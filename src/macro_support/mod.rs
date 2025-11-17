@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use thiserror::Error;
 
-use crate::ast::{DtConditional, DtItem, DtMacro};
+use crate::ast::{DtConditional, DtItem, DtMacro, DtMacroCall};
 use crate::tokenizer::TokenSpan;
 
 /// Metadata captured for each macro definition.
@@ -55,6 +55,29 @@ impl MacroRegistry {
         self.definitions.insert(definition.name.clone(), definition);
         Ok(())
     }
+
+    /// Expand the provided macro call, substituting positional arguments.
+    pub fn expand_call(&self, call: &DtMacroCall) -> Result<String, MacroExpansionError> {
+        let invocation = parse_macro_call(call)?;
+        let definition =
+            self.get(&invocation.name)
+                .ok_or_else(|| MacroExpansionError::UnknownMacro {
+                    name: invocation.name.clone(),
+                })?;
+        if definition.args.len() != invocation.args.len() {
+            return Err(MacroExpansionError::ArgCountMismatch {
+                name: definition.name.clone(),
+                expected: definition.args.len(),
+                actual: invocation.args.len(),
+            });
+        }
+
+        let mut expanded = definition.body.clone();
+        for (param, value) in definition.args.iter().zip(invocation.args.iter()) {
+            expanded = expanded.replace(param, value);
+        }
+        Ok(expanded)
+    }
 }
 
 /// Errors surfaced while parsing macro definitions or populating the registry.
@@ -64,6 +87,21 @@ pub enum MacroError {
     InvalidDefinition { text: String, reason: String },
     #[error("duplicate macro `{name}` at span {span:?}")]
     DuplicateDefinition { name: String, span: TokenSpan },
+}
+
+/// Errors surfaced while parsing or expanding macro calls.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum MacroExpansionError {
+    #[error("{reason} in macro call `{text}`")]
+    InvalidCall { text: String, reason: String },
+    #[error("macro `{name}` is not defined")]
+    UnknownMacro { name: String },
+    #[error("macro `{name}` expects {expected} args but got {actual}")]
+    ArgCountMismatch {
+        name: String,
+        expected: usize,
+        actual: usize,
+    },
 }
 
 /// Traverse the AST and collect all macro definitions into a registry.
@@ -171,4 +209,59 @@ fn parse_args_and_body(rest: &str) -> Result<(Vec<String>, &str), String> {
         remainder = &remainder[end + 1..];
     }
     Ok((args, remainder.trim_start()))
+}
+
+fn parse_macro_call(call: &DtMacroCall) -> Result<MacroInvocation, MacroExpansionError> {
+    let trimmed = call.text.trim();
+    let (name, remainder) = split_name(trimmed);
+    if name.is_empty() {
+        return Err(MacroExpansionError::InvalidCall {
+            text: call.text.clone(),
+            reason: "missing macro name".into(),
+        });
+    }
+    let args = parse_call_args(remainder).map_err(|reason| MacroExpansionError::InvalidCall {
+        text: call.text.clone(),
+        reason,
+    })?;
+    Ok(MacroInvocation {
+        name: name.to_string(),
+        args,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MacroInvocation {
+    name: String,
+    args: Vec<String>,
+}
+
+fn parse_call_args(remainder: &str) -> Result<Vec<String>, String> {
+    let mut args = Vec::new();
+    let mut rest = remainder.trim_start();
+    if !rest.starts_with('(') {
+        return Ok(args);
+    }
+    rest = &rest[1..];
+    let mut current = String::new();
+    for ch in rest.chars() {
+        match ch {
+            ')' => {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    args.push(trimmed.to_string());
+                }
+                return Ok(args);
+            }
+            ',' => {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    args.push(trimmed.to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    Err("unterminated macro call".into())
 }
