@@ -76,7 +76,10 @@ fn tokenize_preprocessor_directives() -> Result<(), LayoutError> {
     let kinds: Vec<_> = tokens.iter().map(|token| token.kind).collect();
     assert_eq!(
         kinds,
-        vec![TokenKind::PreprocessorInclude, TokenKind::PreprocessorDefine]
+        vec![
+            TokenKind::PreprocessorInclude,
+            TokenKind::PreprocessorDefine
+        ]
     );
     assert_eq!(tokens[0].lexeme, "#include <foo>");
     assert_eq!(tokens[1].lexeme, "#define MACRO(x)");

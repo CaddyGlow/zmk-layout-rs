@@ -17,7 +17,7 @@ pub struct TokenSpan {
 }
 
 impl TokenSpan {
-    fn new(
+    pub fn new(
         start: usize,
         end: usize,
         start_line: usize,
@@ -72,6 +72,7 @@ pub enum TokenKind {
     AngleOpen,
     AngleClose,
     Comma,
+    Equals,
     Semicolon,
     PreprocessorInclude,
     PreprocessorDefine,
@@ -187,6 +188,8 @@ enum RawToken {
     AngleClose,
     #[token(",")]
     Comma,
+    #[token("=")]
+    Equals,
     #[token(";")]
     Semicolon,
     #[regex(r"//[^\n]*", priority = 70)]
@@ -218,6 +221,7 @@ impl From<RawToken> for TokenKind {
             RawToken::AngleOpen => TokenKind::AngleOpen,
             RawToken::AngleClose => TokenKind::AngleClose,
             RawToken::Comma => TokenKind::Comma,
+            RawToken::Equals => TokenKind::Equals,
             RawToken::Semicolon => TokenKind::Semicolon,
             RawToken::LineComment => TokenKind::LineComment,
             RawToken::BlockComment => TokenKind::BlockComment,
@@ -274,7 +278,14 @@ impl<'source> PositionTracker<'source> {
     fn record(&mut self, span: Range<usize>) -> TokenSpan {
         let (start_line, start_column) = self.advance_to(span.start);
         let (end_line, end_column) = self.advance_to(span.end);
-        TokenSpan::new(span.start, span.end, start_line, start_column, end_line, end_column)
+        TokenSpan::new(
+            span.start,
+            span.end,
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+        )
     }
 
     fn advance_to(&mut self, target: usize) -> (usize, usize) {
