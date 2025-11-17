@@ -93,6 +93,18 @@ fn provider_sets_layer_bindings() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn provider_creates_missing_layers_when_needed() -> Result<(), Box<dyn Error>> {
+    let template = "keymap {\n};\n";
+    let doc = DtsDocument::parse_str(template)?;
+    let mut provider = KeymapProvider::new(doc);
+    provider.set_layer_bindings("new_layer", &["&kp A", "&kp B"])?;
+    let updated = provider.into_document().to_string()?;
+    assert!(updated.contains("new_layer"));
+    assert!(updated.contains("&kp A &kp B"));
+    Ok(())
+}
+
+#[test]
 fn keymap_document_round_trip() -> Result<(), Box<dyn Error>> {
     let mut keymap = KeymapDocument::parse_str(&fixture("dts_roundtrip_keymap"))?;
     assert_eq!(keymap.behaviors().len(), 0);

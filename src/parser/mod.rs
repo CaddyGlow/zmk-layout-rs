@@ -86,7 +86,11 @@ impl<'a> Parser<'a> {
                 if Self::is_if_like(trimmed) {
                     DtItem::Conditional(self.parse_conditional_from_token(directive, leading)?)
                 } else {
-                    return Err(self.error(directive.span, "unexpected directive"));
+                    DtItem::Directive(DtDirective {
+                        text: directive.lexeme,
+                        span: directive.span,
+                        leading_comments: leading,
+                    })
                 }
             }
             TokenKind::TemplateBlock | TokenKind::TemplateExpr => {

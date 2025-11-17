@@ -7,6 +7,7 @@ pub enum DtItem {
     Node(DtNode),
     Property(DtProperty),
     Conditional(DtConditional),
+    Directive(DtDirective),
     Macro(DtMacro),
     MacroCall(DtMacroCall),
     Include(DtInclude),

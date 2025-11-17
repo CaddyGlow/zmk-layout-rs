@@ -1,8 +1,8 @@
 //! Walks the AST and emits Devicetree text.
 
 use crate::ast::{
-    DtComment, DtConditional, DtInclude, DtItem, DtMacro, DtMacroCall, DtNode, DtProperty,
-    DtTemplate,
+    DtComment, DtConditional, DtDirective, DtInclude, DtItem, DtMacro, DtMacroCall, DtNode,
+    DtProperty, DtTemplate,
 };
 use crate::tokenizer::TokenSpan;
 use thiserror::Error;
@@ -73,6 +73,7 @@ impl Serializer {
             DtItem::Node(node) => self.write_node(node, indent),
             DtItem::Property(prop) => self.write_property(prop, indent),
             DtItem::Conditional(cond) => self.write_conditional(cond, indent),
+            DtItem::Directive(dir) => self.write_directive(dir, indent),
             DtItem::Macro(mac) => self.write_macro(mac, indent),
             DtItem::MacroCall(call) => self.write_macro_call(call, indent),
             DtItem::Include(include) => self.write_include(include, indent),
@@ -141,6 +142,18 @@ impl Serializer {
                 self.output.push_str(&comment.text);
             }
         }
+        self.output.push('\n');
+        Ok(())
+    }
+
+    fn write_directive(
+        &mut self,
+        directive: &DtDirective,
+        indent: usize,
+    ) -> Result<(), SerializeError> {
+        self.write_comments(&directive.leading_comments, indent);
+        self.push_indent(indent);
+        self.output.push_str(&directive.text);
         self.output.push('\n');
         Ok(())
     }

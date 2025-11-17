@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use zmk_layout_rs::{
-    adapters::{AdapterError, export_standard_file, import_standard_file},
-    dts::DtsDocument,
+use zmk_layout_rs::adapters::{
+    AdapterError, export_standard_file, import_standard_file_with_template,
 };
+use zmk_layout_rs::dts::DtsDocument;
 
 #[derive(Parser)]
 #[command(
@@ -61,8 +61,7 @@ fn run() -> Result<(), AdapterError> {
             template,
             output,
         } => {
-            let template_doc = DtsDocument::parse_file(template)?;
-            let imported = import_standard_file(json, template_doc)?;
+            let imported = import_standard_file_with_template(json, template)?;
             imported.write_to_file(output)?;
         }
     }

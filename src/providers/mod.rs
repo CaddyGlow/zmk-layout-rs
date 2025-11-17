@@ -95,10 +95,10 @@ impl KeymapProvider {
         bindings: &[&str],
     ) -> Result<(), ProviderError> {
         let normalized = self.normalize_bindings(bindings)?;
+        self.ensure_layer_node(layer)?;
         let node = find_layer_node_mut(&mut self.document.items, layer)
             .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
-        let bindings_prop = find_bindings_property_mut(node)
-            .ok_or_else(|| ProviderError::BindingsMissing(layer.to_string()))?;
+        let bindings_prop = ensure_bindings_property(node);
         bindings_prop.value.raw = format_bindings_raw(&normalized);
         Ok(())
     }
@@ -218,6 +218,45 @@ impl KeymapProvider {
         find_child_node_mut(behaviors_root, behavior)
             .ok_or_else(|| ProviderError::BehaviorNotFound(behavior.to_string()))
     }
+
+    fn ensure_layer_node(&mut self, layer: &str) -> Result<(), ProviderError> {
+        let keymap_root = find_layer_node_mut(&mut self.document.items, "keymap")
+            .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
+        if let Some(idx) = keymap_root
+            .children
+            .iter()
+            .position(|item| matches!(item, DtItem::Node(node) if node.name == layer))
+        {
+            if let Some(DtItem::Node(_)) = keymap_root.children.get_mut(idx) {
+                return Ok(());
+            }
+        }
+
+        // HACK: some templates rely on macros (e.g., ZMK_DEFINE_LAYER) to generate the
+        // actual layer nodes, so we synthesize a placeholder here to keep the adapter happy.
+        let span = empty_span();
+        let new_node = DtNode {
+            name: layer.to_string(),
+            raw_name: String::new(),
+            span,
+            properties: vec![DtProperty {
+                name: "bindings".to_string(),
+                raw_name: String::new(),
+                value: DtValue {
+                    raw: "< >".to_string(),
+                    span: empty_span(),
+                },
+                span: empty_span(),
+                leading_comments: Vec::new(),
+                trailing_comment: None,
+            }],
+            children: Vec::new(),
+            leading_comments: Vec::new(),
+            trailing_comments: Vec::new(),
+        };
+        keymap_root.children.push(DtItem::Node(new_node));
+        Ok(())
+    }
 }
 
 #[derive(Debug, Error)]
@@ -284,6 +323,20 @@ fn find_bindings_property_mut(node: &mut DtNode) -> Option<&mut DtProperty> {
     node.properties
         .iter_mut()
         .find(|prop| prop.name == "bindings")
+}
+
+fn ensure_bindings_property(node: &mut DtNode) -> &mut DtProperty {
+    if let Some(idx) = node
+        .properties
+        .iter()
+        .position(|prop| prop.name == "bindings")
+    {
+        return node
+            .properties
+            .get_mut(idx)
+            .expect("bindings property index should be valid");
+    }
+    ensure_property(node, "bindings")
 }
 
 fn find_child_node_mut<'a>(parent: &'a mut DtNode, name: &str) -> Option<&'a mut DtNode> {

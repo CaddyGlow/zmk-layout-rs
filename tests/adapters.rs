@@ -1,14 +1,12 @@
 use std::{error::Error, fs, path::PathBuf};
 
 use serde_json::json;
-use zmk_layout_rs::{
-    adapters::{
-        AdapterLayout, export_standard_file, export_standard_str, import_standard_file,
-        import_standard_str,
-    },
-    dts::DtsDocument,
-    providers::KeymapProvider,
+use zmk_layout_rs::adapters::{
+    AdapterLayout, export_standard_file, export_standard_str, import_standard_file,
+    import_standard_str, import_standard_str_with_template,
 };
+use zmk_layout_rs::dts::DtsDocument;
+use zmk_layout_rs::providers::KeymapProvider;
 
 fn fixture(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -116,5 +114,36 @@ fn adapter_file_io_helpers_round_trip() -> Result<(), Box<dyn Error>> {
     let json = export_standard_str(&mutated)?;
     let imported = import_standard_str(&json, base)?;
     assert_eq!(imported.to_string()?, mutated.to_string()?);
+    Ok(())
+}
+
+#[test]
+fn adapter_supports_simple_templates() -> Result<(), Box<dyn Error>> {
+    let doc = DtsDocument::parse_str(&fixture("ast_walker_complex"))?;
+    let mut layout = AdapterLayout::from_document(&doc);
+    layout.metadata.title = Some("MoErgo Layout".into());
+    layout
+        .metadata
+        .extras
+        .insert("includes".into(), json!("#include <behaviors.dtsi>"));
+    let json = layout.to_standard_json()?;
+
+    let template = r#"
+{{includes}}
+{{layer_names_defines}}
+{{combos}}
+/ {
+    keymap {
+{{rendered_layers}}
+    };
+};
+"#;
+
+    let imported = import_standard_str_with_template(&json, template)?;
+    let rendered = imported.to_string()?;
+    assert!(rendered.contains("#define LAYER_DEFAULT_LAYER 0"));
+    assert!(rendered.contains("combo_combo_esc"));
+    assert!(rendered.contains("#include <behaviors.dtsi>"));
+    assert!(rendered.contains("&kp A &kp B"));
     Ok(())
 }

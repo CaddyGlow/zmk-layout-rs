@@ -33,6 +33,18 @@ fn retain_directives_and_templates() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn retain_generic_preprocessor_directives() -> Result<(), Box<dyn Error>> {
+    let source = "#pragma once\nkeymap {\n    compatible = \"zmk,keymap\";\n};\n";
+    let ast = parse_layout(source)?;
+    let output = serialize(&ast)?;
+    assert_eq!(
+        output,
+        "#pragma once\nkeymap {\n  compatible = \"zmk,keymap\";\n};\n"
+    );
+    Ok(())
+}
+
+#[test]
 fn macro_definition_and_invocation_preserved() -> Result<(), Box<dyn Error>> {
     let source = fixture("serialization_macro");
     let ast = parse_layout(&source)?;

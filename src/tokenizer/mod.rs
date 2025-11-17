@@ -220,7 +220,10 @@ enum RawToken {
     PreprocessorInclude,
     #[token("#define", callback = preprocessor_define, priority = 400)]
     PreprocessorDefine,
-    #[regex(r"#(?:if|ifdef|ifndef|elif|else|endif|undef)[^\n]*", priority = 380)]
+    #[regex(
+        r"#(?:if|ifdef|ifndef|elif|else|endif|undef|pragma)[^\n]*",
+        priority = 380
+    )]
     PreprocessorOther,
     #[token("{%", callback = template_block, priority = 30)]
     TemplateBlock,
