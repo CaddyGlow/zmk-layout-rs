@@ -1,1 +1,14 @@
 /target
+.direnv
+.envrc
+CLAUDE.md
+Agents.md
+.claude
+.env
+.wtp.yml
+android/local.properties
+android/app/src/main/jniLibs/
+docker/lab/
+/docker/
+/result
+*.bak
