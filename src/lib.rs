@@ -4,10 +4,12 @@
 //! Modules are intentionally empty placeholders until their respective
 //! TDD phases are implemented (see `rust/PLAN.md`).
 
+pub mod adapters;
 pub mod ast;
 pub mod bindings;
 pub mod dts;
 pub mod macro_support;
 pub mod parser;
+pub mod providers;
 pub mod serialization;
 pub mod tokenizer;

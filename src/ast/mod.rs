@@ -5,6 +5,7 @@ use crate::tokenizer::TokenSpan;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DtItem {
     Node(DtNode),
+    Property(DtProperty),
     Conditional(DtConditional),
     Macro(DtMacro),
     MacroCall(DtMacroCall),

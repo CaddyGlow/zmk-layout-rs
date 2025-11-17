@@ -1,0 +1,7 @@
+/ {
+    config {
+        &existing {
+            compatible = "zmk,dummy";
+        };
+    };
+};

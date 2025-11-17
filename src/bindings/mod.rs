@@ -66,6 +66,19 @@ impl LayoutBinding {
             params: Vec::new(),
         }
     }
+
+    pub fn to_binding_string(&self) -> String {
+        if self.params.is_empty() {
+            return self.value.clone();
+        }
+        let params = self
+            .params
+            .iter()
+            .map(|param| param.as_expression())
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("{} {}", self.value, params)
+    }
 }
 
 /// Parser that converts binding strings into [`LayoutBinding`] structures.
@@ -506,6 +519,6 @@ fn parse_param_value(value: &str) -> ParamValue {
 
 impl fmt::Display for LayoutBinding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.value)
+        write!(f, "{}", self.to_binding_string())
     }
 }

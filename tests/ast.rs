@@ -123,8 +123,91 @@ fn parse_macros() -> Result<(), LayoutError> {
 }
 
 #[test]
+fn parse_root_node() -> Result<(), LayoutError> {
+    let items = parse_layout(&fixture("ast_root"))?;
+    let root = expect_node(&items[0], "/");
+    assert_eq!(root.children.len(), 1);
+    let macros = expect_node(&root.children[0], "macros");
+    assert!(macros.children.is_empty());
+    Ok(())
+}
+
+#[test]
+fn parse_labeled_nodes() -> Result<(), LayoutError> {
+    let items = parse_layout(&fixture("ast_labeled_nodes"))?;
+    let root = expect_node(&items[0], "/");
+    let behaviors = expect_node(&root.children[0], "behaviors");
+    let lower = expect_node(&behaviors.children[0], "lower");
+    assert_eq!(lower.properties[0].name, "compatible");
+    assert!(
+        lower
+            .properties
+            .iter()
+            .any(|prop| prop.name == "hold-trigger-on-release" && prop.value.raw.is_empty())
+    );
+
+    let root_two = expect_node(&items[1], "/");
+    let macros = expect_node(&root_two.children[0], "macros");
+    let macro_node = expect_node(&macros.children[0], "rgb_ug_status_macro");
+    let prop_names: Vec<_> = macro_node
+        .properties
+        .iter()
+        .map(|prop| prop.name.as_str())
+        .collect();
+    assert!(prop_names.contains(&"label"));
+    assert!(prop_names.contains(&"compatible"));
+    assert!(prop_names.contains(&"#binding-cells"));
+
+    let root_three = expect_node(&items[2], "/");
+    let patch = expect_node(&root_three.children[1], "patch");
+    let relabel = patch
+        .children
+        .iter()
+        .find_map(|item| match item {
+            DtItem::Node(node) if node.raw_name.contains("relabel") => Some(node),
+            _ => None,
+        })
+        .expect("relabel node present");
+    assert!(relabel.raw_name.contains("&target"));
+    Ok(())
+}
+
+#[test]
 fn parse_malformed_reports_error() {
     let source = fixture("ast_malformed");
     let err = parse_layout(&source).expect_err("should fail");
     assert!(matches!(err, LayoutError::Parse { .. }));
+}
+
+#[test]
+fn parse_preprocessor_conditionals() -> Result<(), LayoutError> {
+    let items = parse_layout(&fixture("ast_preprocessor"))?;
+    let root = expect_node(&items[0], "/");
+    let behaviors = expect_node(&root.children[0], "behaviors");
+    let left = expect_node(&behaviors.children[0], "left");
+    let conditional = match &left.children[0] {
+        DtItem::Conditional(cond) => cond,
+        other => panic!("expected conditional, got {other:?}"),
+    };
+    let inner = match &conditional.branches[0].items[0] {
+        DtItem::Conditional(cond) => cond,
+        other => panic!("expected inner conditional, got {other:?}"),
+    };
+    assert!(inner.branches[0].items.iter().any(|item| {
+        matches!(item, DtItem::Property(prop) if prop.name == "hold-while-undecided")
+    }));
+    Ok(())
+}
+
+#[test]
+fn parse_reference_nodes() -> Result<(), LayoutError> {
+    let items = parse_layout(&fixture("ast_reference_nodes"))?;
+    let root = expect_node(&items[0], "/");
+    let config = expect_node(&root.children[0], "config");
+    let reference = match &config.children[0] {
+        DtItem::Node(node) => node,
+        other => panic!("expected node, got {other:?}"),
+    };
+    assert_eq!(reference.name, "&existing");
+    Ok(())
 }

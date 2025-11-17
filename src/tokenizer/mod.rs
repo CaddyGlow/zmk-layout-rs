@@ -65,6 +65,7 @@ impl fmt::Display for TokenSpan {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     Identifier,
+    HashIdentifier,
     Reference,
     Literal,
     LBrace,
@@ -75,6 +76,9 @@ pub enum TokenKind {
     LParen,
     RParen,
     Equals,
+    Colon,
+    Pipe,
+    Tilde,
     Semicolon,
     PreprocessorInclude,
     PreprocessorDefine,
@@ -174,7 +178,11 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>, LayoutError> {
 enum RawToken {
     #[regex(r"&[A-Za-z0-9_]+", priority = 200)]
     Reference,
-    #[regex(r"[A-Za-z_][A-Za-z0-9_]*", priority = 100)]
+    #[token("/", priority = 150)]
+    RootIdentifier,
+    #[regex(r"#[A-Za-z0-9_-]+", priority = 120)]
+    HashIdentifier,
+    #[regex(r"[A-Za-z_][A-Za-z0-9_-]*", priority = 100)]
     Identifier,
     #[regex(r#"\"([^\"\\]|\\.)*\""#, priority = 90)]
     StringLiteral,
@@ -198,15 +206,21 @@ enum RawToken {
     Equals,
     #[token(";")]
     Semicolon,
+    #[token(":")]
+    Colon,
+    #[token("|")]
+    Pipe,
+    #[token("~")]
+    Tilde,
     #[regex(r"//[^\n]*", priority = 70)]
     LineComment,
     #[token("/*", callback = block_comment, priority = 60)]
     BlockComment,
-    #[regex(r"#include[^\n]*", priority = 50)]
+    #[regex(r"#include[^\n]*", priority = 400)]
     PreprocessorInclude,
-    #[regex(r"#define[^\n]*", priority = 50)]
+    #[token("#define", callback = preprocessor_define, priority = 400)]
     PreprocessorDefine,
-    #[regex(r"#(?:if|ifdef|ifndef|elif|else|endif|undef)[^\n]*", priority = 40)]
+    #[regex(r"#(?:if|ifdef|ifndef|elif|else|endif|undef)[^\n]*", priority = 380)]
     PreprocessorOther,
     #[token("{%", callback = template_block, priority = 30)]
     TemplateBlock,
@@ -219,7 +233,8 @@ enum RawToken {
 impl From<RawToken> for TokenKind {
     fn from(value: RawToken) -> Self {
         match value {
-            RawToken::Identifier => TokenKind::Identifier,
+            RawToken::RootIdentifier | RawToken::Identifier => TokenKind::Identifier,
+            RawToken::HashIdentifier => TokenKind::HashIdentifier,
             RawToken::Reference => TokenKind::Reference,
             RawToken::StringLiteral | RawToken::NumberLiteral => TokenKind::Literal,
             RawToken::LBrace => TokenKind::LBrace,
@@ -230,6 +245,9 @@ impl From<RawToken> for TokenKind {
             RawToken::LParen => TokenKind::LParen,
             RawToken::RParen => TokenKind::RParen,
             RawToken::Equals => TokenKind::Equals,
+            RawToken::Colon => TokenKind::Colon,
+            RawToken::Pipe => TokenKind::Pipe,
+            RawToken::Tilde => TokenKind::Tilde,
             RawToken::Semicolon => TokenKind::Semicolon,
             RawToken::LineComment => TokenKind::LineComment,
             RawToken::BlockComment => TokenKind::BlockComment,
@@ -263,6 +281,32 @@ fn consume_until(lexer: &mut Lexer<'_, RawToken>, needle: &str) -> Option<()> {
         lexer.bump(lexer.remainder().len());
         None
     }
+}
+
+fn preprocessor_define(lexer: &mut Lexer<'_, RawToken>) -> Option<()> {
+    consume_directive(lexer, true)
+}
+
+fn consume_directive(lexer: &mut Lexer<'_, RawToken>, allow_line_continuation: bool) -> Option<()> {
+    let mut tail = 0usize;
+    let mut prev = '\0';
+    let mut remainder = lexer.remainder().char_indices();
+    while let Some((idx, ch)) = remainder.next() {
+        if ch == '\n' {
+            if allow_line_continuation && prev == '\\' {
+                tail = idx + ch.len_utf8();
+                prev = '\0';
+                continue;
+            } else {
+                lexer.bump(tail);
+                return Some(());
+            }
+        }
+        prev = ch;
+        tail = idx + ch.len_utf8();
+    }
+    lexer.bump(lexer.remainder().len());
+    Some(())
 }
 
 #[derive(Debug, Clone)]

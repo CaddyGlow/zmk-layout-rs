@@ -110,3 +110,24 @@ fn tokenize_unterminated_sequences() {
     let err = stream.next().unwrap().unwrap_err();
     assert!(matches!(err, LayoutError::Parse { .. }));
 }
+
+#[test]
+fn tokenize_multiline_define() -> Result<(), LayoutError> {
+    let source = "#define LEFT_HAND \\\n 0 1 \\\n 2 3\n";
+    let tokens = TokenStream::new(source).collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(tokens.len(), 1);
+    let token = &tokens[0];
+    assert_eq!(token.kind, TokenKind::PreprocessorDefine);
+    assert!(token.lexeme.contains("\\\n 0 1 \\\n 2 3"));
+    Ok(())
+}
+
+#[test]
+fn tokenize_bitwise_modifiers() -> Result<(), LayoutError> {
+    let source = "mods = <(~(MOD_LSFT|MOD_RSFT))>;";
+    let tokens = TokenStream::new(source).collect::<Result<Vec<_>, _>>()?;
+    let kinds: Vec<_> = tokens.iter().map(|tok| tok.kind).collect();
+    assert!(kinds.contains(&TokenKind::Pipe));
+    assert!(kinds.contains(&TokenKind::Tilde));
+    Ok(())
+}

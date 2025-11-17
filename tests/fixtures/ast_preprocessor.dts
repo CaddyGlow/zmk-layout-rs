@@ -1,0 +1,13 @@
+/ {
+    behaviors {
+        left: left {
+            compatible = "zmk,behavior-hold-tap";
+            bindings = <&kp A>, <&kp B>;
+            #ifdef FEATURE_TEST
+            #if FEATURE_TEST == ENABLED
+            hold-while-undecided;
+            #endif
+            #endif
+        };
+    };
+};

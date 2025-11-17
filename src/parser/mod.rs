@@ -61,13 +61,17 @@ impl<'a> Parser<'a> {
         };
 
         let item = match token.kind {
-            TokenKind::Identifier => {
+            TokenKind::Identifier | TokenKind::Reference => {
                 let ident = self.next().unwrap();
                 let next_kind = self
                     .peek_kind_skipping_templates()
-                    .ok_or_else(|| self.error(ident.span, "expected `{` or macro call"))?;
+                    .ok_or_else(|| self.error(ident.span, "expected `{`, `=`, or macro call"))?;
                 if next_kind == TokenKind::LBrace {
                     DtItem::Node(self.parse_node(ident, leading)?)
+                } else if next_kind == TokenKind::Equals {
+                    DtItem::Property(self.parse_property(ident, leading)?)
+                } else if next_kind == TokenKind::Semicolon {
+                    DtItem::Property(self.parse_flag_property(ident, leading)?)
                 } else if next_kind == TokenKind::LParen {
                     DtItem::MacroCall(self.parse_macro_call(ident, leading)?)
                 } else {
@@ -78,7 +82,8 @@ impl<'a> Parser<'a> {
             TokenKind::PreprocessorDefine => DtItem::Macro(self.parse_macro(leading)?),
             TokenKind::PreprocessorOther => {
                 let directive = self.next().unwrap();
-                if directive.lexeme.trim().starts_with("#if") {
+                let trimmed = directive.lexeme.trim();
+                if Self::is_if_like(trimmed) {
                     DtItem::Conditional(self.parse_conditional_from_token(directive, leading)?)
                 } else {
                     return Err(self.error(directive.span, "unexpected directive"));
@@ -103,11 +108,29 @@ impl<'a> Parser<'a> {
         leading: Vec<DtComment>,
     ) -> Result<DtNode, LayoutError> {
         let Token {
-            lexeme: node_name,
-            span: name_span,
+            lexeme: mut node_name,
+            span: mut name_span,
             ..
         } = name_token;
-        let (raw_name, brace_span) = self.collect_raw_until(name_span, TokenKind::LBrace)?;
+
+        let raw_start_span = name_span;
+        if self.match_token(TokenKind::Colon).is_some() {
+            self.consume_whitespace();
+            let next = self
+                .next()
+                .ok_or_else(|| self.error(name_span, "expected node name after label"))?;
+            match next.kind {
+                TokenKind::Identifier | TokenKind::Reference => {
+                    node_name = next.lexeme;
+                    name_span = next.span;
+                }
+                _ => {
+                    return Err(self.error(next.span, "expected node name after label"));
+                }
+            }
+        }
+
+        let (raw_name, brace_span) = self.collect_raw_until(raw_start_span, TokenKind::LBrace)?;
         let brace = self.expect(TokenKind::LBrace, "expected `{` after node name")?;
         let mut node = DtNode {
             name: node_name.clone(),
@@ -144,7 +167,7 @@ impl<'a> Parser<'a> {
 
             let child_leading = self.take_pending_comments();
             match self.peek_kind() {
-                Some(TokenKind::Identifier) => {
+                Some(TokenKind::Identifier | TokenKind::Reference) => {
                     let ident = self.next().unwrap();
                     let next_kind = self
                         .peek_kind_skipping_templates()
@@ -155,6 +178,9 @@ impl<'a> Parser<'a> {
                     } else if next_kind == TokenKind::Equals {
                         let prop = self.parse_property(ident, child_leading)?;
                         node.properties.push(prop);
+                    } else if next_kind == TokenKind::Semicolon {
+                        let flag = self.parse_flag_property(ident, child_leading)?;
+                        node.properties.push(flag);
                     } else if next_kind == TokenKind::LParen {
                         let call = self.parse_macro_call(ident, child_leading)?;
                         node.children.push(DtItem::MacroCall(call));
@@ -163,6 +189,11 @@ impl<'a> Parser<'a> {
                             self.error(ident.span, "expected node, property, or macro call")
                         );
                     }
+                }
+                Some(TokenKind::HashIdentifier) => {
+                    let ident = self.next().unwrap();
+                    let prop = self.parse_property(ident, child_leading)?;
+                    node.properties.push(prop);
                 }
                 Some(TokenKind::TemplateBlock | TokenKind::TemplateExpr) => {
                     let template = self.parse_template(child_leading)?;
@@ -178,7 +209,7 @@ impl<'a> Parser<'a> {
                 }
                 Some(TokenKind::PreprocessorOther) => {
                     let directive = self.next().unwrap();
-                    if directive.lexeme.trim().starts_with("#if") {
+                    if Self::is_if_like(directive.lexeme.trim()) {
                         let conditional =
                             self.parse_conditional_from_token(directive, child_leading)?;
                         node.children.push(DtItem::Conditional(conditional));
@@ -224,6 +255,29 @@ impl<'a> Parser<'a> {
             },
             value,
             span,
+            leading_comments: leading,
+            trailing_comment,
+        })
+    }
+
+    fn parse_flag_property(
+        &mut self,
+        name_token: Token,
+        leading: Vec<DtComment>,
+    ) -> Result<DtProperty, LayoutError> {
+        let name = name_token.lexeme.clone();
+        let span = name_token.span;
+        self.consume_whitespace();
+        let semicolon = self.expect(TokenKind::Semicolon, "expected ';' after flag property")?;
+        let trailing_comment = self.capture_inline_comment();
+        Ok(DtProperty {
+            name: name.clone(),
+            raw_name: name,
+            value: DtValue {
+                raw: String::new(),
+                span,
+            },
+            span: merge_spans(span, semicolon.span),
             leading_comments: leading,
             trailing_comment,
         })
@@ -316,12 +370,28 @@ impl<'a> Parser<'a> {
         leading: Vec<DtComment>,
     ) -> Result<DtMacroCall, LayoutError> {
         let mut last_span = name_token.span;
+        let mut depth = 0usize;
         while let Some(token) = self.peek() {
-            if token.kind == TokenKind::Whitespace && token.lexeme.contains('\n') {
-                break;
-            }
             last_span = token.span;
-            self.idx += 1;
+            match token.kind {
+                TokenKind::LParen => {
+                    depth += 1;
+                    self.idx += 1;
+                }
+                TokenKind::RParen => {
+                    self.idx += 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {
+                    self.idx += 1;
+                }
+            }
         }
         let text = self.source[name_token.span.start..last_span.end]
             .trim_end()
@@ -378,7 +448,7 @@ impl<'a> Parser<'a> {
             match token.kind {
                 TokenKind::PreprocessorOther => {
                     let directive = self.next().unwrap();
-                    let trimmed = directive.lexeme.trim().to_string();
+                    let trimmed = directive.lexeme.trim();
                     if trimmed.starts_with("#endif") {
                         return Ok(DtConditional {
                             branches,
@@ -397,7 +467,7 @@ impl<'a> Parser<'a> {
                             },
                             items: Vec::new(),
                         });
-                    } else if trimmed.starts_with("#if") {
+                    } else if Self::is_if_like(trimmed) {
                         let nested = self.parse_conditional_from_token(directive, leading)?;
                         branches
                             .last_mut()
@@ -519,8 +589,33 @@ impl<'a> Parser<'a> {
         let mut idx = self.idx;
         while let Some(token) = self.tokens.get(idx) {
             match token.kind {
-                TokenKind::Whitespace => idx += 1,
-                TokenKind::TemplateExpr => idx += 1,
+                TokenKind::Whitespace | TokenKind::TemplateExpr => idx += 1,
+                TokenKind::Colon => {
+                    let mut lookahead = idx + 1;
+                    loop {
+                        match self.tokens.get(lookahead) {
+                            Some(tok)
+                                if matches!(
+                                    tok.kind,
+                                    TokenKind::Whitespace | TokenKind::TemplateExpr
+                                ) =>
+                            {
+                                lookahead += 1;
+                            }
+                            Some(tok)
+                                if matches!(
+                                    tok.kind,
+                                    TokenKind::Identifier | TokenKind::Reference
+                                ) =>
+                            {
+                                idx = lookahead + 1;
+                                break;
+                            }
+                            Some(tok) => return Some(tok.kind),
+                            None => return None,
+                        }
+                    }
+                }
                 _ => return Some(token.kind),
             }
         }
@@ -567,6 +662,10 @@ impl<'a> Parser<'a> {
             message: message.into(),
             span,
         }
+    }
+
+    fn is_if_like(text: &str) -> bool {
+        text.starts_with("#if")
     }
 }
 

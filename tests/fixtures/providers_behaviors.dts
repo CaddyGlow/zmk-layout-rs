@@ -1,0 +1,13 @@
+behaviors {
+    ht {
+        compatible = "zmk,behavior-hold-tap";
+        #binding-cells = <2>;
+        bindings = < &kp ESC &kp TAB >;
+    };
+
+    macro_hello {
+        compatible = "zmk,behavior-macro";
+        #binding-cells = <0>;
+        bindings = < &kp H &kp I >;
+    };
+};

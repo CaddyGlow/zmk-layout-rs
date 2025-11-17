@@ -1,0 +1,36 @@
+/* Complex AST walker fixture */
+
+#include <behaviors.dtsi>
+
+behaviors {
+    ht {
+        compatible = "zmk,behavior-hold-tap";
+        #binding-cells = <2>;
+        bindings = < &kp ESC &kp TAB >;
+    };
+};
+
+combos {
+    combo_esc {
+        compatible = "zmk,combos";
+        key-positions = < 0 1 >;
+        bindings = < &kp ESC >;
+    };
+};
+
+macros {
+    hello {
+        compatible = "zmk,behavior-macro";
+        bindings = < &kp H &kp I >;
+    };
+};
+
+keymap {
+    default_layer {
+        bindings = < &kp A &kp B >;
+    };
+};
+
+config {
+    deep_sleep_enable = < 1 >;
+};

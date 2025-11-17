@@ -71,6 +71,7 @@ impl Serializer {
     fn write_item(&mut self, item: &DtItem, indent: usize) -> Result<(), SerializeError> {
         match item {
             DtItem::Node(node) => self.write_node(node, indent),
+            DtItem::Property(prop) => self.write_property(prop, indent),
             DtItem::Conditional(cond) => self.write_conditional(cond, indent),
             DtItem::Macro(mac) => self.write_macro(mac, indent),
             DtItem::MacroCall(call) => self.write_macro_call(call, indent),
