@@ -3,7 +3,7 @@
 use crate::{
     ast::{
         DtComment, DtConditional, DtConditionalBranch, DtDirective, DtInclude, DtItem, DtMacro,
-        DtNode, DtProperty, DtTemplate, DtValue, TemplateKind,
+        DtMacroCall, DtNode, DtProperty, DtTemplate, DtValue, TemplateKind,
     },
     tokenizer::{LayoutError, Token, TokenKind, TokenSpan, TokenStream},
 };
@@ -62,8 +62,17 @@ impl<'a> Parser<'a> {
 
         let item = match token.kind {
             TokenKind::Identifier => {
-                let name = self.next().unwrap();
-                DtItem::Node(self.parse_node(name, leading)?)
+                let ident = self.next().unwrap();
+                let next_kind = self
+                    .peek_kind_skipping_templates()
+                    .ok_or_else(|| self.error(ident.span, "expected `{` or macro call"))?;
+                if next_kind == TokenKind::LBrace {
+                    DtItem::Node(self.parse_node(ident, leading)?)
+                } else if next_kind == TokenKind::LParen {
+                    DtItem::MacroCall(self.parse_macro_call(ident, leading)?)
+                } else {
+                    return Err(self.error(ident.span, "unexpected identifier context"));
+                }
             }
             TokenKind::PreprocessorInclude => DtItem::Include(self.parse_include(leading)?),
             TokenKind::PreprocessorDefine => DtItem::Macro(self.parse_macro(leading)?),
@@ -139,15 +148,20 @@ impl<'a> Parser<'a> {
                     let ident = self.next().unwrap();
                     let next_kind = self
                         .peek_kind_skipping_templates()
-                        .ok_or_else(|| self.error(ident.span, "expected `{` or `=`"))?;
+                        .ok_or_else(|| self.error(ident.span, "expected `{`, `=` or macro call"))?;
                     if next_kind == TokenKind::LBrace {
                         let child = self.parse_node(ident, child_leading)?;
                         node.children.push(DtItem::Node(child));
                     } else if next_kind == TokenKind::Equals {
                         let prop = self.parse_property(ident, child_leading)?;
                         node.properties.push(prop);
+                    } else if next_kind == TokenKind::LParen {
+                        let call = self.parse_macro_call(ident, child_leading)?;
+                        node.children.push(DtItem::MacroCall(call));
                     } else {
-                        return Err(self.error(ident.span, "expected node or property"));
+                        return Err(
+                            self.error(ident.span, "expected node, property, or macro call")
+                        );
                     }
                 }
                 Some(TokenKind::TemplateBlock | TokenKind::TemplateExpr) => {
@@ -219,14 +233,25 @@ impl<'a> Parser<'a> {
         if self.is_eof() {
             return Err(self.error(TokenSpan::new(0, 0, 1, 1, 1, 1), "expected property value"));
         }
-        let start_token = self
-            .peek()
-            .ok_or_else(|| self.error(TokenSpan::new(0, 0, 1, 1, 1, 1), "expected value token"))?
-            .clone();
+
+        let mut start_idx = self.idx;
+        while let Some(token) = self.tokens.get(start_idx) {
+            if token.kind == TokenKind::Whitespace && !token.lexeme.contains('\n') {
+                start_idx += 1;
+                continue;
+            }
+            break;
+        }
+
+        if start_idx >= self.tokens.len() {
+            return Err(self.error(TokenSpan::new(0, 0, 1, 1, 1, 1), "expected value token"));
+        }
+
+        let start_token = self.tokens[start_idx].clone();
         let mut depth_angles = 0usize;
         let mut depth_braces = 0usize;
         let mut last_span = start_token.span;
-        let mut idx = self.idx;
+        let mut idx = start_idx;
 
         while let Some(token) = self.tokens.get(idx) {
             match token.kind {
@@ -257,7 +282,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if idx == self.idx {
+        if idx == start_idx {
             return Err(self.error(start_token.span, "missing property value"));
         }
 
@@ -281,6 +306,29 @@ impl<'a> Parser<'a> {
         Ok(DtMacro {
             text: token.lexeme,
             span: token.span,
+            leading_comments: leading,
+        })
+    }
+
+    fn parse_macro_call(
+        &mut self,
+        name_token: Token,
+        leading: Vec<DtComment>,
+    ) -> Result<DtMacroCall, LayoutError> {
+        let mut last_span = name_token.span;
+        while let Some(token) = self.peek() {
+            if token.kind == TokenKind::Whitespace && token.lexeme.contains('\n') {
+                break;
+            }
+            last_span = token.span;
+            self.idx += 1;
+        }
+        let text = self.source[name_token.span.start..last_span.end]
+            .trim_end()
+            .to_string();
+        Ok(DtMacroCall {
+            text,
+            span: merge_spans(name_token.span, last_span),
             leading_comments: leading,
         })
     }
@@ -409,22 +457,22 @@ impl<'a> Parser<'a> {
 
     fn capture_inline_comment(&mut self) -> Option<DtComment> {
         let mut idx = self.idx;
-        let mut saw_newline = false;
+        let mut spacing = String::new();
         while let Some(token) = self.tokens.get(idx) {
             match token.kind {
                 TokenKind::Whitespace => {
                     if token.lexeme.contains('\n') {
-                        saw_newline = true;
+                        return None;
                     }
+                    spacing.push_str(&token.lexeme);
                     idx += 1;
                 }
                 TokenKind::LineComment | TokenKind::BlockComment => {
-                    if saw_newline {
-                        break;
-                    }
                     let comment = token.clone();
                     self.idx = idx + 1;
-                    return Some(DtComment::new(comment.lexeme, comment.span));
+                    let mut text = spacing;
+                    text.push_str(&comment.lexeme);
+                    return Some(DtComment::new(text, comment.span));
                 }
                 _ => break,
             }

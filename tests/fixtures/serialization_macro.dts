@@ -1,4 +1,2 @@
-#define MAKE_LAYER(name) \
-name { bindings = < &none >; };
-
+#define MAKE_LAYER(name) name { bindings = < &none >; };
 MAKE_LAYER(nav)

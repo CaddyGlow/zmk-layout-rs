@@ -72,6 +72,8 @@ pub enum TokenKind {
     AngleOpen,
     AngleClose,
     Comma,
+    LParen,
+    RParen,
     Equals,
     Semicolon,
     PreprocessorInclude,
@@ -188,6 +190,10 @@ enum RawToken {
     AngleClose,
     #[token(",")]
     Comma,
+    #[token("(")]
+    LParen,
+    #[token(")")]
+    RParen,
     #[token("=")]
     Equals,
     #[token(";")]
@@ -221,6 +227,8 @@ impl From<RawToken> for TokenKind {
             RawToken::AngleOpen => TokenKind::AngleOpen,
             RawToken::AngleClose => TokenKind::AngleClose,
             RawToken::Comma => TokenKind::Comma,
+            RawToken::LParen => TokenKind::LParen,
+            RawToken::RParen => TokenKind::RParen,
             RawToken::Equals => TokenKind::Equals,
             RawToken::Semicolon => TokenKind::Semicolon,
             RawToken::LineComment => TokenKind::LineComment,

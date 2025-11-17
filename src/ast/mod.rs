@@ -7,6 +7,7 @@ pub enum DtItem {
     Node(DtNode),
     Conditional(DtConditional),
     Macro(DtMacro),
+    MacroCall(DtMacroCall),
     Include(DtInclude),
     Template(DtTemplate),
     Comment(DtComment),
@@ -67,6 +68,13 @@ pub enum TemplateKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DtMacro {
+    pub text: String,
+    pub span: TokenSpan,
+    pub leading_comments: Vec<DtComment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DtMacroCall {
     pub text: String,
     pub span: TokenSpan,
     pub leading_comments: Vec<DtComment>,
