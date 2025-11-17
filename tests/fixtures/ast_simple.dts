@@ -1,0 +1,9 @@
+keymap {
+    compatible = "zmk,keymap";
+
+    default_layer {
+        bindings = <
+            &kp Q &kp W
+        >;
+    };
+};

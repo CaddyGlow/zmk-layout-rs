@@ -1,0 +1,4 @@
+/* Title: Test */
+keymap {
+  compatible = "zmk,keymap";  // required
+};

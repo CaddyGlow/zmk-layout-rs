@@ -1,0 +1,5 @@
+#if defined(MACRO_MODE)
+layer_macro { bindings = < &none >; };
+#else
+layer_macro { bindings = < &kp ESC >; };
+#endif

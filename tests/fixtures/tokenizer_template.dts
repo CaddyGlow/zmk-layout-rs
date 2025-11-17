@@ -1,0 +1,3 @@
+{% for i in range(layer_count) %}
+layer_{{ i }} { bindings = < {{ bindings[i] | join(" ") }} >; };
+{% endfor %}

@@ -1,0 +1,3 @@
+#include <behaviors.dtsi>
+{% include "layers.jinja" %}
+#define CUSTOM &kp Z

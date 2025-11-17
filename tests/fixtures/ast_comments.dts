@@ -1,0 +1,4 @@
+// base layer
+base {
+    bindings = < &kp A >; // homerow tap
+};

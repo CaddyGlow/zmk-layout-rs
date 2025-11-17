@@ -1,0 +1,4 @@
+#define LSYM &kp LBKT
+macros {
+    binding = < LSYM >;
+};

@@ -1,0 +1,2 @@
+#define LSYM &kp LBKT
+#include <behaviors.dtsi>
