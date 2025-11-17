@@ -5,8 +5,8 @@ use std::{fs, path::Path};
 use thiserror::Error;
 
 use crate::{
-    ast::DtItem,
-    macro_support::{MacroError, MacroRegistry, collect_macros},
+    ast::{DtItem, DtMacroCall},
+    macro_support::{MacroError, MacroExpansionError, MacroRegistry, collect_macros},
     parser::parse_layout,
     serialization::{SerializeConfig, SerializeError, serialize, serialize_with_config},
     tokenizer::LayoutError,
@@ -27,13 +27,17 @@ pub enum DtsError {
 #[derive(Debug, Clone)]
 pub struct DtsDocument {
     pub items: Vec<DtItem>,
+    macro_registry: Option<MacroRegistry>,
 }
 
 impl DtsDocument {
     /// Parse the provided string into a DTS document.
     pub fn parse_str(source: &str) -> Result<Self, LayoutError> {
         let items = parse_layout(source)?;
-        Ok(Self { items })
+        Ok(Self {
+            items,
+            macro_registry: None,
+        })
     }
 
     /// Parse an on-disk DTS file.
@@ -44,6 +48,7 @@ impl DtsDocument {
 
     /// Return a mutable reference to the document items for modification.
     pub fn items_mut(&mut self) -> &mut Vec<DtItem> {
+        self.macro_registry = None;
         &mut self.items
     }
 
@@ -68,6 +73,22 @@ impl DtsDocument {
     pub fn collect_macros(&self) -> Result<MacroRegistry, MacroError> {
         collect_macros(&self.items)
     }
+
+    /// Lazily build and return the macro registry, caching the result.
+    pub fn macro_registry(&mut self) -> Result<&MacroRegistry, MacroError> {
+        if self.macro_registry.is_none() {
+            self.macro_registry = Some(self.collect_macros()?);
+        }
+        Ok(self.macro_registry.as_ref().expect("registry initialized"))
+    }
+
+    /// Expand a macro call using the cached registry.
+    pub fn expand_macro_call(&mut self, call: &DtMacroCall) -> Result<String, MacroExpansionError> {
+        let registry = self
+            .macro_registry()
+            .map_err(|err| MacroExpansionError::registry(err))?;
+        registry.expand_call(call)
+    }
 }
 
 /// Parse a DTS string into a [`DtsDocument`].
@@ -78,4 +99,20 @@ pub fn parse_str(source: &str) -> Result<DtsDocument, LayoutError> {
 /// Parse a DTS file from disk.
 pub fn parse_file(path: impl AsRef<Path>) -> Result<DtsDocument, DtsError> {
     DtsDocument::parse_file(path)
+}
+
+trait MacroExpansionErrorExt {
+    fn registry(err: MacroError) -> Self;
+}
+
+impl MacroExpansionErrorExt for MacroExpansionError {
+    fn registry(err: MacroError) -> Self {
+        MacroExpansionError::InvalidCall {
+            text: match err {
+                MacroError::InvalidDefinition { text, .. } => text,
+                MacroError::DuplicateDefinition { name, .. } => name,
+            },
+            reason: "failed to build macro registry".into(),
+        }
+    }
 }

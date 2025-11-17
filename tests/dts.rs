@@ -1,6 +1,6 @@
 use std::{env, error::Error, fs, path::PathBuf};
 
-use zmk_layout_rs::{dts::DtsDocument, serialization::SerializeConfig};
+use zmk_layout_rs::{ast::DtItem, dts::DtsDocument, serialization::SerializeConfig};
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -34,4 +34,36 @@ fn document_parse_and_write_files() -> Result<(), Box<dyn Error>> {
     fs::remove_file(&tmp_path)?;
     assert_eq!(written, original);
     Ok(())
+}
+
+#[test]
+fn document_macro_expansion_helper() -> Result<(), Box<dyn Error>> {
+    let source = fs::read_to_string(fixture_path("serialization_macro"))?;
+    let mut doc = DtsDocument::parse_str(&source)?;
+    let call = find_macro_call(&doc.items).cloned().expect("call present");
+    let expanded = doc.expand_macro_call(&call)?;
+    assert!(expanded.contains("bindings"));
+    Ok(())
+}
+
+fn find_macro_call<'a>(items: &'a [DtItem]) -> Option<&'a zmk_layout_rs::ast::DtMacroCall> {
+    for item in items {
+        match item {
+            DtItem::MacroCall(call) => return Some(call),
+            DtItem::Node(node) => {
+                if let Some(call) = find_macro_call(&node.children) {
+                    return Some(call);
+                }
+            }
+            DtItem::Conditional(cond) => {
+                for branch in &cond.branches {
+                    if let Some(call) = find_macro_call(&branch.items) {
+                        return Some(call);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
