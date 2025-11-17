@@ -5,6 +5,7 @@
 //! TDD phases are implemented (see `rust/PLAN.md`).
 
 pub mod ast;
+pub mod bindings;
 pub mod dts;
 pub mod macro_support;
 pub mod parser;

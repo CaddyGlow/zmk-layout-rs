@@ -86,7 +86,7 @@ impl DtsDocument {
     pub fn expand_macro_call(&mut self, call: &DtMacroCall) -> Result<String, MacroExpansionError> {
         let registry = self
             .macro_registry()
-            .map_err(|err| MacroExpansionError::registry(err))?;
+            .map_err(MacroExpansionError::from_registry_error)?;
         registry.expand_call(call)
     }
 }
@@ -101,12 +101,8 @@ pub fn parse_file(path: impl AsRef<Path>) -> Result<DtsDocument, DtsError> {
     DtsDocument::parse_file(path)
 }
 
-trait MacroExpansionErrorExt {
-    fn registry(err: MacroError) -> Self;
-}
-
-impl MacroExpansionErrorExt for MacroExpansionError {
-    fn registry(err: MacroError) -> Self {
+impl MacroExpansionError {
+    fn from_registry_error(err: MacroError) -> Self {
         MacroExpansionError::InvalidCall {
             text: match err {
                 MacroError::InvalidDefinition { text, .. } => text,

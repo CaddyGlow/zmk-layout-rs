@@ -105,3 +105,6 @@ pub struct DtDirective {
     pub span: TokenSpan,
     pub leading_comments: Vec<DtComment>,
 }
+
+pub mod walker;
+pub use walker::{AstWalker, NodeRef};
