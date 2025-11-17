@@ -100,6 +100,75 @@ fn adapter_round_trips_standard_json() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn adapter_extracts_input_listeners_from_dts() -> Result<(), Box<dyn Error>> {
+    let source = r#"
+&mmv_input_listener {
+    input-processors = <&zip_xy_scaler 4 5>;
+    // Cursor Layer
+    Cursor {
+        layers = <2 3>;
+        input-processors = <&zip_xy_scaler 1 9>, <&zip_scroll_scaler 2>;
+    };
+};
+"#;
+    let doc = DtsDocument::parse_str(source)?;
+    let layout = AdapterLayout::from_document(&doc);
+    assert_eq!(layout.input_listeners.len(), 1);
+    let listener = &layout.input_listeners[0];
+    assert_eq!(listener.code, "&mmv_input_listener");
+    assert_eq!(
+        listener.input_processors[0].params,
+        vec![json!(4), json!(5)]
+    );
+    assert_eq!(listener.nodes.len(), 1);
+    let node = &listener.nodes[0];
+    assert_eq!(node.code, "Cursor");
+    assert_eq!(node.description.as_deref(), Some("Cursor Layer"));
+    assert_eq!(node.layers, vec![2, 3]);
+    assert_eq!(node.input_processors[0].params, vec![json!(1), json!(9)]);
+    assert_eq!(node.input_processors[1].code, "&zip_scroll_scaler");
+    assert_eq!(node.input_processors[1].params, vec![json!(2)]);
+    Ok(())
+}
+
+#[test]
+fn adapter_imports_input_listeners_from_json() -> Result<(), Box<dyn Error>> {
+    let json = json!({
+        "title": "Listener Test",
+        "inputListeners": [{
+            "code": "&mmv_input_listener",
+            "inputProcessors": [],
+            "nodes": [{
+                "code": "LAYER_MouseSlow",
+                "description": "Mouse Slow",
+                "layers": [1],
+                "inputProcessors": [{
+                    "code": "&zip_xy_scaler",
+                    "params": [1, 9]
+                }]
+            }]
+        }]
+    })
+    .to_string();
+
+    let layout = AdapterLayout::from_standard_json(&json)?;
+    assert_eq!(layout.input_listeners.len(), 1);
+    assert_eq!(layout.input_listeners[0].nodes.len(), 1);
+
+    let template = "/* Input Listeners */\n{{input_listeners}}\n";
+    let rendered = import_standard_str_with_template(&json, template)?.to_string()?;
+    assert!(
+        rendered.contains("&mmv_input_listener"),
+        "listener block rendered"
+    );
+    assert!(
+        rendered.contains("input-processors = <&zip_xy_scaler 1 9>;"),
+        "processor params rendered"
+    );
+    Ok(())
+}
+
+#[test]
 fn adapter_file_io_helpers_round_trip() -> Result<(), Box<dyn Error>> {
     let base = DtsDocument::parse_str(&fixture("ast_walker_complex"))?;
     let mut provider = KeymapProvider::new(base.clone());
@@ -145,5 +214,29 @@ fn adapter_supports_simple_templates() -> Result<(), Box<dyn Error>> {
     assert!(rendered.contains("combo_combo_esc"));
     assert!(rendered.contains("#include <behaviors.dtsi>"));
     assert!(rendered.contains("&kp A &kp B"));
+    Ok(())
+}
+
+#[test]
+fn template_preserves_spacing() -> Result<(), Box<dyn Error>> {
+    let doc = DtsDocument::parse_str(&fixture("ast_walker_complex"))?;
+    let layout = AdapterLayout::from_document(&doc);
+    let json = layout.to_standard_json()?;
+
+    let template = r#"/* Header Comment */
+
+/* Second Comment */
+
+{{layer_names_defines}}
+
+/* Footer Comment */
+"#;
+
+    let imported = import_standard_str_with_template(&json, template)?;
+    let rendered = imported.to_string()?;
+
+    assert!(rendered.contains("/* Header Comment */\n\n/* Second Comment */"));
+    assert!(rendered.contains("/* Second Comment */\n\n#define LAYER_DEFAULT_LAYER 0"));
+    assert!(rendered.contains("#define LAYER_DEFAULT_LAYER 0\n\n/* Footer Comment */"));
     Ok(())
 }

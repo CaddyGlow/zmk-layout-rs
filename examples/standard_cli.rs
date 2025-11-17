@@ -1,10 +1,11 @@
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use clap::{Parser, Subcommand};
 use zmk_layout_rs::adapters::{
-    AdapterError, export_standard_file, import_standard_file_with_template,
+    AdapterError, export_standard_file, export_standard_str_with_template,
+    import_standard_file_with_template,
 };
-use zmk_layout_rs::dts::DtsDocument;
+use zmk_layout_rs::dts::{DtsDocument, DtsError};
 
 #[derive(Parser)]
 #[command(
@@ -27,6 +28,9 @@ enum Command {
         /// Destination JSON file to write.
         #[arg(long)]
         json: PathBuf,
+        /// Optional template to extract metadata placeholders, e.g. includes.
+        #[arg(long)]
+        template: Option<PathBuf>,
     },
     /// Import a standard JSON layout and write a DTS document.
     Import {
@@ -52,9 +56,21 @@ fn main() {
 fn run() -> Result<(), AdapterError> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Export { dts, json } => {
-            let document = DtsDocument::parse_file(dts)?;
-            export_standard_file(&document, json)?;
+        Command::Export {
+            dts,
+            json,
+            template,
+        } => {
+            let source = fs::read_to_string(&dts)?;
+            let document = DtsDocument::parse_str(&source).map_err(DtsError::from)?;
+            if let Some(template) = template {
+                let template_source = fs::read_to_string(template)?;
+                let contents =
+                    export_standard_str_with_template(&document, &source, &template_source)?;
+                fs::write(json, contents)?;
+            } else {
+                export_standard_file(&document, json)?;
+            }
         }
         Command::Import {
             json,

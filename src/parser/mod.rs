@@ -504,7 +504,14 @@ impl<'a> Parser<'a> {
         while let Some(token) = self.peek() {
             match token.kind {
                 TokenKind::Whitespace => {
-                    self.idx += 1;
+                    let whitespace = self.next().unwrap();
+                    let newline_count = count_line_breaks(&whitespace.lexeme);
+                    if newline_count > 1 {
+                        for _ in 0..(newline_count - 1) {
+                            self.pending_comments
+                                .push(DtComment::new(String::new(), whitespace.span));
+                        }
+                    }
                     advanced = true;
                 }
                 TokenKind::LineComment | TokenKind::BlockComment => {
@@ -685,4 +692,22 @@ fn merge_spans(a: TokenSpan, b: TokenSpan) -> TokenSpan {
         (b.end, b.end_line, b.end_column)
     };
     TokenSpan::new(start, end, start_line, start_column, end_line, end_column)
+}
+
+fn count_line_breaks(text: &str) -> usize {
+    let mut count = 0;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\n' => count += 1,
+            '\r' => {
+                count += 1;
+                if let Some('\n') = chars.peek().copied() {
+                    chars.next();
+                }
+            }
+            _ => {}
+        }
+    }
+    count
 }
