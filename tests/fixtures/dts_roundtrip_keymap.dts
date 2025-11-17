@@ -1,0 +1,14 @@
+/* Example keymap for API round-trips */
+#include <behaviors.dtsi>
+keymap {
+    compatible = "zmk,keymap";
+    default_layer {
+        bindings = <
+            &kp Q &kp W &kp E &kp R
+        >;
+    };
+    #define LSYM &kp LBKT
+    macros {
+        binding = < LSYM >;
+    };
+};
