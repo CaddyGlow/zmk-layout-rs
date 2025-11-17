@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::{
     ast::DtItem,
+    macro_support::{MacroError, MacroRegistry, collect_macros},
     parser::parse_layout,
     serialization::{SerializeConfig, SerializeError, serialize, serialize_with_config},
     tokenizer::LayoutError,
@@ -61,6 +62,11 @@ impl DtsDocument {
         let contents = self.to_string()?;
         fs::write(path, contents)?;
         Ok(())
+    }
+
+    /// Collect macro definitions present in the document.
+    pub fn collect_macros(&self) -> Result<MacroRegistry, MacroError> {
+        collect_macros(&self.items)
     }
 }
 
