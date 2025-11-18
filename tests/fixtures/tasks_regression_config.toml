@@ -1,0 +1,44 @@
+[base]
+template = "regression-fixture"
+version = "0.0.1"
+
+[config]
+format_version = "1.0.0"
+default_conflict = "prompt"
+comment = "regression fixture"
+
+[[tasks]]
+id = "override-base"
+type = "override"
+path = "layers.base.bindings[0]"
+value = "&kp ESC"
+from = "&kp Q"
+target = "layers.base.bindings[0]"
+comment = "swap Q for ESC"
+
+[[tasks]]
+id = "layer-update-nav"
+type = "layer"
+name = "nav"
+bindings = ["&kp LEFT", "&kp DOWN", "&kp UP", "&kp RIGHT"]
+target = "layers.nav"
+comment = "replace nav layer bindings"
+
+[[tasks]]
+id = "combo-add"
+type = "combo"
+name = "combo_enter"
+key_positions = [2, 3]
+binding = "&kp ENTER"
+timeout_ms = 30
+layers = [0]
+target = "combos.combo_enter"
+comment = "add combo"
+
+[[tasks]]
+id = "order-nav"
+type = "layer-order"
+layer = "nav"
+before = "num"
+target = "layers.order.nav"
+comment = "move nav before num"

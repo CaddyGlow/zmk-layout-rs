@@ -126,6 +126,25 @@ cargo run --example standard_cli -- import \
   --output keymap.moergo.dts
 ```
 
+### Customization Tasks & CLI
+
+The crate now ships with a dedicated task runner so you can replay layout tweaks whenever the base
+template changes. Task files follow the schema described in `docs/customization_tasks.md`. Use the
+`zmk-layout` binary to apply, validate, or diff your changes:
+
+```bash
+# Apply tasks and write the result
+zmk-layout apply --tasks layout_tasks.toml --base-layout config/keymap.dts --output config/keymap.generated.dts
+
+# Dry-run to inspect conflicts without touching the file
+zmk-layout validate --tasks layout_tasks.toml --base-layout config/keymap.dts
+
+# Review a unified diff in the terminal
+zmk-layout diff --tasks layout_tasks.toml --base-layout config/keymap.dts
+```
+
+See the docs for conflict policies, `target` naming guidance, and troubleshooting tips.
+
 ### Template-based generation
 
 If your DTS template uses `{{ … }}` placeholders (similar to the Python implementation),

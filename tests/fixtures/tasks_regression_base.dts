@@ -1,0 +1,22 @@
+keymap {
+    compatible = "zmk,keymap";
+
+    base {
+        bindings = < &kp Q &kp W &kp E &kp R >;
+    };
+
+    nav {
+        bindings = < &kp A &kp S &kp D &kp F >;
+    };
+
+    num {
+        bindings = < &kp 1 &kp 2 &kp 3 &kp 4 >;
+    };
+};
+
+combos {
+    combo_esc {
+        key-positions = < 0 1 >;
+        bindings = < &kp ESC >;
+    };
+};
