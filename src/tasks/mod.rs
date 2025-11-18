@@ -48,7 +48,7 @@ impl TaskFile {
         let mut target_set = HashSet::new();
         let mut tasks = Vec::with_capacity(raw.tasks.len());
 
-        for (index, raw_task) in raw.tasks.into_iter().enumerate() {
+        for (index, mut raw_task) in raw.tasks.into_iter().enumerate() {
             let target = match raw_task.target.as_ref() {
                 Some(value) if !value.trim().is_empty() => value.clone(),
                 Some(_) => {
@@ -57,7 +57,7 @@ impl TaskFile {
                         "target",
                         index,
                         "target must be a non-empty string",
-                    ))
+                    ));
                 }
                 None => return Err(missing(raw_task.kind, "target", index)),
             };
@@ -84,13 +84,33 @@ impl TaskFile {
             let conflict = raw_task.conflict.unwrap_or(config.default_conflict);
             let comment = raw_task.comment.clone();
 
+            let mut expected = raw_task.expected.take();
+            if let Some(text) = expected.as_ref() {
+                if text.trim().is_empty() {
+                    return Err(invalid(
+                        raw_task.kind,
+                        "expected",
+                        index,
+                        "expected value cannot be empty",
+                    ));
+                }
+            }
+
             let action = raw_task.into_action(index)?;
+            if expected.is_none() {
+                expected = match &action {
+                    TaskAction::Override(action) => action.from.clone(),
+                    _ => None,
+                };
+            }
+            let expected = expected.map(|value| value.trim().to_string());
 
             tasks.push(Task {
                 id,
                 target,
                 conflict,
                 comment,
+                expected,
                 action,
             });
         }
@@ -134,6 +154,7 @@ pub struct Task {
     pub target: String,
     pub conflict: ConflictPolicy,
     pub comment: Option<String>,
+    pub expected: Option<String>,
     pub action: TaskAction,
 }
 
@@ -161,7 +182,7 @@ pub struct ComboTask {
     pub key_positions: Vec<u32>,
     pub binding: String,
     pub timeout_ms: Option<u32>,
-    pub layers: Vec<String>,
+    pub layers: Vec<LayerSelector>,
     pub conditions: Vec<String>,
 }
 
@@ -195,6 +216,12 @@ pub struct BehaviorTask {
 pub struct MetaTask {
     pub key: String,
     pub value: TomlValue,
+}
+
+#[derive(Debug, Clone)]
+pub enum LayerSelector {
+    Index(u32),
+    Name(String),
 }
 
 #[derive(Debug, Clone)]
@@ -310,13 +337,11 @@ pub fn apply_tasks_with_options(
             TaskAction::LayerOrder(action) => {
                 apply_layer_order_task(&mut document, task, action, options.mode)
             }
-            TaskAction::Behavior(_) | TaskAction::Meta(_) => {
-                TaskOutcome {
-                    status: TaskStatus::Skipped,
-                    message: Some("behavior/meta tasks not implemented yet".into()),
-                    ..TaskOutcome::new(task)
-                }
-            }
+            TaskAction::Behavior(_) | TaskAction::Meta(_) => TaskOutcome {
+                status: TaskStatus::Skipped,
+                message: Some("behavior/meta tasks not implemented yet".into()),
+                ..TaskOutcome::new(task)
+            },
             TaskAction::Script(_) => TaskOutcome {
                 status: TaskStatus::Skipped,
                 message: Some("script tasks deferred until Rhai integration".into()),
@@ -376,32 +401,9 @@ fn apply_override_task(
     let before_value = Some(bindings[slot].to_binding_string());
     outcome.before = before_value.clone();
 
-    if let Some(expected) = &action.from {
-        if before_value.as_deref() != Some(expected.as_str()) {
-            let reason = format!(
-                "expected `{}` at {} but found `{}`",
-                expected,
-                action.path,
-                before_value.as_deref().unwrap_or("<none>")
-            );
-            match resolve_conflict(task, reason) {
-                ConflictResolution::Proceed(message) => {
-                    if let Some(msg) = message {
-                        append_message(&mut outcome.message, msg);
-                    }
-                }
-                ConflictResolution::Skip(message) => {
-                    outcome.status = TaskStatus::Skipped;
-                    append_message(&mut outcome.message, message);
-                    return outcome;
-                }
-                ConflictResolution::Abort(reason) => {
-                    outcome.status = TaskStatus::Conflict;
-                    append_message(&mut outcome.message, reason);
-                    return outcome;
-                }
-            }
-        }
+    let before_snapshot = outcome.before.clone();
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome) {
+        return outcome;
     }
 
     if mode == ExecutionMode::Apply {
@@ -431,6 +433,11 @@ fn apply_layer_task(
     let before = layer_snapshot(document.document(), &action.name);
     outcome.before = before.clone();
 
+    let before_snapshot = outcome.before.clone();
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome) {
+        return outcome;
+    }
+
     let normalized = match normalize_binding_list(parser, &action.bindings) {
         Ok(values) => values,
         Err(message) => {
@@ -445,11 +452,24 @@ fn apply_layer_task(
             apply_provider_error(&mut outcome, err);
             return outcome;
         }
+        if !action.metadata.is_empty() {
+            let metadata = metadata_properties(&action.metadata);
+            if let Err(err) = document.set_layer_metadata(&action.name, &metadata) {
+                apply_provider_error(&mut outcome, err);
+                return outcome;
+            }
+        }
     } else {
         append_message(
             &mut outcome.message,
             "dry-run: layer bindings not applied (reporting desired result)",
         );
+        if !action.metadata.is_empty() {
+            append_message(
+                &mut outcome.message,
+                "dry-run: layer metadata not applied (reporting desired result)",
+            );
+        }
     }
     outcome.after = Some(format_bindings_raw(&normalized));
     outcome.status = TaskStatus::Applied;
@@ -466,6 +486,11 @@ fn apply_combo_task(
     let mut outcome = TaskOutcome::new(task);
     outcome.before = combo_snapshot(document.document(), &action.name);
 
+    let before_snapshot = outcome.before.clone();
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome) {
+        return outcome;
+    }
+
     let normalized_binding = match normalize_binding(parser, &action.binding) {
         Ok(value) => value,
         Err(message) => {
@@ -475,7 +500,7 @@ fn apply_combo_task(
         }
     };
 
-    let layers = match parse_layer_values(&action.layers) {
+    let layers = match resolve_combo_layers(document, &action.layers) {
         Ok(values) => values,
         Err(message) => {
             outcome.status = TaskStatus::Error;
@@ -523,6 +548,11 @@ fn apply_layer_order_task(
     let before = layer_order_snapshot(document.document());
     outcome.before = Some(before);
 
+    let before_snapshot = outcome.before.clone();
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome) {
+        return outcome;
+    }
+
     let names = document.layer_names();
     let current_index = match names.iter().position(|name| name == &action.layer) {
         Some(idx) => idx,
@@ -535,22 +565,26 @@ fn apply_layer_order_task(
 
     let target_index = match &action.movement {
         LayerOrderMovement::Position(pos) => (*pos).min(names.len().saturating_sub(1)),
-        LayerOrderMovement::Before(reference) => match names.iter().position(|name| name == reference) {
-            Some(idx) => idx,
-            None => {
-                outcome.status = TaskStatus::Error;
-                outcome.message = Some(format!("reference layer `{}` not found", reference));
-                return outcome;
+        LayerOrderMovement::Before(reference) => {
+            match names.iter().position(|name| name == reference) {
+                Some(idx) => idx,
+                None => {
+                    outcome.status = TaskStatus::Error;
+                    outcome.message = Some(format!("reference layer `{}` not found", reference));
+                    return outcome;
+                }
             }
-        },
-        LayerOrderMovement::After(reference) => match names.iter().position(|name| name == reference) {
-            Some(idx) => (idx + 1).min(names.len()),
-            None => {
-                outcome.status = TaskStatus::Error;
-                outcome.message = Some(format!("reference layer `{}` not found", reference));
-                return outcome;
+        }
+        LayerOrderMovement::After(reference) => {
+            match names.iter().position(|name| name == reference) {
+                Some(idx) => (idx + 1).min(names.len()),
+                None => {
+                    outcome.status = TaskStatus::Error;
+                    outcome.message = Some(format!("reference layer `{}` not found", reference));
+                    return outcome;
+                }
             }
-        },
+        }
     };
 
     if target_index == current_index {
@@ -598,6 +632,43 @@ fn resolve_conflict(task: &Task, reason: String) -> ConflictResolution {
     }
 }
 
+fn ensure_expected_state(task: &Task, actual: Option<&str>, outcome: &mut TaskOutcome) -> bool {
+    let Some(expected) = task.expected.as_deref() else {
+        return true;
+    };
+    let actual_value = actual.map(|value| value.trim().to_string());
+    if actual_value
+        .as_deref()
+        .map(|value| value == expected)
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let actual_display = actual_value.as_deref().unwrap_or("<missing>");
+    let reason = format!(
+        "expected `{}` for target `{}` but found `{}`",
+        expected, task.target, actual_display
+    );
+    match resolve_conflict(task, reason) {
+        ConflictResolution::Proceed(message) => {
+            if let Some(msg) = message {
+                append_message(&mut outcome.message, msg);
+            }
+            true
+        }
+        ConflictResolution::Skip(message) => {
+            outcome.status = TaskStatus::Skipped;
+            append_message(&mut outcome.message, message);
+            false
+        }
+        ConflictResolution::Abort(message) => {
+            outcome.status = TaskStatus::Conflict;
+            append_message(&mut outcome.message, message);
+            false
+        }
+    }
+}
+
 fn parse_override_path(path: &str) -> Result<(String, usize), String> {
     const LAYERS_PREFIX: &str = "layers.";
     const BINDINGS_SEGMENT: &str = ".bindings";
@@ -633,9 +704,7 @@ fn normalize_binding(parser: &mut BindingParser, value: &str) -> Result<String, 
     if value.trim().is_empty() {
         return Err("binding value cannot be empty".into());
     }
-    Ok(parser
-        .parse_with_behavior_rules(value)
-        .to_binding_string())
+    Ok(parser.parse_with_behavior_rules(value).to_binding_string())
 }
 
 fn normalize_binding_list(
@@ -673,7 +742,11 @@ fn combo_snapshot(document: &DtsDocument, combo: &str) -> Option<String> {
     {
         parts.push(format!("key-positions={}", prop.value.raw.trim()));
     }
-    if let Some(prop) = combo_node.properties.iter().find(|prop| prop.name == "bindings") {
+    if let Some(prop) = combo_node
+        .properties
+        .iter()
+        .find(|prop| prop.name == "bindings")
+    {
         parts.push(format!("bindings={}", prop.value.raw.trim()));
     }
     if let Some(prop) = combo_node
@@ -683,7 +756,11 @@ fn combo_snapshot(document: &DtsDocument, combo: &str) -> Option<String> {
     {
         parts.push(format!("timeout-ms={}", prop.value.raw.trim()));
     }
-    if let Some(prop) = combo_node.properties.iter().find(|prop| prop.name == "layers") {
+    if let Some(prop) = combo_node
+        .properties
+        .iter()
+        .find(|prop| prop.name == "layers")
+    {
         parts.push(format!("layers={}", prop.value.raw.trim()));
     }
     if parts.is_empty() {
@@ -720,16 +797,40 @@ fn find_child_node<'a>(parent: &'a DtNode, name: &str) -> Option<&'a DtNode> {
     None
 }
 
-fn parse_layer_values(values: &[String]) -> Result<Vec<u32>, String> {
-    let mut result = Vec::new();
-    for value in values {
-        let parsed = value.parse::<u32>().map_err(|_| {
-            format!(
-                "layer reference `{}` must be a numeric index (0-based)",
-                value
-            )
-        })?;
-        result.push(parsed);
+fn resolve_combo_layers(
+    document: &KeymapDocument,
+    selectors: &[LayerSelector],
+) -> Result<Vec<u32>, String> {
+    if selectors.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = document.layer_names();
+    let mut name_to_index = HashMap::new();
+    for (index, name) in names.iter().enumerate() {
+        name_to_index.insert(name.clone(), index as u32);
+    }
+    let mut result = Vec::with_capacity(selectors.len());
+    for selector in selectors {
+        match selector {
+            LayerSelector::Index(idx) => {
+                if (*idx as usize) < names.len() {
+                    result.push(*idx);
+                } else {
+                    return Err(format!(
+                        "layer index {} out of range (len {})",
+                        idx,
+                        names.len()
+                    ));
+                }
+            }
+            LayerSelector::Name(name) => {
+                if let Some(index) = name_to_index.get(name) {
+                    result.push(*index);
+                } else {
+                    return Err(format!("layer `{}` not found for combo", name));
+                }
+            }
+        }
     }
     Ok(result)
 }
@@ -786,6 +887,66 @@ fn format_list(values: &[String]) -> String {
     } else {
         format!("< {} >", values.join(" "))
     }
+}
+
+fn metadata_properties(metadata: &MetadataMap) -> Vec<(String, String)> {
+    metadata
+        .iter()
+        .map(|(key, value)| (key.clone(), format_metadata_value(value)))
+        .collect()
+}
+
+fn format_metadata_value(value: &TomlValue) -> String {
+    match value {
+        TomlValue::String(text) => format!("\"{}\"", escape_string(text)),
+        TomlValue::Integer(num) => num.to_string(),
+        TomlValue::Float(num) => num.to_string(),
+        TomlValue::Boolean(flag) => {
+            if *flag {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }
+        TomlValue::Array(items) => format_metadata_array(items),
+        TomlValue::Table(entries) => {
+            let body = entries
+                .iter()
+                .map(|(key, value)| format!("{} = {}", key, format_metadata_value(value)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{ {} }}", body)
+        }
+        TomlValue::Datetime(dt) => format!("\"{}\"", dt),
+    }
+}
+
+fn format_metadata_array(items: &[TomlValue]) -> String {
+    if items.is_empty() {
+        "< >".to_string()
+    } else if items
+        .iter()
+        .all(|item| matches!(item, TomlValue::Integer(_) | TomlValue::Float(_)))
+    {
+        let values = items
+            .iter()
+            .map(|item| format_metadata_value(item))
+            .collect::<Vec<_>>();
+        format!("< {} >", values.join(" "))
+    } else {
+        items
+            .iter()
+            .map(|item| match item {
+                TomlValue::String(text) => format!("\"{}\"", escape_string(text)),
+                _ => format_metadata_value(item),
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn escape_string(input: &str) -> String {
+    input.replace('"', "\\\"")
 }
 
 fn parse_binding_list(raw: &str) -> Vec<String> {
@@ -866,7 +1027,6 @@ fn split_binding_sequence(sequence: &str) -> Vec<String> {
     }
     bindings
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -969,9 +1129,7 @@ impl TryFrom<RawConfigSection> for ConfigSection {
             .ok_or(TaskConfigError::MissingFormatVersion)?;
         Ok(ConfigSection {
             format_version,
-            default_conflict: value
-                .default_conflict
-                .unwrap_or(ConflictPolicy::Prompt),
+            default_conflict: value.default_conflict.unwrap_or(ConflictPolicy::Prompt),
             conflict_script: value.conflict_script,
             comment: value.comment,
         })
@@ -993,7 +1151,7 @@ struct RawTask {
     key_positions: Option<Vec<u32>>,
     binding: Option<String>,
     timeout_ms: Option<u32>,
-    layers: Option<Vec<String>>,
+    layers: Option<Vec<RawLayerSelector>>,
     conditions: Option<Vec<String>>,
     bindings: Option<Vec<String>>,
     metadata: Option<MetadataMap>,
@@ -1007,6 +1165,14 @@ struct RawTask {
     script: Option<String>,
     filename: Option<String>,
     args: Option<MetadataMap>,
+    expected: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum RawLayerSelector {
+    Index(i64),
+    Name(String),
 }
 
 impl RawTask {
@@ -1025,12 +1191,7 @@ impl RawTask {
                     .take()
                     .ok_or_else(|| missing(self.kind, "value", index))?;
                 let value = value.as_str().map(str::to_string).ok_or_else(|| {
-                    invalid(
-                        self.kind,
-                        "value",
-                        index,
-                        "override value must be a string",
-                    )
+                    invalid(self.kind, "value", index, "override value must be a string")
                 })?;
                 if value.trim().is_empty() {
                     return Err(invalid(
@@ -1078,7 +1239,7 @@ impl RawTask {
                     key_positions,
                     binding,
                     timeout_ms: self.timeout_ms,
-                    layers: self.layers.unwrap_or_default(),
+                    layers: convert_layer_selectors(self.layers, self.kind, index)?,
                     conditions: self.conditions.unwrap_or_default(),
                 }))
             }
@@ -1206,6 +1367,47 @@ impl RawTask {
     }
 }
 
+fn convert_layer_selectors(
+    raw: Option<Vec<RawLayerSelector>>,
+    kind: TaskKind,
+    index: usize,
+) -> Result<Vec<LayerSelector>, TaskConfigError> {
+    let Some(values) = raw else {
+        return Ok(Vec::new());
+    };
+    let mut selectors = Vec::with_capacity(values.len());
+    for value in values {
+        selectors.push(value.into_selector(kind, index)?);
+    }
+    Ok(selectors)
+}
+
+impl RawLayerSelector {
+    fn into_selector(self, kind: TaskKind, index: usize) -> Result<LayerSelector, TaskConfigError> {
+        match self {
+            RawLayerSelector::Index(value) => {
+                if value < 0 {
+                    Err(invalid(
+                        kind,
+                        "layers",
+                        index,
+                        "layer index must be non-negative",
+                    ))
+                } else {
+                    Ok(LayerSelector::Index(value as u32))
+                }
+            }
+            RawLayerSelector::Name(name) => {
+                if name.trim().is_empty() {
+                    Err(invalid(kind, "layers", index, "layer name cannot be empty"))
+                } else {
+                    Ok(LayerSelector::Name(name.trim().to_string()))
+                }
+            }
+        }
+    }
+}
+
 fn take_nonempty_string(
     slot: &mut Option<String>,
     kind: TaskKind,
@@ -1221,11 +1423,7 @@ fn take_nonempty_string(
 }
 
 fn missing(kind: TaskKind, field: &'static str, index: usize) -> TaskConfigError {
-    TaskConfigError::MissingField {
-        field,
-        kind,
-        index,
-    }
+    TaskConfigError::MissingField { field, kind, index }
 }
 
 fn invalid(
@@ -1242,18 +1440,17 @@ fn invalid(
     }
 }
 
-fn resolve_layer_order(task: &RawTask, index: usize) -> Result<LayerOrderMovement, TaskConfigError> {
+fn resolve_layer_order(
+    task: &RawTask,
+    index: usize,
+) -> Result<LayerOrderMovement, TaskConfigError> {
     let has_position = task.position.is_some();
     let has_before = task.before.is_some();
     let has_after = task.after.is_some();
     let count = has_position as u8 + has_before as u8 + has_after as u8;
 
     if count == 0 {
-        return Err(missing(
-            task.kind,
-            "position|before|after",
-            index,
-        ));
+        return Err(missing(task.kind, "position|before|after", index));
     }
     if count > 1 {
         return Err(invalid(
@@ -1300,11 +1497,7 @@ fn resolve_layer_order(task: &RawTask, index: usize) -> Result<LayerOrderMovemen
     unreachable!("validated combination should ensure one branch returns")
 }
 
-fn auto_id(
-    kind: TaskKind,
-    target: &str,
-    slug_counts: &mut HashMap<String, usize>,
-) -> String {
+fn auto_id(kind: TaskKind, target: &str, slug_counts: &mut HashMap<String, usize>) -> String {
     let base = slugify(&format!("{}-{}", kind.as_str(), target));
     let entry = slug_counts.entry(base.clone()).or_insert(0);
     *entry += 1;
@@ -1451,7 +1644,9 @@ target = "layers.base.bindings[0]"
 "#;
 
         let err = TaskFile::from_toml_str(doc).expect_err("duplicate targets");
-        assert!(matches!(err, TaskConfigError::DuplicateTarget(target) if target == "layers.base.bindings[0]"));
+        assert!(
+            matches!(err, TaskConfigError::DuplicateTarget(target) if target == "layers.base.bindings[0]")
+        );
     }
 
     #[test]
@@ -1479,6 +1674,7 @@ target = "layers.base.bindings[0]"
             target: "layers.base.bindings[1]".into(),
             conflict: ConflictPolicy::Prompt,
             comment: None,
+            expected: None,
             action: TaskAction::Override(OverrideTask {
                 path: "layers.base.bindings[1]".into(),
                 value: "&kp SPACE".into(),
@@ -1503,12 +1699,13 @@ target = "layers.base.bindings[0]"
             target: "combos.combo_new".into(),
             conflict: ConflictPolicy::Prompt,
             comment: None,
+            expected: None,
             action: TaskAction::Combo(ComboTask {
                 name: "combo_new".into(),
                 key_positions: vec![2, 3],
                 binding: "&kp ENTER".into(),
                 timeout_ms: Some(40),
-                layers: vec![],
+                layers: Vec::new(),
                 conditions: vec![],
             }),
         });
@@ -1521,6 +1718,37 @@ target = "layers.base.bindings[0]"
     }
 
     #[test]
+    fn combo_task_supports_layer_names() {
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "combo-add".into(),
+            target: "combos.combo_new".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: None,
+            action: TaskAction::Combo(ComboTask {
+                name: "combo_new".into(),
+                key_positions: vec![2, 3],
+                binding: "&kp ENTER".into(),
+                timeout_ms: Some(40),
+                layers: vec![LayerSelector::Name("nav".into())],
+                conditions: vec![],
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+        let snapshot = combo_snapshot(exec.document.document(), "combo_new").unwrap();
+        assert!(
+            snapshot.contains("layers=<1>") || snapshot.contains("layers=< 1 >"),
+            "snapshot: {}",
+            snapshot
+        );
+    }
+
+    #[test]
     fn moves_layer_order() {
         let mut file = default_task_file();
         file.tasks.push(Task {
@@ -1528,6 +1756,7 @@ target = "layers.base.bindings[0]"
             target: "layers.order.nav".into(),
             conflict: ConflictPolicy::Prompt,
             comment: None,
+            expected: None,
             action: TaskAction::LayerOrder(LayerOrderTask {
                 layer: "nav".into(),
                 movement: LayerOrderMovement::Position(0),
@@ -1539,6 +1768,97 @@ target = "layers.base.bindings[0]"
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         assert_eq!(layer_order_snapshot(exec.document.document()), "nav,base");
+    }
+
+    #[test]
+    fn layer_order_moves_to_end() {
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "layer-order".into(),
+            target: "layers.order.base".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: None,
+            action: TaskAction::LayerOrder(LayerOrderTask {
+                layer: "base".into(),
+                movement: LayerOrderMovement::After("nav".into()),
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+        assert_eq!(layer_order_snapshot(exec.document.document()), "nav,base");
+    }
+
+    #[test]
+    fn layer_task_applies_metadata() {
+        let mut metadata = MetadataMap::new();
+        metadata.insert("display_name".into(), TomlValue::String("Primary".into()));
+        metadata.insert(
+            "color".into(),
+            TomlValue::Array(vec![
+                TomlValue::Integer(1),
+                TomlValue::Integer(2),
+                TomlValue::Integer(3),
+            ]),
+        );
+
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "layer-update".into(),
+            target: "layers.base".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: None,
+            action: TaskAction::Layer(LayerTask {
+                name: "base".into(),
+                bindings: vec!["&kp Q".into(), "&kp W".into()],
+                metadata,
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+
+        let layer = find_layer_node(&exec.document.document().items, "base").expect("layer node");
+        let display_name = layer
+            .properties
+            .iter()
+            .find(|prop| prop.name == "display_name")
+            .expect("display_name property");
+        assert_eq!(display_name.value.raw, "\"Primary\"");
+    }
+
+    #[test]
+    fn expected_snapshot_detects_conflict() {
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "layer-order".into(),
+            target: "layers.order.nav".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: Some("nav,base".into()),
+            action: TaskAction::LayerOrder(LayerOrderTask {
+                layer: "nav".into(),
+                movement: LayerOrderMovement::Position(0),
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Conflict);
+        assert!(
+            exec.results[0]
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("expected `nav,base`")
+        );
     }
 
     fn default_task_file() -> TaskFile {

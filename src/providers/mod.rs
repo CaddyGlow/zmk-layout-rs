@@ -103,6 +103,24 @@ impl KeymapProvider {
         Ok(())
     }
 
+    pub fn set_layer_metadata(
+        &mut self,
+        layer: &str,
+        metadata: &[(String, String)],
+    ) -> Result<(), ProviderError> {
+        if metadata.is_empty() {
+            return Ok(());
+        }
+        self.ensure_layer_node(layer)?;
+        let node = find_layer_node_mut(&mut self.document.items, layer)
+            .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
+        for (key, value) in metadata {
+            let property = ensure_property(node, key);
+            property.value.raw = value.clone();
+        }
+        Ok(())
+    }
+
     pub fn set_combo_bindings(
         &mut self,
         combo: &str,
@@ -231,7 +249,9 @@ impl KeymapProvider {
             let timeout_prop = ensure_property(combo_node, "timeout-ms");
             timeout_prop.value.raw = format_u32_list(&[value]);
         } else {
-            combo_node.properties.retain(|prop| prop.name != "timeout-ms");
+            combo_node
+                .properties
+                .retain(|prop| prop.name != "timeout-ms");
         }
 
         if layers.is_empty() {
@@ -257,18 +277,20 @@ impl KeymapProvider {
             .position(|item| matches!(item, DtItem::Node(node) if node.name == layer))
             .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
 
-        let new_index = position.min(keymap_root.children.len().saturating_sub(1));
-        if current_index == new_index {
+        let max_index = keymap_root.children.len();
+        let target_index = position.min(max_index);
+        if current_index == target_index {
             return Ok(());
         }
 
         let item = keymap_root.children.remove(current_index);
-        let adjusted = if current_index < new_index {
-            new_index.saturating_sub(1)
+        let adjusted = if target_index > current_index {
+            target_index.saturating_sub(1)
         } else {
-            new_index
+            target_index
         };
-        keymap_root.children.insert(adjusted, item);
+        let insert_at = adjusted.min(keymap_root.children.len());
+        keymap_root.children.insert(insert_at, item);
         Ok(())
     }
 
@@ -1112,6 +1134,20 @@ impl KeymapDocument {
         let refs: Vec<&str> = bindings.iter().map(|value| value.as_str()).collect();
         let mut provider = KeymapProvider::new(self.document.clone());
         provider.set_layer_bindings(layer, &refs)?;
+        self.document = provider.into_document();
+        Ok(())
+    }
+
+    pub fn set_layer_metadata(
+        &mut self,
+        layer: &str,
+        metadata: &[(String, String)],
+    ) -> Result<(), ProviderError> {
+        if metadata.is_empty() {
+            return Ok(());
+        }
+        let mut provider = KeymapProvider::new(self.document.clone());
+        provider.set_layer_metadata(layer, metadata)?;
         self.document = provider.into_document();
         Ok(())
     }
