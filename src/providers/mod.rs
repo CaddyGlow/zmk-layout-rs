@@ -175,6 +175,103 @@ impl KeymapProvider {
         Ok(())
     }
 
+    pub fn upsert_combo(
+        &mut self,
+        combo: &str,
+        binding: &str,
+        key_positions: &[u32],
+        timeout_ms: Option<u32>,
+        layers: &[u32],
+    ) -> Result<(), ProviderError> {
+        if key_positions.is_empty() {
+            return Err(ProviderError::InvalidBinding(
+                "combo must declare at least one key position".to_string(),
+            ));
+        }
+        let normalized = self.normalize_bindings(&[binding])?;
+        let combos_index = self.ensure_combos_root_index();
+        let combo_node = match self.document.items.get_mut(combos_index) {
+            Some(DtItem::Node(node)) => {
+                let child_index = node
+                    .children
+                    .iter()
+                    .position(|item| matches!(item, DtItem::Node(child) if child.name == combo));
+                let target_node = if let Some(idx) = child_index {
+                    match node.children.get_mut(idx) {
+                        Some(DtItem::Node(child)) => child,
+                        _ => unreachable!(),
+                    }
+                } else {
+                    node.children.push(DtItem::Node(DtNode {
+                        name: combo.to_string(),
+                        raw_name: String::new(),
+                        span: empty_span(),
+                        properties: Vec::new(),
+                        children: Vec::new(),
+                        leading_comments: Vec::new(),
+                        trailing_comments: Vec::new(),
+                    }));
+                    match node.children.last_mut() {
+                        Some(DtItem::Node(child)) => child,
+                        _ => unreachable!(),
+                    }
+                };
+                target_node
+            }
+            _ => unreachable!(),
+        };
+
+        let key_prop = ensure_property(combo_node, "key-positions");
+        key_prop.value.raw = format_u32_list(key_positions);
+
+        let bindings_prop = ensure_property(combo_node, "bindings");
+        bindings_prop.value.raw = format_bindings_raw(&normalized);
+
+        if let Some(value) = timeout_ms {
+            let timeout_prop = ensure_property(combo_node, "timeout-ms");
+            timeout_prop.value.raw = format_u32_list(&[value]);
+        } else {
+            combo_node.properties.retain(|prop| prop.name != "timeout-ms");
+        }
+
+        if layers.is_empty() {
+            combo_node.properties.retain(|prop| prop.name != "layers");
+        } else {
+            let layer_prop = ensure_property(combo_node, "layers");
+            layer_prop.value.raw = format_u32_list(layers);
+        }
+
+        Ok(())
+    }
+
+    pub fn move_layer_to_index(
+        &mut self,
+        layer: &str,
+        position: usize,
+    ) -> Result<(), ProviderError> {
+        let keymap_root = find_layer_node_mut(&mut self.document.items, "keymap")
+            .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
+        let current_index = keymap_root
+            .children
+            .iter()
+            .position(|item| matches!(item, DtItem::Node(node) if node.name == layer))
+            .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
+
+        let new_index = position.min(keymap_root.children.len().saturating_sub(1));
+        if current_index == new_index {
+            return Ok(());
+        }
+
+        let item = keymap_root.children.remove(current_index);
+        let adjusted = if current_index < new_index {
+            new_index.saturating_sub(1)
+        } else {
+            new_index
+        };
+        keymap_root.children.insert(adjusted, item);
+        Ok(())
+    }
+
     pub fn set_behavior_bindings(
         &mut self,
         behavior: &str,
@@ -272,6 +369,27 @@ impl KeymapProvider {
             .ok_or(ProviderError::CombosMissing)?;
         find_child_node_mut(combos_root, combo)
             .ok_or_else(|| ProviderError::ComboNotFound(combo.to_string()))
+    }
+
+    fn ensure_combos_root_index(&mut self) -> usize {
+        if let Some(index) = self
+            .document
+            .items
+            .iter()
+            .position(|item| matches!(item, DtItem::Node(node) if node.name == "combos"))
+        {
+            return index;
+        }
+        self.document.items.push(DtItem::Node(DtNode {
+            name: "combos".to_string(),
+            raw_name: String::new(),
+            span: empty_span(),
+            properties: Vec::new(),
+            children: Vec::new(),
+            leading_comments: Vec::new(),
+            trailing_comments: Vec::new(),
+        }));
+        self.document.items.len() - 1
     }
 
     fn behavior_node_mut(&mut self, behavior: &str) -> Result<&mut DtNode, ProviderError> {
@@ -984,5 +1102,46 @@ impl KeymapDocument {
         provider.set_behavior_bindings(behavior, bindings)?;
         self.document = provider.into_document();
         Ok(())
+    }
+
+    pub fn set_layer_bindings(
+        &mut self,
+        layer: &str,
+        bindings: &[String],
+    ) -> Result<(), ProviderError> {
+        let refs: Vec<&str> = bindings.iter().map(|value| value.as_str()).collect();
+        let mut provider = KeymapProvider::new(self.document.clone());
+        provider.set_layer_bindings(layer, &refs)?;
+        self.document = provider.into_document();
+        Ok(())
+    }
+
+    pub fn upsert_combo(
+        &mut self,
+        name: &str,
+        binding: &str,
+        key_positions: &[u32],
+        timeout_ms: Option<u32>,
+        layers: &[u32],
+    ) -> Result<(), ProviderError> {
+        let mut provider = KeymapProvider::new(self.document.clone());
+        provider.upsert_combo(name, binding, key_positions, timeout_ms, layers)?;
+        self.document = provider.into_document();
+        Ok(())
+    }
+
+    pub fn reorder_layer(&mut self, layer: &str, new_index: usize) -> Result<(), ProviderError> {
+        let mut provider = KeymapProvider::new(self.document.clone());
+        provider.move_layer_to_index(layer, new_index)?;
+        self.document = provider.into_document();
+        Ok(())
+    }
+
+    pub fn layer_names(&self) -> Vec<String> {
+        KeymapProvider::new(self.document.clone()).layer_names()
+    }
+
+    pub fn into_document(self) -> DtsDocument {
+        self.document
     }
 }

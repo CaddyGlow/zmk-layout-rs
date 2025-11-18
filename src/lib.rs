@@ -12,4 +12,5 @@ pub mod macro_support;
 pub mod parser;
 pub mod providers;
 pub mod serialization;
+pub mod tasks;
 pub mod tokenizer;
