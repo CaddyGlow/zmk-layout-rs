@@ -34,23 +34,23 @@
 #define CONCAT_(a, b) a##b
 #define CONCAT(a, b) CONCAT_(a, b)
 
-#define ZMK_BEHAVIOR_CORE_tap_dance  \\
-    compatible = "zmk,behavior-tap-dance"; \\
+#define ZMK_BEHAVIOR_CORE_tap_dance  \
+    compatible = "zmk,behavior-tap-dance"; \
     #binding-cells = <0>
 
-#define ZMK_BEHAVIOR(name, type, ...) \\
-    name: name { \\
-        ZMK_BEHAVIOR_CORE_ ## type; \\
-        __VA_ARGS__ \\
+#define ZMK_BEHAVIOR(name, type, ...) \
+    name: name { \
+        ZMK_BEHAVIOR_CORE_ ## type; \
+        __VA_ARGS__ \
     };
 
-#define ZMK_TAP_DANCE(name, ...) \\
+#define ZMK_TAP_DANCE(name, ...) \
     ZMK_BEHAVIOR(name, tap_dance, __VA_ARGS__)
 
-#define ZMK_TD_LAYER(name, layer) \\
-    ZMK_TAP_DANCE(name, \\
-        tapping-term-ms = <200>; \\
-        bindings = <&mo layer>, <&to layer>; \\
+#define ZMK_TD_LAYER(name, layer) \
+    ZMK_TAP_DANCE(name, \
+        tapping-term-ms = <200>; \
+        bindings = <&mo layer>, <&to layer>; \
 )
 
 /* Automatically generated layer name #define */

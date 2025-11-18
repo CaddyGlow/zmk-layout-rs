@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 use clap::{Parser, Subcommand};
 use zmk_layout_rs::adapters::{
     AdapterError, export_standard_file, export_standard_str_with_template,
-    import_standard_file_with_template,
+    import_standard_str_with_template, render_standard_template, template_contains_placeholders,
 };
 use zmk_layout_rs::dts::{DtsDocument, DtsError};
 
@@ -77,8 +77,15 @@ fn run() -> Result<(), AdapterError> {
             template,
             output,
         } => {
-            let imported = import_standard_file_with_template(json, template)?;
-            imported.write_to_file(output)?;
+            let json_text = fs::read_to_string(&json)?;
+            let template_source = fs::read_to_string(&template)?;
+            if template_contains_placeholders(&template_source) {
+                let rendered = render_standard_template(&json_text, &template_source)?;
+                fs::write(output, rendered)?;
+            } else {
+                let imported = import_standard_str_with_template(&json_text, &template_source)?;
+                imported.write_to_file(output)?;
+            }
         }
     }
     Ok(())

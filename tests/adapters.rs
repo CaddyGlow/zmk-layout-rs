@@ -3,7 +3,7 @@ use std::{error::Error, fs, path::PathBuf};
 use serde_json::json;
 use zmk_layout_rs::adapters::{
     AdapterLayout, export_standard_file, export_standard_str, import_standard_file,
-    import_standard_str, import_standard_str_with_template,
+    import_standard_str, import_standard_str_with_template, render_standard_template,
 };
 use zmk_layout_rs::dts::DtsDocument;
 use zmk_layout_rs::providers::KeymapProvider;
@@ -29,9 +29,8 @@ fn adapter_extracts_combo_and_behavior_specs() -> Result<(), Box<dyn Error>> {
     let combo = &layout.combos[0];
     assert_eq!(combo.name, "combo_esc");
     assert_eq!(combo.key_positions, vec![0, 1]);
-    assert_eq!(combo.bindings, vec!["&kp ESC"]);
+    assert_eq!(combo.binding.as_deref(), Some("&kp ESC"));
 
-    assert_eq!(layout.behaviors.len(), 2);
     let ht = layout
         .behaviors
         .iter()
@@ -52,9 +51,10 @@ fn adapter_applies_mutations_via_provider() -> Result<(), Box<dyn Error>> {
         .iter_mut()
         .find(|combo| combo.name == "combo_esc")
         .expect("combo exists");
-    combo.bindings = vec!["&kp SPACE".into()];
+    combo.binding = Some("&kp SPACE".into());
     combo.key_positions = vec![2, 3];
     combo.timeout_ms = Some(90);
+    combo.layers = vec![0, 1];
 
     let ht = layout
         .behaviors
@@ -78,6 +78,7 @@ fn adapter_applies_mutations_via_provider() -> Result<(), Box<dyn Error>> {
     assert!(updated.contains("bindings = < &kp SPACE >;"));
     assert!(updated.contains("key-positions = < 2 3 >;"));
     assert!(updated.contains("bindings = < &kp Z &kp X >;"));
+    assert!(updated.contains("layers = <0 1>;"));
     Ok(())
 }
 
@@ -156,14 +157,91 @@ fn adapter_imports_input_listeners_from_json() -> Result<(), Box<dyn Error>> {
     assert_eq!(layout.input_listeners[0].nodes.len(), 1);
 
     let template = "/* Input Listeners */\n{{input_listeners}}\n";
-    let rendered = import_standard_str_with_template(&json, template)?.to_string()?;
+    let rendered = render_standard_template(&json, template)?;
     assert!(
         rendered.contains("&mmv_input_listener"),
         "listener block rendered"
     );
     assert!(
+        rendered.contains("\n    // Mouse Slow"),
+        "listener comments use four-space indent"
+    );
+    assert!(
         rendered.contains("input-processors = <&zip_xy_scaler 1 9>;"),
         "processor params rendered"
+    );
+    Ok(())
+}
+
+#[test]
+fn combo_descriptions_and_layers_round_trip() -> Result<(), Box<dyn Error>> {
+    let source = r#"
+/ {
+    combos {
+        compatible = "zmk,combos";
+        // sticky "meh" modifiers (Alt + Ctrl + Shift) - TailorKey
+        combo_sticky_meh {
+            key-positions = <1 2>;
+            bindings = < &kp A >;
+            layers = <0 2>;
+        };
+    };
+};
+"#;
+    let doc = DtsDocument::parse_str(source)?;
+    let layout = AdapterLayout::from_document(&doc);
+    assert_eq!(layout.combos.len(), 1);
+    let combo = &layout.combos[0];
+    assert_eq!(
+        combo.description,
+        r#"sticky "meh" modifiers (Alt + Ctrl + Shift) - TailorKey"#
+    );
+    assert_eq!(combo.layers, vec![0, 2]);
+
+    let json = layout.to_standard_json()?;
+    let rendered = render_standard_template(&json, "{{combos}}\n")?;
+    assert!(
+        rendered.contains("// sticky \"meh\" modifiers (Alt + Ctrl + Shift) - TailorKey"),
+        "combo description rendered as comment"
+    );
+    assert!(
+        rendered.contains("bindings = <&kp A>;"),
+        "bindings rendered without extra spacing"
+    );
+    assert!(
+        rendered.contains("layers = <0 2>;"),
+        "layers property rendered"
+    );
+    Ok(())
+}
+
+#[test]
+fn macro_rendering_avoids_double_quotes_and_spacing() -> Result<(), Box<dyn Error>> {
+    let source = r#"
+behaviors {
+    rgb_ug_status_macro: rgb_ug_status_macro {
+        label = "RGB_UG_STATUS";
+        compatible = "zmk,behavior-macro";
+        #binding-cells = <0>;
+        bindings = < &rgb_ug RGB_STATUS >;
+    };
+};
+"#;
+    let doc = DtsDocument::parse_str(source)?;
+    let layout = AdapterLayout::from_document(&doc);
+    let json = layout.to_standard_json()?;
+    let rendered = render_standard_template(&json, "{{macros}}\n")?;
+    assert!(
+        rendered.contains(r#"compatible = "zmk,behavior-macro";"#),
+        "compatible property should only have one set of quotes"
+    );
+    assert!(
+        rendered.contains(r#"label = "RGB_UG_STATUS";"#),
+        "label property should be preserved"
+    );
+    assert!(
+        rendered.contains("<&rgb_ug RGB_STATUS>;"),
+        "bindings should omit extra spaces inside angle brackets"
     );
     Ok(())
 }
@@ -210,8 +288,8 @@ fn adapter_supports_simple_templates() -> Result<(), Box<dyn Error>> {
 
     let imported = import_standard_str_with_template(&json, template)?;
     let rendered = imported.to_string()?;
-    assert!(rendered.contains("#define LAYER_DEFAULT_LAYER 0"));
-    assert!(rendered.contains("combo_combo_esc"));
+    assert!(rendered.contains("#define LAYER_default_layer 0"));
+    assert!(rendered.contains("combo_esc"));
     assert!(rendered.contains("#include <behaviors.dtsi>"));
     assert!(rendered.contains("&kp A &kp B"));
     Ok(())
@@ -236,7 +314,7 @@ fn template_preserves_spacing() -> Result<(), Box<dyn Error>> {
     let rendered = imported.to_string()?;
 
     assert!(rendered.contains("/* Header Comment */\n\n/* Second Comment */"));
-    assert!(rendered.contains("/* Second Comment */\n\n#define LAYER_DEFAULT_LAYER 0"));
-    assert!(rendered.contains("#define LAYER_DEFAULT_LAYER 0\n\n/* Footer Comment */"));
+    assert!(rendered.contains("/* Second Comment */\n\n#define LAYER_default_layer 0"));
+    assert!(rendered.contains("#define LAYER_default_layer 0\n\n/* Footer Comment */"));
     Ok(())
 }

@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 use crate::{
-    ast::{DtItem, DtNode, DtProperty, DtValue},
+    ast::{DtComment, DtItem, DtNode, DtProperty, DtValue},
     bindings::{BindingParser, LayoutBinding},
     dts::DtsDocument,
     tokenizer::TokenSpan,
@@ -164,6 +164,17 @@ impl KeymapProvider {
         Ok(())
     }
 
+    pub fn set_combo_layers(&mut self, combo: &str, layers: &[u32]) -> Result<(), ProviderError> {
+        let combo_node = self.combo_node_mut(combo)?;
+        if layers.is_empty() {
+            combo_node.properties.retain(|prop| prop.name != "layers");
+        } else {
+            let property = ensure_property(combo_node, "layers");
+            property.value.raw = format_u32_list(layers);
+        }
+        Ok(())
+    }
+
     pub fn set_behavior_bindings(
         &mut self,
         behavior: &str,
@@ -178,6 +189,39 @@ impl KeymapProvider {
             }
         })?;
         property.value.raw = format_bindings_raw(&binding_values);
+        Ok(())
+    }
+
+    pub fn set_macro_timing(
+        &mut self,
+        behavior: &str,
+        wait_ms: Option<u32>,
+        tap_ms: Option<u32>,
+    ) -> Result<(), ProviderError> {
+        self.set_behavior_numeric_property(behavior, "wait-ms", wait_ms)?;
+        self.set_behavior_numeric_property(behavior, "tap-ms", tap_ms)
+    }
+
+    pub fn set_behavior_binding_cells(
+        &mut self,
+        behavior: &str,
+        binding_cells: Option<u32>,
+    ) -> Result<(), ProviderError> {
+        self.set_behavior_numeric_property(behavior, "#binding-cells", binding_cells)
+    }
+
+    pub fn set_behavior_label(
+        &mut self,
+        behavior: &str,
+        label: Option<&str>,
+    ) -> Result<(), ProviderError> {
+        let behavior_node = self.behavior_node_mut(behavior)?;
+        if let Some(text) = label {
+            let property = ensure_property(behavior_node, "label");
+            property.value.raw = format!("\"{}\"", text);
+        } else {
+            behavior_node.properties.retain(|prop| prop.name != "label");
+        }
         Ok(())
     }
 
@@ -205,6 +249,24 @@ impl KeymapProvider {
             .collect()
     }
 
+    fn set_behavior_numeric_property(
+        &mut self,
+        behavior: &str,
+        property: &str,
+        value: Option<u32>,
+    ) -> Result<(), ProviderError> {
+        let behavior_node = self.behavior_node_mut(behavior)?;
+        if let Some(value) = value {
+            let prop = ensure_property(behavior_node, property);
+            prop.value.raw = format_u32_list(&[value]);
+        } else {
+            behavior_node
+                .properties
+                .retain(|prop| prop.name != property);
+        }
+        Ok(())
+    }
+
     fn combo_node_mut(&mut self, combo: &str) -> Result<&mut DtNode, ProviderError> {
         let combos_root = find_layer_node_mut(&mut self.document.items, "combos")
             .ok_or(ProviderError::CombosMissing)?;
@@ -213,10 +275,21 @@ impl KeymapProvider {
     }
 
     fn behavior_node_mut(&mut self, behavior: &str) -> Result<&mut DtNode, ProviderError> {
-        let behaviors_root = find_layer_node_mut(&mut self.document.items, "behaviors")
-            .ok_or(ProviderError::BehaviorsMissing)?;
-        find_child_node_mut(behaviors_root, behavior)
-            .ok_or_else(|| ProviderError::BehaviorNotFound(behavior.to_string()))
+        let mut root_found = false;
+        for item in &mut self.document.items {
+            if let DtItem::Node(node) = item {
+                if node.name == "behaviors" || node.name == "macros" {
+                    root_found = true;
+                    if let Some(child) = find_child_node_mut(node, behavior) {
+                        return Ok(child);
+                    }
+                }
+            }
+        }
+        if !root_found {
+            return Err(ProviderError::BehaviorsMissing);
+        }
+        Err(ProviderError::BehaviorNotFound(behavior.to_string()))
     }
 
     fn ensure_layer_node(&mut self, layer: &str) -> Result<(), ProviderError> {
@@ -373,21 +446,70 @@ fn empty_span() -> TokenSpan {
     TokenSpan::new(0, 0, 1, 1, 1, 1)
 }
 
-fn parse_binding_list(raw: &str) -> Vec<String> {
-    let mut inner = raw.trim();
-    if inner.starts_with('<') {
-        inner = inner.trim_start_matches('<').trim_start();
+fn parse_binding_groups(raw: &str) -> Vec<String> {
+    let mut groups = Vec::new();
+    let mut depth = 0usize;
+    let mut current = String::new();
+    for ch in raw.chars() {
+        match ch {
+            '<' => {
+                if depth == 0 {
+                    current.clear();
+                } else {
+                    current.push(ch);
+                }
+                depth += 1;
+            }
+            '>' => {
+                if depth > 0 {
+                    depth -= 1;
+                    if depth == 0 {
+                        let trimmed = current.trim();
+                        if !trimmed.is_empty() {
+                            if trimmed.matches('&').count() > 1 {
+                                groups.extend(split_binding_sequence(trimmed));
+                            } else {
+                                groups.push(trimmed.to_string());
+                            }
+                        }
+                    } else {
+                        current.push(ch);
+                    }
+                }
+            }
+            _ => {
+                if depth > 0 {
+                    current.push(ch);
+                }
+            }
+        }
     }
-    if inner.ends_with('>') {
-        inner = inner.trim_end_matches('>').trim_end();
+    if groups.is_empty() {
+        let trimmed = raw
+            .trim()
+            .trim_start_matches('<')
+            .trim_end_matches('>')
+            .trim_end_matches(';')
+            .trim();
+        if !trimmed.is_empty() {
+            if trimmed.matches('&').count() > 1 {
+                groups.extend(split_binding_sequence(trimmed));
+            } else {
+                groups.push(trimmed.to_string());
+            }
+        }
     }
-    if inner.ends_with(';') {
-        inner = inner.trim_end_matches(';').trim_end();
-    }
+    groups
+}
 
+fn parse_binding_list(raw: &str) -> Vec<String> {
+    parse_binding_groups(raw)
+}
+
+fn split_binding_sequence(sequence: &str) -> Vec<String> {
     let mut bindings = Vec::new();
     let mut current = String::new();
-    for token in inner.split_whitespace() {
+    for token in sequence.split_whitespace() {
         if token.starts_with('&') {
             if !current.is_empty() {
                 bindings.push(current.trim().to_string());
@@ -419,6 +541,21 @@ fn format_list(values: &[String]) -> String {
     }
 }
 
+fn format_u32_list(values: &[u32]) -> String {
+    if values.is_empty() {
+        "< >".to_string()
+    } else {
+        format!(
+            "<{}>",
+            values
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    }
+}
+
 /// Read-only provider that lists behavior definitions.
 pub struct BehaviorProvider<'a> {
     document: &'a DtsDocument,
@@ -444,6 +581,17 @@ pub struct BehaviorDefinition {
     pub compatible: Option<String>,
     pub binding_cells: Option<u32>,
     pub bindings: Vec<String>,
+    pub description: Option<String>,
+    pub wait_ms: Option<u32>,
+    pub tap_ms: Option<u32>,
+    pub label: Option<String>,
+    pub properties: Vec<NodeProperty>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeProperty {
+    pub name: String,
+    pub raw_value: Option<String>,
 }
 
 fn collect_behaviors(item: &DtItem, acc: &mut Vec<BehaviorDefinition>) {
@@ -455,6 +603,11 @@ fn collect_behaviors(item: &DtItem, acc: &mut Vec<BehaviorDefinition>) {
                     compatible: compatible_value(node),
                     binding_cells: binding_cells_value(node),
                     bindings: binding_list(node),
+                    description: behavior_description(node),
+                    wait_ms: parse_optional_numeric_property(node, "wait-ms"),
+                    tap_ms: parse_optional_numeric_property(node, "tap-ms"),
+                    label: label_value(node),
+                    properties: capture_node_properties(node),
                 });
             }
             for child in &node.children {
@@ -462,6 +615,25 @@ fn collect_behaviors(item: &DtItem, acc: &mut Vec<BehaviorDefinition>) {
             }
         }
         _ => {}
+    }
+}
+
+fn capture_node_properties(node: &DtNode) -> Vec<NodeProperty> {
+    node.properties
+        .iter()
+        .map(|prop| NodeProperty {
+            name: prop.name.clone(),
+            raw_value: normalize_behavior_property_value(&prop.value.raw),
+        })
+        .collect()
+}
+
+fn normalize_behavior_property_value(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.trim_end_matches(';').trim().to_string())
     }
 }
 
@@ -475,7 +647,7 @@ fn compatible_value(node: &DtNode) -> Option<String> {
     node.properties
         .iter()
         .find(|prop| prop.name == "compatible")
-        .map(|prop| prop.value.raw.clone())
+        .map(|prop| trim_string_literal(&prop.value.raw))
 }
 
 fn binding_cells_value(node: &DtNode) -> Option<u32> {
@@ -495,8 +667,26 @@ fn binding_list(node: &DtNode) -> Vec<String> {
     node.properties
         .iter()
         .find(|prop| prop.name == "bindings")
-        .map(|prop| parse_binding_list(&prop.value.raw))
+        .map(|prop| parse_binding_groups(&prop.value.raw))
         .unwrap_or_default()
+}
+
+fn behavior_description(node: &DtNode) -> Option<String> {
+    extract_comment_text(&node.leading_comments)
+}
+
+fn parse_optional_numeric_property(node: &DtNode, name: &str) -> Option<u32> {
+    node.properties
+        .iter()
+        .find(|prop| prop.name == name)
+        .and_then(|prop| parse_numeric_value(&prop.value.raw))
+}
+
+fn label_value(node: &DtNode) -> Option<String> {
+    node.properties
+        .iter()
+        .find(|prop| prop.name == "label")
+        .map(|prop| trim_string_literal(&prop.value.raw))
 }
 
 /// Provider that enumerates combos and exposes their metadata.
@@ -528,6 +718,9 @@ pub struct ComboDefinition {
     pub key_positions: Vec<u32>,
     pub timeout_ms: Option<u32>,
     pub bindings: Vec<LayoutBinding>,
+    pub layers: Vec<u32>,
+    pub description: Option<String>,
+    pub properties: Vec<NodeProperty>,
 }
 
 fn collect_combos(item: &DtItem, parser: &BindingParser, acc: &mut Vec<ComboDefinition>) {
@@ -548,11 +741,16 @@ fn collect_combos(item: &DtItem, parser: &BindingParser, acc: &mut Vec<ComboDefi
                     .into_iter()
                     .map(|raw| parser.parse_with_behavior_rules(&raw))
                     .collect();
+                let layers = parse_layers(node);
+                let description = combo_description(node);
                 acc.push(ComboDefinition {
                     name: node.name.clone(),
                     key_positions,
                     timeout_ms,
                     bindings,
+                    layers,
+                    description,
+                    properties: capture_node_properties(node),
                 });
             }
             for child in &node.children {
@@ -580,6 +778,120 @@ fn parse_key_positions(node: &DtNode) -> Vec<u32> {
 
 fn parse_numeric_value(raw: &str) -> Option<u32> {
     raw.trim_matches(['<', '>', ';', ' ']).parse().ok()
+}
+
+fn parse_layers(node: &DtNode) -> Vec<u32> {
+    node.properties
+        .iter()
+        .find(|prop| prop.name == "layers")
+        .map(|prop| parse_numeric_list(&prop.value.raw))
+        .unwrap_or_default()
+}
+
+fn combo_description(node: &DtNode) -> Option<String> {
+    if let Some(prop) = node
+        .properties
+        .iter()
+        .find(|prop| prop.name == "description")
+    {
+        return Some(trim_string_literal(&prop.value.raw));
+    }
+    extract_comment_text(&node.leading_comments)
+}
+
+fn trim_string_literal(raw: &str) -> String {
+    let trimmed = raw.trim();
+    trimmed.trim_matches('"').trim().to_string()
+}
+
+fn extract_comment_text(comments: &[DtComment]) -> Option<String> {
+    collect_trailing_comment_lines(comments).map(|lines| lines.join("\n"))
+}
+
+fn collect_trailing_comment_lines(comments: &[DtComment]) -> Option<Vec<String>> {
+    let mut lines = Vec::new();
+    let mut started = false;
+    for comment in comments.iter().rev() {
+        match normalize_comment_text(&comment.text) {
+            Some(text) => {
+                started = true;
+                lines.push(text);
+            }
+            None => {
+                if started {
+                    lines.push(String::new());
+                }
+            }
+        }
+    }
+    if !started {
+        return None;
+    }
+    lines.reverse();
+    let start = lines
+        .iter()
+        .position(|line| !line.trim().is_empty())
+        .unwrap_or(0);
+    let end = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .unwrap_or(start);
+    let slice = lines[start..=end].to_vec();
+    Some(slice)
+}
+
+fn normalize_comment_text(text: &str) -> Option<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let content = if trimmed.starts_with("//") {
+        trimmed
+            .trim_start_matches('/')
+            .trim_start_matches('/')
+            .trim()
+    } else if trimmed.starts_with("/*") {
+        trimmed
+            .trim_start_matches("/*")
+            .trim_end_matches("*/")
+            .trim()
+    } else {
+        trimmed
+    };
+    if content.is_empty() {
+        None
+    } else {
+        Some(content.to_string())
+    }
+}
+
+fn parse_numeric_list(raw: &str) -> Vec<u32> {
+    raw.replace('<', " ")
+        .replace('>', " ")
+        .replace(';', " ")
+        .replace(',', " ")
+        .split_whitespace()
+        .filter_map(parse_u32_token)
+        .collect()
+}
+
+fn parse_u32_token(token: &str) -> Option<u32> {
+    if token.is_empty() {
+        return None;
+    }
+    if let Some(stripped) = token
+        .strip_prefix("0x")
+        .or_else(|| token.strip_prefix("0X"))
+    {
+        return u32::from_str_radix(stripped, 16).ok();
+    }
+    if let Some(stripped) = token
+        .strip_prefix("0b")
+        .or_else(|| token.strip_prefix("0B"))
+    {
+        return u32::from_str_radix(stripped, 2).ok();
+    }
+    token.parse::<u32>().ok()
 }
 
 /// High-level keymap document that reuses the provider stack.
