@@ -1,0 +1,12 @@
+[config]
+format_version = "1.0.0"
+default_conflict = "prompt"
+
+[[tasks]]
+id = "conflict-check"
+type = "override"
+path = "layers.base.bindings[0]"
+value = "&kp ESC"
+from = "&kp X"
+target = "layers.base.bindings[0]"
+comment = "forces a conflict when the base layout still has &kp Q"
