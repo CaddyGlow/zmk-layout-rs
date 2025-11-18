@@ -123,6 +123,17 @@ fn tokenize_multiline_define() -> Result<(), LayoutError> {
 }
 
 #[test]
+fn tokenize_multiline_if_directive() -> Result<(), LayoutError> {
+    let source = "#if defined(FOO) || \\\n    defined(BAR)\n#endif\n";
+    let tokens = TokenStream::new(source).collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens[0].kind, TokenKind::PreprocessorOther);
+    assert!(tokens[0].lexeme.contains("defined(BAR)"));
+    assert_eq!(tokens[1].lexeme, "#endif");
+    Ok(())
+}
+
+#[test]
 fn tokenize_bitwise_modifiers() -> Result<(), LayoutError> {
     let source = "mods = <(~(MOD_LSFT|MOD_RSFT))>;";
     let tokens = TokenStream::new(source).collect::<Result<Vec<_>, _>>()?;

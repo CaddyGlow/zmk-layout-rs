@@ -5,21 +5,44 @@ use thiserror::Error;
 
 use super::layout::AdapterLayout;
 
+#[derive(Debug, Default)]
+pub(crate) struct TemplateCapture {
+    pub values: BTreeMap<String, String>,
+    pub fragments: Vec<CapturedFragment>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CapturedFragment {
+    pub key: String,
+    pub start: usize,
+    pub end: usize,
+}
+
 pub fn template_contains_placeholders(source: &str) -> bool {
     source.contains("{{") || source.contains("{%")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TemplateParseMode {
+    StripPlaceholders,
+    FullDocument,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn merge_template_metadata(
     layout: &mut AdapterLayout,
     template_source: &str,
     rendered_source: &str,
 ) -> Result<(), TemplateError> {
-    let captured = capture_template_values(template_source, rendered_source)?;
-    apply_captured_template_values(layout, captured);
+    let TemplateCapture { values, .. } = capture_template_values(template_source, rendered_source)?;
+    apply_captured_template_values(layout, values);
     Ok(())
 }
 
-fn apply_captured_template_values(layout: &mut AdapterLayout, captured: BTreeMap<String, String>) {
+pub(crate) fn apply_captured_template_values(
+    layout: &mut AdapterLayout,
+    captured: BTreeMap<String, String>,
+) {
     const DERIVED_KEYS: &[&str] = &[
         "layer_names_defines",
         "layer_defines",
@@ -47,14 +70,55 @@ fn apply_captured_template_values(layout: &mut AdapterLayout, captured: BTreeMap
     }
 }
 
+pub(crate) fn capture_template_sections(
+    template_source: &str,
+    rendered_source: &str,
+) -> Result<TemplateCapture, TemplateError> {
+    capture_template_values(template_source, rendered_source)
+}
+
+pub(crate) fn strip_template_fragments(
+    rendered_source: &str,
+    fragments: &[CapturedFragment],
+) -> String {
+    let mut output = String::with_capacity(rendered_source.len());
+    let mut cursor = 0;
+    for fragment in fragments {
+        if should_strip_before_parse(&fragment.key) {
+            if cursor < fragment.start {
+                output.push_str(&rendered_source[cursor..fragment.start]);
+            }
+            cursor = fragment.end;
+        }
+    }
+    output.push_str(&rendered_source[cursor..]);
+    output
+}
+
+fn should_strip_before_parse(key: &str) -> bool {
+    matches!(
+        key,
+        "includes"
+            | "resolved_includes"
+            | "custom_devicetree"
+            | "input_listeners"
+            | "input_listeners_dtsi"
+            | "custom_defined_behaviors"
+            | "input_processors"
+            | "system_behaviors_dts"
+            | "key_position_header"
+            | "custom_defined_macros"
+    )
+}
+
 fn capture_template_values(
     template_source: &str,
     rendered_source: &str,
-) -> Result<BTreeMap<String, String>, TemplateError> {
+) -> Result<TemplateCapture, TemplateError> {
     let segments = parse_template_segments(template_source)?;
     let mut cursor = 0;
     let mut pending_placeholder: Option<String> = None;
-    let mut captures = BTreeMap::new();
+    let mut captures = TemplateCapture::default();
 
     for segment in segments {
         match segment {
@@ -67,7 +131,12 @@ fn capture_template_values(
                     let absolute = cursor + offset;
                     if let Some(name) = pending_placeholder.take() {
                         let value = &rendered_source[cursor..absolute];
-                        captures.insert(name, value.to_string());
+                        captures.values.insert(name.clone(), value.to_string());
+                        captures.fragments.push(CapturedFragment {
+                            key: name,
+                            start: cursor,
+                            end: absolute,
+                        });
                     } else if absolute != cursor {
                         return Err(TemplateError::UnexpectedContent {
                             literal: snippet(&literal),
@@ -83,14 +152,26 @@ fn capture_template_values(
             }
             TemplateSegment::Placeholder(name) => {
                 if let Some(previous) = pending_placeholder.replace(name.clone()) {
-                    captures.insert(previous, String::new());
+                    captures.values.insert(previous.clone(), String::new());
+                    captures.fragments.push(CapturedFragment {
+                        key: previous,
+                        start: cursor,
+                        end: cursor,
+                    });
                 }
             }
         }
     }
 
     if let Some(name) = pending_placeholder {
-        captures.insert(name, rendered_source[cursor..].to_string());
+        captures
+            .values
+            .insert(name.clone(), rendered_source[cursor..].to_string());
+        captures.fragments.push(CapturedFragment {
+            key: name,
+            start: cursor,
+            end: rendered_source.len(),
+        });
     } else if cursor != rendered_source.len() {
         return Err(TemplateError::TrailingContent {
             trailing: snippet(&rendered_source[cursor..]),

@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use zmk_layout_rs::adapters::{
-    AdapterError, export_standard_file, export_standard_str_with_template,
+    AdapterError, TemplateParseMode, export_standard_file, export_standard_str_with_template_mode,
     import_standard_str_with_template, render_standard_template, template_contains_placeholders,
 };
 use zmk_layout_rs::dts::{DtsDocument, DtsError};
@@ -31,6 +31,9 @@ enum Command {
         /// Optional template to extract metadata placeholders, e.g. includes.
         #[arg(long)]
         template: Option<PathBuf>,
+        /// How to parse the DTS when a template is provided.
+        #[arg(long, value_enum, default_value_t = TemplateMode::Strip)]
+        template_mode: TemplateMode,
     },
     /// Import a standard JSON layout and write a DTS document.
     Import {
@@ -60,15 +63,19 @@ fn run() -> Result<(), AdapterError> {
             dts,
             json,
             template,
+            template_mode,
         } => {
             let source = fs::read_to_string(&dts)?;
-            let document = DtsDocument::parse_str(&source).map_err(DtsError::from)?;
             if let Some(template) = template {
                 let template_source = fs::read_to_string(template)?;
-                let contents =
-                    export_standard_str_with_template(&document, &source, &template_source)?;
+                let contents = export_standard_str_with_template_mode(
+                    &source,
+                    &template_source,
+                    template_mode.into(),
+                )?;
                 fs::write(json, contents)?;
             } else {
+                let document = DtsDocument::parse_str(&source).map_err(DtsError::from)?;
                 export_standard_file(&document, json)?;
             }
         }
@@ -89,4 +96,19 @@ fn run() -> Result<(), AdapterError> {
         }
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum TemplateMode {
+    Strip,
+    Full,
+}
+
+impl From<TemplateMode> for TemplateParseMode {
+    fn from(value: TemplateMode) -> Self {
+        match value {
+            TemplateMode::Strip => TemplateParseMode::StripPlaceholders,
+            TemplateMode::Full => TemplateParseMode::FullDocument,
+        }
+    }
 }

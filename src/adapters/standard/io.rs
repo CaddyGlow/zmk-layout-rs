@@ -6,7 +6,10 @@ use super::{
     AdapterError,
     layout::AdapterLayout,
     render::render_layout_with_template,
-    template::{merge_template_metadata, template_contains_placeholders},
+    template::{
+        TemplateCapture, TemplateParseMode, apply_captured_template_values,
+        capture_template_sections, strip_template_fragments, template_contains_placeholders,
+    },
 };
 
 /// Export a document to the standard JSON format.
@@ -26,12 +29,33 @@ pub fn export_standard_file(
 
 /// Export a document to the standard JSON format while extracting template metadata.
 pub fn export_standard_str_with_template(
-    document: &DtsDocument,
     rendered_source: &str,
     template_source: &str,
 ) -> Result<String, AdapterError> {
-    let mut layout = AdapterLayout::from_document(document);
-    merge_template_metadata(&mut layout, template_source, rendered_source)?;
+    export_standard_str_with_template_mode(
+        rendered_source,
+        template_source,
+        TemplateParseMode::StripPlaceholders,
+    )
+}
+
+/// Export a document to JSON with template metadata using the requested parse mode.
+pub fn export_standard_str_with_template_mode(
+    rendered_source: &str,
+    template_source: &str,
+    mode: TemplateParseMode,
+) -> Result<String, AdapterError> {
+    let TemplateCapture { values, fragments } =
+        capture_template_sections(template_source, rendered_source)?;
+    let source_to_parse = match mode {
+        TemplateParseMode::StripPlaceholders => {
+            strip_template_fragments(rendered_source, &fragments)
+        }
+        TemplateParseMode::FullDocument => rendered_source.to_string(),
+    };
+    let document = DtsDocument::parse_str(&source_to_parse).map_err(DtsError::from)?;
+    let mut layout = AdapterLayout::from_document(&document);
+    apply_captured_template_values(&mut layout, values);
     Ok(layout.to_standard_json()?)
 }
 
@@ -42,9 +66,8 @@ pub fn export_standard_file_with_template(
     json_path: impl AsRef<Path>,
 ) -> Result<(), AdapterError> {
     let rendered = fs::read_to_string(&dts_path)?;
-    let document = DtsDocument::parse_str(&rendered).map_err(DtsError::from)?;
     let template = fs::read_to_string(template_path)?;
-    let json = export_standard_str_with_template(&document, &rendered, &template)?;
+    let json = export_standard_str_with_template(&rendered, &template)?;
     fs::write(json_path, json)?;
     Ok(())
 }

@@ -1,9 +1,10 @@
 use std::{error::Error, fs, path::PathBuf};
 
-use serde_json::json;
+use serde_json::{Value, json};
 use zmk_layout_rs::adapters::{
-    AdapterLayout, export_standard_file, export_standard_str, import_standard_file,
-    import_standard_str, import_standard_str_with_template, render_standard_template,
+    AdapterLayout, export_standard_file, export_standard_str, export_standard_str_with_template,
+    import_standard_file, import_standard_str, import_standard_str_with_template,
+    render_standard_template,
 };
 use zmk_layout_rs::dts::DtsDocument;
 use zmk_layout_rs::providers::KeymapProvider;
@@ -316,5 +317,88 @@ fn template_preserves_spacing() -> Result<(), Box<dyn Error>> {
     assert!(rendered.contains("/* Header Comment */\n\n/* Second Comment */"));
     assert!(rendered.contains("/* Second Comment */\n\n#define LAYER_default_layer 0"));
     assert!(rendered.contains("#define LAYER_default_layer 0\n\n/* Footer Comment */"));
+    Ok(())
+}
+
+#[test]
+fn template_export_strips_metadata_sections_before_parse() -> Result<(), Box<dyn Error>> {
+    const TEMPLATE: &str = r#"/* Includes */
+{{includes}}
+
+/* Custom Device-tree */
+{{custom_devicetree}}
+
+/ {
+    keymap {
+        compatible = "zmk,keymap";
+
+{{rendered_layers}}
+    };
+};
+"#;
+
+    const RENDERED: &str = r#"/* Includes */
+#if defined(TEST) || \
+    defined(TEST2)
+#error "naming conflict"
+#endif
+
+/* Custom Device-tree */
+&mmv {
+#if defined(FOO) || \
+    defined(BAR)
+#error "guard"
+#endif
+};
+
+/ {
+    keymap {
+        compatible = "zmk,keymap";
+
+        base {
+            bindings = < &kp A &kp B >;
+        };
+    };
+};
+"#;
+
+    let json = export_standard_str_with_template(RENDERED, TEMPLATE)?;
+    let parsed: Value = serde_json::from_str(&json)?;
+
+    let metadata = parsed
+        .get("metadata")
+        .and_then(|value| value.as_object())
+        .expect("metadata captured");
+    assert!(
+        metadata
+            .get("includes")
+            .and_then(|value| value.as_str())
+            .expect("includes stored")
+            .contains("#if defined(TEST) || \\")
+    );
+    assert!(
+        metadata
+            .get("custom_devicetree")
+            .and_then(|value| value.as_str())
+            .expect("custom devicetree stored")
+            .contains("#if defined(FOO) || \\")
+    );
+
+    let layers = parsed
+        .get("layers")
+        .and_then(|value| value.as_array())
+        .expect("layers present");
+    assert_eq!(layers.len(), 1);
+    let bindings = layers[0]
+        .get("bindings")
+        .and_then(|value| value.as_array())
+        .expect("bindings array");
+    assert_eq!(
+        bindings
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["&kp A", "&kp B"]
+    );
     Ok(())
 }

@@ -221,7 +221,8 @@ enum RawToken {
     #[token("#define", callback = preprocessor_define, priority = 400)]
     PreprocessorDefine,
     #[regex(
-        r"#(?:if|ifdef|ifndef|elif|else|endif|undef|pragma)[^\n]*",
+        r"#\s*(?:if|ifdef|ifndef|elif|else|endif|undef|pragma|error|warning)",
+        preprocessor_other,
         priority = 380
     )]
     PreprocessorOther,
@@ -287,6 +288,10 @@ fn consume_until(lexer: &mut Lexer<'_, RawToken>, needle: &str) -> Option<()> {
 }
 
 fn preprocessor_define(lexer: &mut Lexer<'_, RawToken>) -> Option<()> {
+    consume_directive(lexer, true)
+}
+
+fn preprocessor_other(lexer: &mut Lexer<'_, RawToken>) -> Option<()> {
     consume_directive(lexer, true)
 }
 
