@@ -1,0 +1,846 @@
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+
+use serde_json::Value;
+
+use super::{
+    layout::AdapterLayout,
+    types::{
+        BehaviorSpec, ComboSpec, InputListenerNodeSpec, InputListenerSpec, InputProcessorSpec,
+        LayerSpec, MacroSpec,
+    },
+};
+
+pub(crate) fn render_layout_with_template(layout: &AdapterLayout, template: &str) -> String {
+    let mut replacements = build_template_replacements(layout);
+    let has_explicit_includes = layout.metadata.extras.contains_key("includes");
+    normalize_template_includes(template, &mut replacements, has_explicit_includes);
+    apply_template(template, &replacements)
+}
+
+fn build_template_replacements(layout: &AdapterLayout) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    let extras = &layout.metadata.extras;
+
+    let keyboard_name = metadata_text(extras, "keyboard_name")
+        .or_else(|| layout.metadata.title.clone())
+        .unwrap_or_else(|| "ZMK Layout".to_string());
+    insert_placeholder(&mut map, "keyboard_name", keyboard_name);
+
+    let includes = metadata_text(extras, "includes")
+        .or_else(|| metadata_text(extras, "resolved_includes"))
+        .unwrap_or_default();
+    insert_placeholder(&mut map, "includes", includes.clone());
+    insert_placeholder(&mut map, "resolved_includes", includes);
+
+    let layer_defines = render_layer_defines(&layout.layers);
+    insert_placeholder(&mut map, "layer_names_defines", layer_defines.clone());
+    insert_placeholder(&mut map, "layer_defines", layer_defines);
+
+    let rendered_layers = render_layers_only(&layout.layers);
+    insert_placeholder(&mut map, "rendered_layers", rendered_layers);
+
+    let keymap_node = render_keymap_node(&layout.layers);
+    insert_placeholder(&mut map, "keymap_node", keymap_node);
+
+    let macros_block = render_macros(&layout.macros);
+    insert_placeholder(&mut map, "macros", macros_block.clone());
+    insert_placeholder(&mut map, "user_macros_dtsi", macros_block);
+
+    let behaviors_block = render_behaviors(layout.behaviors.iter());
+    insert_placeholder(&mut map, "behaviors", behaviors_block.clone());
+    insert_placeholder(&mut map, "user_behaviors_dtsi", behaviors_block);
+
+    if let Some((combos_root, combos_body)) = render_combos(&layout.combos) {
+        insert_placeholder(&mut map, "combos", combos_root);
+        insert_placeholder(&mut map, "combos_dtsi", combos_body);
+    } else {
+        insert_placeholder(&mut map, "combos", String::new());
+        insert_placeholder(&mut map, "combos_dtsi", String::new());
+    }
+
+    let rendered_input_listeners = render_input_listeners(&layout.input_listeners);
+    for key in [
+        "custom_devicetree",
+        "input_listeners",
+        "input_listeners_dtsi",
+        "custom_defined_behaviors",
+        "input_processors",
+        "system_behaviors_dts",
+        "key_position_header",
+        "custom_defined_macros",
+    ] {
+        let value = match metadata_text(extras, key) {
+            Some(text) => text,
+            None if key == "input_listeners" || key == "input_listeners_dtsi" => {
+                rendered_input_listeners.clone()
+            }
+            None => String::new(),
+        };
+        insert_placeholder(&mut map, key, value);
+    }
+
+    map
+}
+
+fn normalize_template_includes(
+    template: &str,
+    replacements: &mut BTreeMap<String, String>,
+    has_explicit_includes: bool,
+) {
+    if has_explicit_includes {
+        return;
+    }
+    let template_includes = collect_template_include_lines(template);
+    if template_includes.is_empty() {
+        return;
+    }
+    let Some(current_value) = replacements
+        .get("includes")
+        .cloned()
+        .or_else(|| replacements.get("resolved_includes").cloned())
+    else {
+        return;
+    };
+    if current_value.trim().is_empty() {
+        return;
+    }
+    let filtered = filter_includes_not_in_template(&current_value, &template_includes);
+    for key in ["includes", "resolved_includes"] {
+        if replacements.contains_key(key) {
+            replacements.insert(key.to_string(), filtered.clone());
+        }
+        let content_key = format!("content.{key}");
+        if replacements.contains_key(&content_key) {
+            replacements.insert(content_key, filtered.clone());
+        }
+    }
+}
+
+fn collect_template_include_lines(template: &str) -> BTreeSet<String> {
+    template
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("#include") && !trimmed.contains("{{") {
+                Some(trimmed.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn filter_includes_not_in_template(value: &str, template_lines: &BTreeSet<String>) -> String {
+    let mut filtered = Vec::new();
+    for line in value.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || !template_lines.contains(trimmed) {
+            filtered.push(line.to_string());
+        }
+    }
+
+    let mut result = filtered.join("\n");
+    if value.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+fn insert_placeholder(map: &mut BTreeMap<String, String>, key: &str, value: String) {
+    map.insert(key.to_string(), value.clone());
+    map.insert(format!("content.{key}"), value);
+}
+
+fn metadata_text(extras: &BTreeMap<String, Value>, key: &str) -> Option<String> {
+    extras.get(key).map(|value| match value {
+        Value::String(text) => text.clone(),
+        Value::Number(num) => num.to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|item| match item {
+                Value::String(text) => Some(text.clone()),
+                Value::Number(num) => Some(num.to_string()),
+                Value::Bool(flag) => Some(flag.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Object(obj) => serde_json::to_string_pretty(obj).unwrap_or_default(),
+        Value::Null => String::new(),
+    })
+}
+
+fn render_layer_defines(layers: &[LayerSpec]) -> String {
+    if layers.is_empty() {
+        return String::new();
+    }
+    let mut output = String::new();
+    for (idx, layer) in layers.iter().enumerate() {
+        let define_name = sanitize_define_name(&layer.name);
+        output.push_str(&format!("#define LAYER_{} {}\n", define_name, idx));
+    }
+    if output.ends_with('\n') {
+        output.pop();
+    }
+    output
+}
+
+fn render_layers_only(layers: &[LayerSpec]) -> String {
+    if layers.is_empty() {
+        return String::new();
+    }
+    let mut output = String::new();
+    for layer in layers {
+        output.push_str("        ");
+        output.push_str(&layer.name);
+        output.push_str(" {\n");
+        output.push_str("            bindings = ");
+        output.push_str(&format_list(&layer.bindings));
+        output.push_str(";\n        };\n");
+    }
+    output
+}
+
+fn render_keymap_node(layers: &[LayerSpec]) -> String {
+    let mut output = String::new();
+    output.push_str("keymap {\n    compatible = \"zmk,keymap\";\n");
+    if !layers.is_empty() {
+        let rendered = render_layers_only(layers);
+        output.push('\n');
+        output.push_str(rendered.trim_end());
+        output.push('\n');
+    }
+    output.push_str("};\n");
+    output
+}
+
+fn render_behaviors<'a>(behaviors: impl Iterator<Item = &'a BehaviorSpec>) -> String {
+    let mut blocks = Vec::new();
+    for behavior in behaviors {
+        let mut block = String::new();
+        push_comment_lines(&mut block, "        ", &behavior.description);
+        block.push_str("        ");
+        block.push_str(&behavior.name);
+        block.push_str(": ");
+        block.push_str(&behavior.name);
+        block.push_str(" {\n");
+        let mut rendered = HashSet::new();
+        for name in behavior.resolved_property_order() {
+            if render_behavior_property(behavior, &name, &mut block) {
+                rendered.insert(name);
+            }
+        }
+        for name in behavior.default_property_order() {
+            if rendered.contains(&name) {
+                continue;
+            }
+            if render_behavior_property(behavior, &name, &mut block) {
+                rendered.insert(name);
+            }
+        }
+        block.push_str("        };\n");
+        blocks.push(block);
+    }
+    blocks.join("\n")
+}
+
+fn render_behavior_property(behavior: &BehaviorSpec, name: &str, block: &mut String) -> bool {
+    match name {
+        "label" => {
+            if let Some(label) = behavior.label.as_deref() {
+                block.push_str("            label = \"");
+                block.push_str(label);
+                block.push_str("\";\n");
+                return true;
+            }
+        }
+        "compatible" => {
+            if let Some(compat) = &behavior.compatible {
+                block.push_str("            compatible = \"");
+                block.push_str(compat);
+                block.push_str("\";\n");
+                return true;
+            }
+        }
+        "#binding-cells" => {
+            if let Some(binding_cells) = behavior.binding_cells {
+                block.push_str("            #binding-cells = <");
+                block.push_str(&binding_cells.to_string());
+                block.push_str(">;\n");
+                return true;
+            }
+        }
+        "bindings" => {
+            if let Some(rendered) = render_behavior_bindings(&behavior.bindings) {
+                block.push_str(&rendered);
+                return true;
+            }
+        }
+        _ => {
+            if let Some(value) = behavior.properties.get(name) {
+                block.push_str("            ");
+                block.push_str(name);
+                if value.trim().is_empty() {
+                    block.push_str(";\n");
+                } else {
+                    block.push_str(" = ");
+                    block.push_str(value);
+                    block.push_str(";\n");
+                }
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn render_behavior_bindings(bindings: &[String]) -> Option<String> {
+    if bindings.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for binding in bindings {
+        let trimmed = binding.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        parts.push(format!("<{}>", trimmed));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!("            bindings = {};\n", parts.join(", ")))
+}
+
+fn push_comment_lines(block: &mut String, indent: &str, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    for line in text.split('\n') {
+        let trimmed = line.trim();
+        block.push_str(indent);
+        block.push_str("//");
+        if !trimmed.is_empty() {
+            block.push(' ');
+            block.push_str(trimmed);
+        }
+        block.push('\n');
+    }
+}
+
+fn push_comment_lines_with_depth(block: &mut String, depth: usize, text: &str) {
+    let indent = "    ".repeat(depth);
+    push_comment_lines(block, &indent, text);
+}
+
+fn render_combos(combos: &[ComboSpec]) -> Option<(String, String)> {
+    if combos.is_empty() {
+        return None;
+    }
+    let mut inner = String::new();
+    inner.push_str("combos {\n");
+    inner.push_str("    compatible = \"zmk,combos\";\n");
+    for combo in combos {
+        let node_name = sanitize_node_identifier(&combo.name);
+        push_comment_lines(&mut inner, "    ", &combo.description);
+        inner.push_str("    ");
+        inner.push_str(&node_name);
+        inner.push_str(" {\n");
+        let mut rendered = HashSet::new();
+        for name in combo.resolved_property_order() {
+            if render_combo_property(combo, &name, &mut inner) {
+                rendered.insert(name);
+            }
+        }
+        for name in combo.default_property_order() {
+            if rendered.contains(&name) {
+                continue;
+            }
+            if render_combo_property(combo, &name, &mut inner) {
+                rendered.insert(name);
+            }
+        }
+        inner.push_str("    };\n\n");
+    }
+    if inner.ends_with("\n\n") {
+        inner.truncate(inner.len() - 1);
+    }
+    inner.push_str("};\n");
+
+    let combos_root = format!("/ {{\n{}\n}};\n", indent_block(inner.trim_end(), 4));
+    Some((combos_root, inner))
+}
+
+fn render_combo_property(combo: &ComboSpec, name: &str, block: &mut String) -> bool {
+    match name {
+        "timeout-ms" => {
+            if let Some(timeout) = combo.timeout_ms {
+                block.push_str("        timeout-ms = <");
+                block.push_str(&timeout.to_string());
+                block.push_str(">;\n");
+                return true;
+            }
+        }
+        "key-positions" => {
+            if !combo.key_positions.is_empty() {
+                block.push_str("        key-positions = <");
+                block.push_str(
+                    &combo
+                        .key_positions
+                        .iter()
+                        .map(|pos| pos.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
+                block.push_str(">;\n");
+                return true;
+            }
+        }
+        "bindings" => {
+            if let Some(binding_line) = render_combo_bindings(combo) {
+                block.push_str(&binding_line);
+                return true;
+            }
+        }
+        "layers" => {
+            if !combo.layers.is_empty() {
+                block.push_str("        layers = ");
+                block.push_str(&format_compact_u32_list(&combo.layers));
+                block.push_str(";\n");
+                return true;
+            }
+        }
+        _ => {
+            if let Some(value) = combo.property_value(name) {
+                block.push_str("        ");
+                block.push_str(name);
+                if value.trim().is_empty() {
+                    block.push_str(";\n");
+                } else {
+                    block.push_str(" = ");
+                    block.push_str(value);
+                    block.push_str(";\n");
+                }
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn render_combo_bindings(combo: &ComboSpec) -> Option<String> {
+    let binding = combo.binding.as_deref()?.trim();
+    if binding.is_empty() {
+        return None;
+    }
+    Some(format!("        bindings = <{}>;\n", binding))
+}
+
+fn render_macros(macros: &[MacroSpec]) -> String {
+    if macros.is_empty() {
+        return String::new();
+    }
+    let mut blocks = Vec::new();
+    for macro_behavior in macros {
+        let mut block = String::new();
+        push_comment_lines(&mut block, "        ", &macro_behavior.description);
+        block.push_str("        ");
+        block.push_str(&macro_behavior.name);
+        block.push_str(": ");
+        block.push_str(&macro_behavior.name);
+        block.push_str(" {\n");
+        let mut rendered = HashSet::new();
+        for name in macro_behavior.resolved_property_order() {
+            if render_macro_property(macro_behavior, &name, &mut block) {
+                rendered.insert(name);
+            }
+        }
+        for name in macro_behavior.default_property_order() {
+            if rendered.contains(&name) {
+                continue;
+            }
+            if render_macro_property(macro_behavior, &name, &mut block) {
+                rendered.insert(name);
+            }
+        }
+        block.push_str("        };\n");
+        blocks.push(block);
+    }
+    blocks.join("\n")
+}
+
+fn render_macro_property(macro_behavior: &MacroSpec, name: &str, block: &mut String) -> bool {
+    match name {
+        "label" => {
+            if let Some(label) = macro_behavior.label.as_deref() {
+                block.push_str("            label = \"");
+                block.push_str(label);
+                block.push_str("\";\n");
+                return true;
+            }
+        }
+        "compatible" => {
+            let compatible = macro_behavior
+                .compatible
+                .as_deref()
+                .unwrap_or("zmk,behavior-macro");
+            block.push_str("            compatible = \"");
+            block.push_str(compatible);
+            block.push_str("\";\n");
+            return true;
+        }
+        "#binding-cells" => {
+            let binding_cells = macro_behavior
+                .binding_cells
+                .or_else(|| Some(0))
+                .unwrap_or(0);
+            block.push_str("            #binding-cells = <");
+            block.push_str(&binding_cells.to_string());
+            block.push_str(">;\n");
+            return true;
+        }
+        "tap-ms" => {
+            if let Some(tap) = macro_behavior.tap_ms {
+                block.push_str("            tap-ms = <");
+                block.push_str(&tap.to_string());
+                block.push_str(">;\n");
+                return true;
+            }
+        }
+        "wait-ms" => {
+            if let Some(wait) = macro_behavior.wait_ms {
+                block.push_str("            wait-ms = <");
+                block.push_str(&wait.to_string());
+                block.push_str(">;\n");
+                return true;
+            }
+        }
+        "bindings" => {
+            if render_macro_bindings(macro_behavior, block) {
+                return true;
+            }
+        }
+        _ => {
+            if let Some(value) = macro_behavior.property_value(name) {
+                block.push_str("            ");
+                block.push_str(name);
+                if value.trim().is_empty() {
+                    block.push_str(";\n");
+                } else {
+                    block.push_str(" = ");
+                    block.push_str(value);
+                    block.push_str(";\n");
+                }
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn render_macro_bindings(macro_behavior: &MacroSpec, block: &mut String) -> bool {
+    if macro_behavior.bindings.is_empty() {
+        return false;
+    }
+    block.push_str("            bindings = <");
+    block.push_str(macro_behavior.bindings[0].trim());
+    block.push_str(">");
+    if macro_behavior.bindings.len() == 1 {
+        block.push_str(";\n");
+    } else {
+        block.push('\n');
+        let last_index = macro_behavior.bindings.len() - 1;
+        for (idx, binding) in macro_behavior.bindings.iter().enumerate().skip(1) {
+            block.push_str("                , <");
+            block.push_str(binding.trim());
+            block.push('>');
+            if idx == last_index {
+                block.push_str(";\n");
+            } else {
+                block.push('\n');
+            }
+        }
+    }
+    true
+}
+
+fn render_input_listeners(listeners: &[InputListenerSpec]) -> String {
+    if listeners.is_empty() {
+        return String::new();
+    }
+    let mut blocks = Vec::new();
+    for listener in listeners {
+        let mut block = String::new();
+        block.push_str(listener.code.trim());
+        block.push_str(" {\n");
+        let mut rendered = HashSet::new();
+        for name in listener.resolved_property_order() {
+            if render_input_listener_property(listener, &name, &mut block) {
+                rendered.insert(name);
+            }
+        }
+        for name in listener.default_property_order() {
+            if rendered.contains(&name) {
+                continue;
+            }
+            if render_input_listener_property(listener, &name, &mut block) {
+                rendered.insert(name);
+            }
+        }
+        for node in &listener.nodes {
+            if let Some(description) = node.description.as_ref() {
+                push_comment_lines_with_depth(&mut block, 1, description);
+            }
+            append_listener_indent(&mut block, 1);
+            block.push_str(&node.code);
+            block.push_str(" {\n");
+            let mut rendered_node = HashSet::new();
+            for name in node.resolved_property_order() {
+                if render_input_listener_node_property(node, &name, &mut block) {
+                    rendered_node.insert(name);
+                }
+            }
+            for name in node.default_property_order() {
+                if rendered_node.contains(&name) {
+                    continue;
+                }
+                if render_input_listener_node_property(node, &name, &mut block) {
+                    rendered_node.insert(name);
+                }
+            }
+            append_listener_indent(&mut block, 1);
+            block.push_str("};\n");
+        }
+        block.push_str("};\n");
+        blocks.push(block);
+    }
+    blocks.join("\n")
+}
+
+fn render_input_listener_property(
+    listener: &InputListenerSpec,
+    name: &str,
+    block: &mut String,
+) -> bool {
+    match name {
+        "input-processors" => {
+            if listener.input_processors.is_empty() {
+                return false;
+            }
+            append_listener_indent(block, 1);
+            block.push_str("input-processors = ");
+            block.push_str(&render_input_processor_list(&listener.input_processors));
+            block.push_str(";\n");
+            true
+        }
+        _ => {
+            if let Some(value) = listener.properties.get(name) {
+                append_listener_indent(block, 1);
+                block.push_str(name);
+                if value.trim().is_empty() {
+                    block.push_str(";\n");
+                } else {
+                    block.push_str(" = ");
+                    block.push_str(value);
+                    block.push_str(";\n");
+                }
+                true
+            } else {
+                false
+            }
+        }
+    }
+}
+
+fn render_input_listener_node_property(
+    node: &InputListenerNodeSpec,
+    name: &str,
+    block: &mut String,
+) -> bool {
+    match name {
+        "layers" => {
+            if node.layers.is_empty() {
+                return false;
+            }
+            append_listener_indent(block, 2);
+            block.push_str("layers = <");
+            block.push_str(
+                &node
+                    .layers
+                    .iter()
+                    .map(|layer| layer.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+            block.push_str(">;\n");
+            true
+        }
+        "input-processors" => {
+            if node.input_processors.is_empty() {
+                return false;
+            }
+            append_listener_indent(block, 2);
+            block.push_str("input-processors = ");
+            block.push_str(&render_input_processor_list(&node.input_processors));
+            block.push_str(";\n");
+            true
+        }
+        _ => {
+            if let Some(value) = node.properties.get(name) {
+                append_listener_indent(block, 2);
+                block.push_str(name);
+                if value.trim().is_empty() {
+                    block.push_str(";\n");
+                } else {
+                    block.push_str(" = ");
+                    block.push_str(value);
+                    block.push_str(";\n");
+                }
+                true
+            } else {
+                false
+            }
+        }
+    }
+}
+
+fn append_listener_indent(buffer: &mut String, depth: usize) {
+    for _ in 0..depth {
+        buffer.push_str("    ");
+    }
+}
+
+fn render_input_processor_list(processors: &[InputProcessorSpec]) -> String {
+    processors
+        .iter()
+        .map(|processor| {
+            let mut tokens = Vec::new();
+            tokens.push(processor.code.trim().to_string());
+            for param in &processor.params {
+                let rendered = render_input_processor_param(param);
+                if !rendered.is_empty() {
+                    tokens.push(rendered);
+                }
+            }
+            format!("<{}>", tokens.join(" "))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn render_input_processor_param(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Number(num) => num.to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Null => "null".to_string(),
+        Value::Array(_) | Value::Object(_) => serde_json::to_string(value).unwrap_or_default(),
+    }
+}
+
+fn format_list(items: &[String]) -> String {
+    if items.is_empty() {
+        "< >".to_string()
+    } else {
+        format!("< {} >", items.join(" "))
+    }
+}
+
+fn indent_block(text: &str, spaces: usize) -> String {
+    let indent = " ".repeat(spaces);
+    text.lines()
+        .map(|line| {
+            if line.is_empty() {
+                String::new()
+            } else {
+                format!("{indent}{line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_compact_u32_list(values: &[u32]) -> String {
+    if values.is_empty() {
+        "<>".to_string()
+    } else {
+        format!(
+            "<{}>",
+            values
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    }
+}
+
+fn sanitize_define_name(name: &str) -> String {
+    let trimmed = if name.len() >= 6 && name[..6].eq_ignore_ascii_case("layer_") {
+        &name[6..]
+    } else {
+        name
+    };
+    let mut result = String::new();
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() {
+            result.push(ch);
+            continue;
+        }
+        result.push('_');
+    }
+    if result.is_empty() {
+        "LAYER".to_string()
+    } else {
+        result
+    }
+}
+
+fn sanitize_node_identifier(name: &str) -> String {
+    let mut result = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            result.push(ch);
+        } else {
+            result.push('_');
+        }
+    }
+    if result.is_empty() {
+        "node".to_string()
+    } else {
+        result
+    }
+}
+
+fn apply_template(template: &str, replacements: &BTreeMap<String, String>) -> String {
+    let mut output = String::with_capacity(template.len());
+    let mut cursor = 0;
+    while let Some(start) = template[cursor..].find("{{") {
+        let absolute_start = cursor + start;
+        output.push_str(&template[cursor..absolute_start]);
+        let after_start = absolute_start + 2;
+        if let Some(end) = template[after_start..].find("}}") {
+            let absolute_end = after_start + end;
+            let key = template[after_start..absolute_end].trim();
+            let normalized = key.split_whitespace().collect::<String>();
+            let content_variant = normalized.strip_prefix("content.").map(|s| s.to_string());
+            if let Some(replacement) = replacements.get(&normalized).cloned().or_else(|| {
+                content_variant
+                    .as_ref()
+                    .and_then(|variant| replacements.get(variant).cloned())
+            }) {
+                output.push_str(&replacement);
+                cursor = absolute_end + 2;
+            } else {
+                output.push_str(&template[absolute_start..absolute_end + 2]);
+                cursor = absolute_end + 2;
+            }
+        } else {
+            output.push_str(&template[absolute_start..]);
+            return output;
+        }
+    }
+    output.push_str(&template[cursor..]);
+    output
+}
