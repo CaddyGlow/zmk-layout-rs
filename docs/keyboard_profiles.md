@@ -1,134 +1,205 @@
-# Keyboard Profile Specification
+# Keyboard Profile Specification (TOML)
 
-This document explains what we mean by a **keyboard profile** inside
-`zmk-layout-rs`, what problems it solves, and how to keep profiles simple while
-still capturing everything we need to flash dependable firmware.
+Keyboard profiles are single TOML documents that capture everything the firmware
+builder and layout tools need to know about a keyboard. This file replaces the
+earlier ad-hoc YAML folders so we can describe keyboards with one canonical,
+versioned document.
 
-## Goals
-- Single source of truth for a keyboard’s hardware facts, preferred firmware,
-  behavior catalog, macros/combos, and layout templates.
-- Keep manifests (`firmware_profiles/*.toml`) declarative by pointing at the
-  correct profile instead of re‑describing the keyboard in every workflow.
-- Provide enough structure for tooling (CLI, GUI, docs) without building a
-  complex schema that is hard to maintain.
+## Design Goals
 
-The `example_profile/` directory already demonstrates these ideas for the Glove80
-and Corne. The spec below formalizes the minimum expectations so new keyboards
-can follow the same pattern.
+- **Single source of truth** – manifests and CLIs reference one file instead of
+  duplicating hardware or firmware data.
+- **Human friendly TOML** – tables and arrays are enough for lists such as
+  controllers, flash methods, or combo definitions; no YAML/JSON required.
+- **Small required surface** – metadata, hardware, firmware, and layout tables
+  are mandatory; everything else can be omitted when a keyboard does not need
+  it.
 
-## Directory Structure
+## Top-Level Structure
 
-A keyboard profile is a folder that carries a root YAML file (e.g.
-`example_profile/glove80.yaml` or `example_profile/glove80/main.yaml`) plus
-referenced components:
+Every profile must define at least these keys:
 
-```
-<keyboard>/
-├── main.yaml          # Entry point referenced by tooling/manifests
-├── hardware.yaml      # Physical keyboard description
-├── firmwares.yaml     # Supported firmware branches/tags
-├── strategies.yaml    # Allowed build methods/toolchains
-├── behaviors.yaml     # Behavior/macro catalog
-├── keymap.yaml        # Formatting + template metadata
-└── config/…           # Shared templates, macros, combos, includes
-```
+```toml
+keyboard = "glove80"  # slug referenced by CLI/manifest
+version = 1           # schema version for this profile
 
-The YAML loader only needs to support `includes` so profiles can stay modular.
-Simple keyboards can keep everything in a single `<keyboard>.yaml`; larger
-keyboards can drop files next to `main.yaml` the way `example_profile/glove80/`
-does.
+[metadata]            # required
+[hardware]            # required
+[firmware]            # required
+[layout]              # required
 
-## Required Top-Level Fields
-
-Every root YAML file must provide these keys:
-
-| Field          | Purpose                                                        |
-|----------------|----------------------------------------------------------------|
-| `keyboard`     | Stable identifier (used by manifests and the CLI).             |
-| `description`  | Human-readable summary.                                        |
-| `vendor`       | Manufacturer/designer attribution.                             |
-| `key_count`    | Integer number of physical keys.                               |
-| `is_split`     | Boolean – informs tooling about halves vs. monolithic boards.  |
-| `includes`     | Ordered list of component YAML files to merge.                 |
-
-Optional but recommended:
-
-- `compile_methods`: List of build strategies (`method_type`, repo/branch, and
-  board/shield defaults). `example_profile/corne.yaml` shows the structure.
-- `flash_methods`: Enumerates USB/DFU/etc. flashing recipes.
-- `firmwares`: Inline firmware catalog if you do not split into
-  `firmwares.yaml`.
-- `keymap`: Formatting hints plus template file (`keymap_dtsi_file`) used
-  by `zmk-layout` generators.
-
-## Firmware Catalog
-
-Profiles own the list of firmware versions that make sense for that keyboard.
-Each entry should describe at minimum:
-
-```yaml
-firmwares:
-  v25.05:
-    version: "v25.05"
-    description: "Stable MoErgo firmware v25.05"
-    build_options:
-      repository: "moergo-sc/zmk"
-      branch: "v25.05"
-    # Optional overrides
-    kconfig: { ... }        # per-firmware config knobs
-    combos: [ ... ]         # extra combos enabled only on this firmware
-    macros: [ ... ]         # firmware-defined macros
+# Optional sections
+[[behaviors]]
+[[combos]]
+[[macros]]
 ```
 
-Firmware metadata feeds both the layout tooling (to render version pickers or
-warnings) and the manifest (`firmware_profiles/*.toml`), which only needs the
-default firmware id plus a pointer back to the profile (see
-`firmware_profiles/glove80.toml` → `profile = "keyboards/glove80/main.yaml"`).
+If a keyboard does not use combos or macros, simply omit those arrays.
 
-## Hardware + Layout Metadata
+## Section Reference
 
-`hardware.yaml` captures everything that does not change per build:
+### `metadata`
 
-- Physical key order/rows (`keymap.formatting.rows`).
-- Flash/DFU instructions (USB queries, timeouts, mass storage paths).
-- Build configuration (board/shield combinations, `CONFIG_ZMK_SPLIT_ROLE`
-  definitions, artifact naming).
+```toml
+[metadata]
+name = "MoErgo Glove80"
+vendor = "MoErgo"
+description = "Split ergonomic column-staggered keyboard"
+homepage = "https://www.moergo.com"
+tags = ["split", "wireless"]
+```
 
-`keymap.yaml` records serializer hints and includes the Devicetree template for
-layout generation. These files let the CLI render consistent keymaps without
-relying on ad-hoc scripts.
+Fields:
+- `name` *(string, required)*
+- `vendor` *(string, required)*
+- `description`, `homepage`, `tags` *(optional)*
 
-## Combos, Behaviors, Macros
+### `hardware`
 
-Keyboard-specific combos or macros live under `config/` (shared for all
-keyboards) or in the profile folder itself. To keep the spec lightweight:
+```toml
+[hardware]
+key_count = 80
+is_split = true
+controllers = ["nrf52840"]
 
-- Use `behaviors.yaml` to enumerate reusable behaviors/macros. Each entry should
-  include a name, `code`, description, and expected parameters (see
-  `example_profile/glove80/behaviors.yaml` for a concrete list).
-- Combos that are part of the “stock” layout can ship as YAML fragments inside
-  `config/common/*.yaml`, then be referenced from `includes`.
-- Firmware‑specific combos/macros may sit under each firmware entry (e.g.
-  `firmwares.pr36.combos = [...]`) so tooling can toggle them when that firmware
-  is selected.
+[[hardware.boards]]
+id = "glove80_lh"
+role = "left"
 
-Because everything is plain YAML/TOML, we can parse the same structures inside
-Rhai scripts, CLI commands, or future GUIs without introducing yet another
-format.
+[[hardware.boards]]
+id = "glove80_rh"
+role = "right"
 
-## Keeping It Simple
+[[hardware.flash]]
+method = "usb"
+device_query = "serial~=GLV80-.* and removable=true"
+mount_timeout = 120
+copy_timeout = 60
+sync_after_copy = true
 
-- Favor descriptive text over deeply nested schemas. Most sections only need a
-  `method_type`, `repository`, `branch`, and optional maps for environment or
-  Kconfig overrides.
-- Use shared includes (`example_profile/config/all.yaml`) for items that span
-  multiple keyboards (standard behaviors, default macros, template paths).
-- If a keyboard does not require a concept (e.g., no special flash modes), omit
-  the section entirely; defaults kick in downstream.
-- When in doubt, match the structure already checked into
-  `example_profile/glove80/`—new keyboards can copy that folder, delete unused
-  pieces, and fill in their specifics.
+[hardware.build_defaults.cmake]
+CONFIG_ZMK_SPLIT_ROLE = "\"left\""
 
-This spec gives us enough structure to teach tooling how to list keyboards,
-display supported firmware, parameterize builds, and pre-fill combo/macro
-libraries without forcing profile authors to learn a new DSL.
+[hardware.build_defaults.env]
+ARTIFACT_NAME = "glove80_left"
+```
+
+Required fields:
+- `key_count` *(u32)*
+- `is_split` *(bool)*
+
+Optional:
+- `controllers` *(array of strings)*
+- `boards` *(array of tables with `id` and optional `role`/`variant`)*
+- `flash` *(array; each table may define `method`, probe strings, timeouts, etc.)*
+- `build_defaults` *(table; nested `cmake`, `env`, or `kconfig` maps that most
+  builds should inherit)*
+
+### `firmware`
+
+```toml
+[firmware]
+default = "stable"
+
+[firmware.versions.stable]
+repository = "moergo-sc/zmk"
+branch = "v25.05"
+channel = "stable"
+notes = "Vendor recommended release"
+
+[firmware.versions.beta]
+repository = "moergo-sc/zmk"
+branch = "v25.08-beta.1"
+channel = "beta"
+
+[firmware.versions.beta.kconfig]
+CONFIG_ZMK_RGB_UNDERGLOW = true
+```
+
+Required keys:
+- `default` – string referencing one entry under `firmware.versions`.
+- `versions.<id>` – each table supports:
+  - `repository` *(string, required, `owner/repo` or full URL)*
+  - `branch` *(string, required)*
+  - `channel`, `notes` *(optional)*
+  - Nested tables (`kconfig`, `env`, `combos`, `macros`) for per-firmware tweaks.
+
+### `layout`
+
+```toml
+[layout]
+template = "config/templates/keymap.dtsi.j2"
+
+[layout.formatting]
+key_gap = "  "
+base_indent = ""
+
+[[layout.formatting.rows]]
+keys = [0, 1, 2, 3, 4, 5, -1, 40, 41, 42, 43, 44]
+
+[layout.keymap]
+header_includes = ["dt-bindings/zmk/bt.h"]
+```
+
+Required:
+- `template` *(string)* – path to the DTS template used for generation.
+- At least one entry under `layout.formatting.rows`. Represent each row as a
+  table so we can extend it later (e.g., `[[layout.formatting.rows]] keys = [...]`).
+
+Optional:
+- `formatting.key_gap` / `formatting.base_indent`
+- `keymap.header_includes`
+- `renderers.*` for alternative output templates
+
+### Optional Arrays
+
+Each optional array is a list of tables. Keep the structure lightweight so GUIs
+or scripts can display and filter entries easily.
+
+```toml
+[[behaviors]]
+id = "magic"
+code = "&magic"
+description = "Tap to show indicators; hold for layer shift"
+expected_params = 0
+origin = "vendor"
+
+[[combos]]
+name = "copy"
+key_positions = [0, 1]
+binding = "&kp C"
+layers = ["base"]
+timeout_ms = 30
+```
+
+The same pattern applies to `[[macros]]`.
+
+## Minimal Example
+
+```toml
+keyboard = "planck"
+version = 1
+
+[metadata]
+name = "Planck Rev6"
+vendor = "OLKB"
+
+[hardware]
+key_count = 47
+is_split = false
+
+[firmware]
+default = "stable"
+[firmware.versions.stable]
+repository = "zmkfirmware/zmk"
+branch = "main"
+
+[layout]
+template = "config/templates/planck.dtsi.j2"
+[[layout.formatting.rows]]
+keys = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+```
+
+This satisfies the required sections while staying concise. Tooling can enrich
+it with defaults (flash method, board identifier, etc.), but every keyboard uses
+the same TOML vocabulary so manifests and CLIs can resolve them consistently.

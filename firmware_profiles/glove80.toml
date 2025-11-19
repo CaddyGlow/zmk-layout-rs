@@ -14,6 +14,12 @@ kind = "zmk_config"
 image = "zmkfirmware/zmk-build-arm:stable"
 repository = "https://github.com/moergo-sc/zmk.git"
 branch = "v25.05"
+[toolchains.zmk.cache]
+workspace = "read_write"
+build = "read_only"
+[[toolchains.zmk.cache.extra_paths]]
+relative = ".west"
+mode = "read_write"
 
 [keyboards.glove80]
 default_toolchain = "moergo"
@@ -21,7 +27,7 @@ default_toolchain = "moergo"
 [keyboards.glove80.metadata]
 vendor = "MoErgo"
 description = "Derived from zmk-glovebox/keyboards/glove80"
-profile = "keyboards/glove80/main.yaml"
+profile = "keyboard_profiles/glove80.toml"
 default_firmware = "v25.05"
 
 [keyboards.glove80.metadata.firmwares]

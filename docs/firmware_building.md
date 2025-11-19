@@ -70,6 +70,28 @@ The CLI always prints the resolved request (keyboard, toolchain, targets,
 output path, env overrides) followed by a build summary detailing metadata,
 artifacts, log, and build-info paths.
 
+## Caching and Workspace Reuse
+
+ZMK builds require a full west workspace (`.west/`, `app/`, Zephyr modules). To
+avoid re-cloning on every run, enable caching in the manifest:
+
+```toml
+[toolchains.zmk.cache]
+workspace = "read_write"
+build = "read_only"
+[[toolchains.zmk.cache.extra_paths]]
+relative = ".west"
+mode = "read_write"
+```
+
+- `workspace` controls hydration/persist of `app/` and `config/`.
+- `build` persists `build/<target>` outputs for incremental rebuilds.
+- Extra paths let you include other workspace-relative folders; caching `.west`
+  is essential so `west init` runs only the first time.
+
+Cache data lives under `$ZMK_LAYOUT_CACHE_DIR/firmware/<toolchain>` (defaults to
+`~/.cache/zmk-layout`). Pass `--disable-cache` to force a clean workspace.
+
 ## Outputs and Logs
 
 Artifacts are copied into the requested `--output` directory. Every successful

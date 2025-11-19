@@ -150,20 +150,20 @@ Helpful flags:
 - `--combo-conditions` prints a post-run summary of combo tasks that declare `conditions = ["..."]` for easier review.
 
 See the docs for conflict policies, `target` naming guidance, and troubleshooting tips.
-The same document covers the Rhai scripting hooks that power `script` tasks and conflict handlers.
+The same document covers the Lua scripting hooks that power `script` tasks and conflict handlers.
 
-### Standalone Rhai Scripts
+### Standalone Lua Scripts
 
-For one-off automation or debugging, run Rhai scripts directly without creating a full task file:
+For one-off automation or debugging, run Lua scripts directly without creating a full task file:
 
 ```bash
 zmk-layout script \
-  --script tasks/swap_layer_names.rhai \
+  --script tasks/swap_layer_names.lua \
   --layout config/keymap.dts \
   --output config/keymap.generated.dts
 
 # Preview without writing a file
-zmk-layout script --script scratch/update_layers.rhai --layout config/keymap.dts --diff
+zmk-layout script --script scratch/update_layers.lua --layout config/keymap.dts --diff
 ```
 
 Scripts receive the same helper API as `script` tasks (`set_binding`, `set_layer`, `upsert_combo`, etc.) and can emit notes
@@ -187,11 +187,10 @@ The project includes Docker-based toolchains for building ZMK firmware. The MoEr
 
 ## Keyboard Profiles
 
-Keyboard profiles describe a keyboard’s hardware spec, firmware catalog, available
-behaviors/combos, and layout templates in a structured YAML format. They live under
-directories such as `example_profile/` and are referenced by firmware manifests
-(`firmware_profiles/*.toml`). See `docs/keyboard_profiles.md` for the spec and
-guidance on creating new profiles.
+Keyboard profiles are single TOML documents that collect a keyboard’s metadata,
+hardware facts, firmware catalog, and layout template hints. Firmware manifests
+point at these profiles to understand what they are building. See
+`docs/keyboard_profiles.md` for the full specification and authoring guidance.
 
 ### Running a firmware build
 

@@ -1,7 +1,7 @@
-# Layout Customization Plan (Rhai Task Format)
+# Layout Customization Plan (Lua Task Format)
 
 ## Goals
-- Allow users to reapply customizations after base template updates by replaying a declarative task list augmented with sandboxed Rhai scripts (added only after the declarative pipeline is proven).
+- Allow users to reapply customizations after base template updates by replaying a declarative task list augmented with sandboxed Lua scripts (added only after the declarative pipeline is proven).
 - Provide deterministic conflict detection scoped by JSON-style paths, with per-task policies (prompt, override, skip, script).
 - Offer human-friendly configuration file that mixes simple overrides, structured inserts, and optional scripting, all under version control.
 
@@ -18,7 +18,7 @@ metadata = { keyboard = "glove80", maintainer = "community" }  # informational o
 [config]
 format_version = "1.0.0"
 default_conflict = "prompt"        # prompt | override | skip | script
-conflict_script = "scripts/resolve.rhai"
+conflict_script = "scripts/resolve.lua"
 comment = "Community base with my tweaks"
 
 [[tasks]]
@@ -49,17 +49,17 @@ comment = "Move nav layer near the top"
 
 [[tasks]]
 type = "script"
-filename = "custom.rhai"
+filename = "custom.lua"
 target = "scripts.external.custom"
 comment = "Larger set of layer tweaks"
 ```
 
-- _Script tasks & `config.conflict_script`_: deferred until the Rhai integration phase and treated as no-ops earlier.
+- _Script tasks & `config.conflict_script`_: deferred until the Lua integration phase and treated as no-ops earlier.
 
 ### Fields
 - `base`: informational metadata about the template source; the executor requires users to pass the actual master layout (path or template ID) via CLI flags at runtime, so this block is purely for documentation and diff context.
 - `config`: global defaults (`format_version`, `default_conflict`, `conflict_script`, `comment`) controlling behavior and schema compatibility.
-- `tasks`: ordered list; each entry may provide an `id` used in logs, filtering, and prompts. When omitted, the CLI auto-generates a deterministic ID (e.g., slug of `type+target+index`). After generation, IDs must be unique or validation fails. Other fields: `type`, `comment`, `conflict`, type-specific payload (`value`, `name`, `key_positions`, `script`, `filename`, etc.). `type = "script"` uses Rhai once Phase 6 lands.
+- `tasks`: ordered list; each entry may provide an `id` used in logs, filtering, and prompts. When omitted, the CLI auto-generates a deterministic ID (e.g., slug of `type+target+index`). After generation, IDs must be unique or validation fails. Other fields: `type`, `comment`, `conflict`, type-specific payload (`value`, `name`, `key_positions`, `script`, `filename`, etc.). `type = "script"` uses Lua once Phase 6 lands.
 - `path`: only valid for `override` tasks, pointing to the exact structure being replaced.
 - `target`: required for every task; canonical string (JSON pointer / dotted path + optional key data) describing which structure the task owns. Conflict detection watches this for all task types and errors on overlapping targets.
 - `conflict`: overrides the global default per task.
@@ -74,14 +74,16 @@ comment = "Larger set of layer tweaks"
 | `layer-order` | Reorder an existing layer                | `layer`, and either `position` (index) or `before`/`after` markers                       | `layers.order.<layer>`               |
 | `behavior`  | Adjust behavior parameters/settings       | `behavior`, `settings` map (e.g., tapping term, hold trigger)                            | `behaviors.<behavior>`               |
 | `meta`      | Inject metadata (notes, tags) into config | `key`, `value` (stored under a metadata namespace)                                       | `meta.<key>`                         |
-| `script`    | Execute Rhai automation (later phase)     | `filename` or inline `script`, optional `args`                                           | `scripts.<identifier>`               |
+| `script`    | Execute Lua automation (later phase)      | `filename` or inline `script`, optional `args`                                           | `scripts.<identifier>`               |
 
 Guidelines:
 - Every new task type must define how its `target` is constructed so the conflict detector can map user intent to layout regions.
 - Additional actions (e.g., `behavior`, `meta`) can be implemented lazily, but the schema reserves their slot to avoid breaking changes later.
-- `script` tasks remain no-ops until the Rhai phase, yet they still reserve their `target` so future runs can detect overlaps with declarative tasks.
+- `script` tasks remain no-ops until the Lua phase, yet they still reserve their `target` so future runs can detect overlaps with declarative tasks.
 
 ## Implementation Plan (keep it simple)
+
+> **Delivery cadence:** at the end of every phase, update the changelog/task plan with the work completed and create a dedicated git commit capturing that phase. No phase is considered done until both the documentation and commit are in place.
 
 1. **Schema & Parser**  
    - Freeze the TOML schema (`base`, `config`, `tasks`) and document valid task types.  
@@ -109,18 +111,18 @@ Guidelines:
    - Publish concise docs (schema reference, CLI quickstart, conflict troubleshooting, `target` naming guidance).
    - Finalize with **mandatory** `CHANGELOG.md` update + commit capturing coverage/doc improvements.
 
-6. **Rhai Scripting (last)**  
-   - After declarative flow is stable, embed Rhai for `script` tasks and conflict hooks.  
+6. **Lua Scripting (last)**  
+   - After declarative flow is stable, embed Lua for `script` tasks and conflict hooks.  
    - Sandbox runtime, expose helper API, add linting/tests, and update docs with scripting guidance.
    - On completion, **mandatory** `CHANGELOG.md` entry + commit to record scripting milestone.
 
 ## Risks & Mitigations
 - **Schema Drift**: version config schema (`config.format_version`), keep golden fixtures to prevent accidental breaking changes.
-- **Rhai Escape / Non-determinism**: once scripting lands, expose only vetted functions, enforce timeouts/memory caps, freeze random sources, and fuzz APIs for sandbox breakout.
+- **Lua Escape / Non-determinism**: once scripting lands, expose only vetted functions, enforce timeouts/memory caps, freeze random sources, and fuzz APIs for sandbox breakout.
 - **Conflict Fatigue**: deliver clear prompts (path, old/new value, task comment) and allow switching policies mid-run (`--conflicts override`).
 - **Migration Coverage**: document converter limitations, annotate generated tasks with `comment = "TODO verify"`, and provide validation errors for unsupported edits.
 
 ## Next Actions
-1. Draft schema + Rhai API spec (even though execution waits until Phase 6) so task files remain forward-compatible.
+1. Draft schema + Lua API spec (even though execution waits until Phase 6) so task files remain forward-compatible.
 2. Prototype parser/validator using the sample config above.
 3. Spike declarative task orchestrator (override + combo) to validate conflict handling before wiring in scripting.
