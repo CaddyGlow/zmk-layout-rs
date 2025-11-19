@@ -4,6 +4,7 @@ pub mod builder;
 pub mod docker;
 pub mod error;
 pub mod layout;
+pub mod logs;
 pub mod manifest;
 pub mod progress;
 pub mod request;

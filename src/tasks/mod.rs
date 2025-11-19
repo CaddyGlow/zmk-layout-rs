@@ -388,6 +388,60 @@ pub fn apply_tasks_with_options(
     }
 }
 
+/// Result of executing a standalone script.
+#[derive(Debug)]
+pub struct ScriptResult {
+    pub document: KeymapDocument,
+    pub logs: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// Error type for script execution.
+#[derive(Debug, Error)]
+pub enum ScriptExecutionError {
+    #[error("script compilation failed: {0}")]
+    Compilation(String),
+}
+
+/// Execute a Rhai script directly against a document.
+///
+/// This function executes a standalone Rhai script against a KeymapDocument
+/// without requiring a TOML task file wrapper.
+pub fn execute_script(
+    document: KeymapDocument,
+    script_source: &str,
+    _script_dir: Option<&Path>,
+) -> Result<ScriptResult, ScriptExecutionError> {
+    let mut engine_layout = LayoutEngine::new(document);
+    let shared_engine = Rc::new(RefCell::new(engine_layout.clone()));
+    let logs = Rc::new(RefCell::new(Vec::new()));
+
+    let mut engine = sandboxed_engine();
+    register_script_api(&mut engine, shared_engine.clone(), logs.clone());
+
+    let mut scope = Scope::new();
+
+    match engine.eval_with_scope::<Dynamic>(&mut scope, script_source) {
+        Ok(_) => {
+            let log_messages = logs.borrow().clone();
+            engine_layout = shared_engine.borrow().clone();
+            Ok(ScriptResult {
+                document: engine_layout.into_document(),
+                logs: log_messages,
+                error: None,
+            })
+        }
+        Err(err) => {
+            let log_messages = logs.borrow().clone();
+            Ok(ScriptResult {
+                document: engine_layout.into_document(),
+                logs: log_messages,
+                error: Some(format!("{err}")),
+            })
+        }
+    }
+}
+
 fn apply_override_task(
     engine: &mut LayoutEngine,
     task: &Task,
@@ -405,7 +459,7 @@ fn apply_override_task(
         }
     };
 
-    let bindings = match engine.layer_binding_strings(&layer) {
+    let bindings = match engine.layer_bindings(&layer) {
         Ok(value) => value,
         Err(err) => {
             apply_engine_error(&mut outcome, err);
@@ -463,7 +517,7 @@ fn apply_layer_task(
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
-    let before = engine.layer_snapshot(&action.name);
+    let before = engine.layer_to_string(&action.name);
     outcome.before = before.clone();
 
     let before_snapshot = outcome.before.clone();
@@ -485,7 +539,7 @@ fn apply_layer_task(
             return outcome;
         }
         if !action.metadata.is_empty() {
-            let metadata = LayoutEngine::metadata_properties(&action.metadata);
+            let metadata = LayoutEngine::metadata_to_properties(&action.metadata);
             if let Err(err) = engine.set_layer_metadata(&action.name, &metadata) {
                 apply_engine_error(&mut outcome, err);
                 return outcome;
@@ -516,7 +570,7 @@ fn apply_combo_task(
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
-    outcome.before = engine.combo_snapshot(&action.name);
+    outcome.before = engine.combo_to_string(&action.name);
 
     let before_snapshot = outcome.before.clone();
     if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
@@ -557,7 +611,7 @@ fn apply_combo_task(
             "dry-run: combo task recorded but not applied to document",
         );
     }
-    outcome.after = engine.combo_snapshot(&action.name);
+    outcome.after = engine.combo_to_string(&action.name);
     if !action.conditions.is_empty() {
         append_message(
             &mut outcome.message,
@@ -576,7 +630,7 @@ fn apply_layer_order_task(
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
-    let before = engine.layer_order_snapshot();
+    let before = engine.layer_order_to_string();
     outcome.before = Some(before);
 
     let before_snapshot = outcome.before.clone();
@@ -640,7 +694,7 @@ fn apply_layer_order_task(
         );
     }
 
-    outcome.after = Some(engine.layer_order_snapshot());
+    outcome.after = Some(engine.layer_order_to_string());
     outcome.status = TaskStatus::Applied;
     outcome
 }
@@ -653,7 +707,7 @@ fn apply_behavior_task(
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
-    outcome.before = engine.behavior_snapshot(&action.behavior);
+    outcome.before = engine.behavior_to_string(&action.behavior);
 
     let before_snapshot = outcome.before.clone();
     if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
@@ -680,7 +734,7 @@ fn apply_behavior_task(
             "dry-run: behavior settings not applied (reporting desired result)",
         );
     }
-    outcome.after = engine.behavior_snapshot(&action.behavior);
+    outcome.after = engine.behavior_to_string(&action.behavior);
     outcome.status = TaskStatus::Applied;
     outcome
 }
@@ -693,7 +747,7 @@ fn apply_meta_task(
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
-    outcome.before = engine.meta_snapshot(&action.key);
+    outcome.before = engine.meta_to_string(&action.key);
 
     let before_snapshot = outcome.before.clone();
     if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
@@ -711,7 +765,7 @@ fn apply_meta_task(
             "dry-run: meta entry not applied (reporting desired result)",
         );
     }
-    outcome.after = engine.meta_snapshot(&action.key);
+    outcome.after = engine.meta_to_string(&action.key);
     outcome.status = TaskStatus::Applied;
     outcome
 }
@@ -983,7 +1037,7 @@ fn register_script_api(
         "set_layer_metadata",
         move |layer: &str, metadata: RhaiMap| -> Result<(), Box<EvalAltResult>> {
             let map = rhai_map_to_metadata(&metadata).map_err(|err| script_error(err))?;
-            let props = LayoutEngine::metadata_properties(&map);
+            let props = LayoutEngine::metadata_to_properties(&map);
             doc_layer_metadata
                 .borrow_mut()
                 .set_layer_metadata(layer, &props)
@@ -1107,6 +1161,86 @@ fn register_script_api(
                 .map_err(|err| script_error(err.to_string()))
         },
     );
+
+    // Layer management functions
+    let doc_add_layer = Rc::clone(&layout);
+    engine.register_fn(
+        "add_layer",
+        move |name: &str, bindings: RhaiArray| -> Result<(), Box<EvalAltResult>> {
+            let binding_list = array_to_string_vec(&bindings).map_err(|err| script_error(err))?;
+            let mut engine = doc_add_layer.borrow_mut();
+            let normalized = engine
+                .normalize_binding_list(&binding_list)
+                .map_err(|err| script_error(err.to_string()))?;
+            engine
+                .add_layer(name, &normalized)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let doc_remove_layer = Rc::clone(&layout);
+    engine.register_fn(
+        "remove_layer",
+        move |name: &str| -> Result<(), Box<EvalAltResult>> {
+            doc_remove_layer
+                .borrow_mut()
+                .remove_layer(name)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let doc_get_layer = Rc::clone(&layout);
+    engine.register_fn(
+        "get_layer",
+        move |name: &str| -> Result<Dynamic, Box<EvalAltResult>> {
+            let engine = doc_get_layer.borrow();
+            match engine.get_layer(name) {
+                Some(info) => {
+                    let mut map = RhaiMap::new();
+                    map.insert("name".into(), Dynamic::from(info.name));
+                    map.insert("index".into(), Dynamic::from(info.index as INT));
+                    map.insert(
+                        "binding_count".into(),
+                        Dynamic::from(info.binding_count as INT),
+                    );
+                    let bindings_array: RhaiArray =
+                        info.bindings.into_iter().map(Dynamic::from).collect();
+                    map.insert("bindings".into(), Dynamic::from_array(bindings_array));
+                    Ok(Dynamic::from_map(map))
+                }
+                None => Err(script_error(format!("layer '{}' not found", name))),
+            }
+        },
+    );
+
+    let doc_list_layers = Rc::clone(&layout);
+    engine.register_fn(
+        "list_layers",
+        move || -> Result<RhaiArray, Box<EvalAltResult>> {
+            let engine = doc_list_layers.borrow();
+            let layers = engine.list_layers();
+            let mut result = RhaiArray::new();
+            for info in layers {
+                let mut map = RhaiMap::new();
+                map.insert("name".into(), Dynamic::from(info.name));
+                map.insert("index".into(), Dynamic::from(info.index as INT));
+                map.insert(
+                    "binding_count".into(),
+                    Dynamic::from(info.binding_count as INT),
+                );
+                let bindings_array: RhaiArray =
+                    info.bindings.into_iter().map(Dynamic::from).collect();
+                map.insert("bindings".into(), Dynamic::from_array(bindings_array));
+                result.push(Dynamic::from_map(map));
+            }
+            Ok(result)
+        },
+    );
+
+    let doc_layer_count = Rc::clone(&layout);
+    engine.register_fn("layer_count", move || -> INT {
+        doc_layer_count.borrow().layer_names().len() as INT
+    });
 }
 
 fn metadata_to_rhai_map(metadata: &MetadataMap) -> RhaiMap {
@@ -2084,7 +2218,7 @@ target = "layers.base.bindings[0]"
         assert_eq!(exec.results.len(), 1);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         let engine = LayoutEngine::new(exec.document.clone());
-        let updated = engine.layer_snapshot("base").expect("layer snapshot");
+        let updated = engine.layer_to_string("base").expect("layer snapshot");
         assert!(updated.contains("&kp SPACE"));
     }
 
@@ -2112,7 +2246,7 @@ target = "layers.base.bindings[0]"
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         let engine = LayoutEngine::new(exec.document.clone());
-        assert!(engine.combo_snapshot("combo_new").is_some());
+        assert!(engine.combo_to_string("combo_new").is_some());
     }
 
     #[test]
@@ -2139,7 +2273,7 @@ target = "layers.base.bindings[0]"
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         let engine = LayoutEngine::new(exec.document.clone());
-        let snapshot = engine.combo_snapshot("combo_new").unwrap();
+        let snapshot = engine.combo_to_string("combo_new").unwrap();
         assert!(
             snapshot.contains("layers=<1>") || snapshot.contains("layers=< 1 >"),
             "snapshot: {}",
@@ -2187,7 +2321,7 @@ target = "layers.base.bindings[0]"
         assert!(comments.iter().any(|text| text.contains("mods.shift")));
 
         let engine = LayoutEngine::new(exec.document.clone());
-        let snapshot = engine.combo_snapshot("combo_cond").unwrap();
+        let snapshot = engine.combo_to_string("combo_cond").unwrap();
         assert!(
             snapshot.contains("conditions=layer_state == base && mods.shift"),
             "snapshot missing conditions: {}",
@@ -2222,7 +2356,7 @@ target = "layers.base.bindings[0]"
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         let engine = LayoutEngine::new(exec.document.clone());
         let snapshot = engine
-            .behavior_snapshot("simple_tap")
+            .behavior_to_string("simple_tap")
             .expect("behavior snapshot");
         assert!(
             snapshot.contains("bindings=< &kp ENTER >"),
@@ -2256,7 +2390,7 @@ target = "layers.base.bindings[0]"
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         let engine = LayoutEngine::new(exec.document.clone());
-        let snapshot = engine.meta_snapshot("author").expect("meta entry");
+        let snapshot = engine.meta_to_string("author").expect("meta entry");
         assert_eq!(snapshot, "\"Bob\"");
     }
 
@@ -2280,7 +2414,7 @@ target = "layers.base.bindings[0]"
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         let engine = LayoutEngine::new(exec.document.clone());
-        assert_eq!(engine.layer_order_snapshot(), "nav,base");
+        assert_eq!(engine.layer_order_to_string(), "nav,base");
     }
 
     #[test]
@@ -2303,7 +2437,7 @@ target = "layers.base.bindings[0]"
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         let engine = LayoutEngine::new(exec.document.clone());
-        assert_eq!(engine.layer_order_snapshot(), "nav,base");
+        assert_eq!(engine.layer_order_to_string(), "nav,base");
     }
 
     #[test]
@@ -2401,7 +2535,7 @@ set_binding("base", 0, "&kp ESC");
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         let engine = LayoutEngine::new(exec.document.clone());
-        let updated = engine.layer_snapshot("base").expect("layer snapshot");
+        let updated = engine.layer_to_string("base").expect("layer snapshot");
         assert!(updated.contains("&kp ESC"));
         assert!(
             exec.results[0]
@@ -2433,7 +2567,7 @@ set_binding("base", 0, "&kp ESC");
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
         let engine = LayoutEngine::new(exec.document.clone());
-        let updated = engine.layer_snapshot("base").expect("layer snapshot");
+        let updated = engine.layer_to_string("base").expect("layer snapshot");
         assert!(updated.contains("&kp TAB"));
     }
 
@@ -2474,10 +2608,10 @@ upsert_combo_full("combo_new", [0, 1], "&kp ENTER", 50, ["nav"], ["layer_state =
         assert_eq!(display.value.raw, "\"Primary\"");
 
         let engine = LayoutEngine::new(exec.document.clone());
-        assert_eq!(engine.layer_order_snapshot(), "nav,base");
+        assert_eq!(engine.layer_order_to_string(), "nav,base");
 
         let engine = LayoutEngine::new(exec.document.clone());
-        let snapshot = engine.combo_snapshot("combo_new").unwrap();
+        let snapshot = engine.combo_to_string("combo_new").unwrap();
         assert!(
             snapshot.contains("timeout-ms=< 50 >") || snapshot.contains("timeout-ms=<50>"),
             "snapshot: {}",

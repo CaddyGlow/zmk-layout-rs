@@ -5,6 +5,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use serde_json::Value;
+
 use tempfile::tempdir;
 use zmk_layout_rs::build::{
     BuildError, BuildRequestError, CliDockerBackend, DockerBackend, DockerBuildOptions,
@@ -213,9 +215,19 @@ fn firmware_builder_runs_zmk_toolchain() {
     let docker = FakeDockerBackend::new();
     docker.set_on_run(|invocation| {
         let workspace = host_workspace(invocation);
-        let build_dir = workspace.join("build/right/zephyr");
-        fs::create_dir_all(&build_dir).expect("build dir");
-        fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
+        match invocation.command.get(1).map(String::as_str) {
+            Some("init") => {
+                let west_dir = workspace.join("app/.west");
+                fs::create_dir_all(&west_dir).expect("west dir");
+                fs::write(west_dir.join("config"), b"init").expect("west config");
+            }
+            Some("build") => {
+                let build_dir = workspace.join("build/right/zephyr");
+                fs::create_dir_all(&build_dir).expect("build dir");
+                fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
+            }
+            _ => {}
+        }
     });
     let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()));
     let output_dir = tempdir().expect("tempdir");
@@ -231,16 +243,49 @@ fn firmware_builder_runs_zmk_toolchain() {
     let report = builder.build(request).expect("build");
     assert!(report.success);
     assert!(output_dir.path().join("firmware.uf2").exists());
+    let log_path = report.logs_path.as_ref().expect("log path");
+    assert!(log_path.exists(), "log file should exist");
+    let log_text = fs::read_to_string(log_path).expect("log text");
+    assert!(
+        log_text.contains("completed target right"),
+        "log should record successful target completion"
+    );
+    let info_path = report.build_info_path.as_ref().expect("build info path");
+    assert!(info_path.exists(), "build-info file should exist");
+    let info_text = fs::read_to_string(info_path).expect("info text");
+    let info: Value = serde_json::from_str(&info_text).expect("info json");
+    assert_eq!(info["keyboard"], "glove80");
+    assert_eq!(info["toolchain"], "zmk");
+    assert_eq!(info["success"].as_bool(), Some(true));
 
     let invocations = docker.invocations();
-    assert_eq!(invocations.len(), 1);
-    let record = &invocations[0];
+    assert_eq!(invocations.len(), 4);
+    assert_eq!(
+        invocations[0].command.get(1).map(String::as_str),
+        Some("init")
+    );
+    assert_eq!(
+        invocations[1].command.get(1).map(String::as_str),
+        Some("update")
+    );
+    assert_eq!(
+        invocations[2].command.get(1).map(String::as_str),
+        Some("zephyr-export")
+    );
+    let record = invocations.last().expect("build invocation");
     assert_eq!(record.image, "zmkfirmware/zmk-build-arm");
     assert!(
         record
             .command
             .iter()
-            .any(|arg| arg.contains("-DSHIELD=glove80_right"))
+            .any(|arg| arg == "--" || arg.starts_with("-DZMK_CONFIG="))
+    );
+    assert!(
+        record
+            .command
+            .iter()
+            .any(|arg| arg.contains("-DSHIELD=glove80_right")),
+        "shield should be passed to west build"
     );
     assert_eq!(
         record.env.get("ZMK_CONFIG").map(String::as_str),
@@ -391,11 +436,20 @@ shield = "demo"
     let docker = FakeDockerBackend::new();
     docker.set_on_run(|invocation| {
         let workspace = host_workspace(invocation);
-        fs::create_dir_all(workspace.join("app")).expect("app dir");
-        fs::write(workspace.join("app/repo.txt"), b"repo").expect("repo file");
-        let build_dir = workspace.join("build/main/zephyr");
-        fs::create_dir_all(&build_dir).expect("build dir");
-        fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
+        match invocation.command.get(1).map(String::as_str) {
+            Some("init") => {
+                let west_dir = workspace.join("app/.west");
+                fs::create_dir_all(&west_dir).expect("west dir");
+                fs::write(west_dir.join("config"), b"init").expect("west config");
+                fs::write(workspace.join("app/repo.txt"), b"repo").expect("repo file");
+            }
+            Some("build") => {
+                let build_dir = workspace.join("build/main/zephyr");
+                fs::create_dir_all(&build_dir).expect("build dir");
+                fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
+            }
+            _ => {}
+        }
     });
 
     let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()))
@@ -474,11 +528,20 @@ board = "nice_nano_v2"
             !workspace.join("app/cached.txt").exists(),
             "disable_cache should prevent hydration"
         );
-        fs::create_dir_all(workspace.join("app")).expect("app dir");
-        fs::write(workspace.join("app/runtime.txt"), b"runtime").expect("runtime file");
-        let build_dir = workspace.join("build/main/zephyr");
-        fs::create_dir_all(&build_dir).expect("build dir");
-        fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
+        match invocation.command.get(1).map(String::as_str) {
+            Some("init") => {
+                let west_dir = workspace.join("app/.west");
+                fs::create_dir_all(&west_dir).expect("west dir");
+                fs::write(west_dir.join("config"), b"init").expect("west config");
+            }
+            Some("build") => {
+                let build_dir = workspace.join("build/main/zephyr");
+                fs::create_dir_all(&build_dir).expect("build dir");
+                fs::write(workspace.join("app/runtime.txt"), b"runtime").expect("runtime file");
+                fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
+            }
+            _ => {}
+        }
     });
 
     let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()))

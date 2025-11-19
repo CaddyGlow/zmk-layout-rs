@@ -1374,6 +1374,48 @@ impl KeymapDocument {
         KeymapProvider::new(self.document.clone()).layer_names()
     }
 
+    /// Add a new layer with the given name and bindings.
+    pub fn add_layer(&mut self, name: &str, bindings: &[String]) -> Result<(), ProviderError> {
+        let refs: Vec<&str> = bindings.iter().map(|s| s.as_str()).collect();
+        let mut provider = KeymapProvider::new(self.document.clone());
+        provider.ensure_layer_node(name)?;
+        provider.set_layer_bindings(name, &refs)?;
+        self.document = provider.into_document();
+
+        // Update layer defines to include the new layer
+        self.update_layer_defines()?;
+
+        Ok(())
+    }
+
+    /// Remove a layer by name.
+    pub fn remove_layer(&mut self, name: &str) -> Result<(), ProviderError> {
+        // Find and remove the layer node from the keymap
+        let keymap_node = find_layer_node_mut(&mut self.document.items, "keymap")
+            .ok_or_else(|| ProviderError::LayerNotFound("keymap".to_string()))?;
+
+        // Find the index of the layer to remove
+        let layer_index = keymap_node
+            .children
+            .iter()
+            .position(|item| {
+                if let DtItem::Node(node) = item {
+                    node.name == name && find_bindings_property(node).is_some()
+                } else {
+                    false
+                }
+            })
+            .ok_or_else(|| ProviderError::LayerNotFound(name.to_string()))?;
+
+        // Remove the layer
+        keymap_node.children.remove(layer_index);
+
+        // Update layer defines to reflect the removal
+        self.update_layer_defines()?;
+
+        Ok(())
+    }
+
     pub fn into_document(self) -> DtsDocument {
         self.document
     }

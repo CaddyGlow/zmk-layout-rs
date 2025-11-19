@@ -181,3 +181,46 @@ These names are fixed so the implementation can follow the terminology without f
 - Whether flashing commands live in this crate or a follow-up project.
 - Exact cache layout (global vs per-project) once we have real workloads.
 - Potential switch to a Docker client library if/when CLI invocation becomes limiting.
+
+## End-to-end build flow
+1. CLI loads the manifest from `firmware_profiles.toml` (default search path: cwd, repo root, explicit `--manifest`). Deserialization validates toolchain ids, ensures keyboard targets reference existing toolchains, and normalizes cache policies (apply derived defaults when omitted).
+2. `FirmwareBuilder::builder()` populates a `BuildRequestBuilder` with the manifest `Arc`, the default keyboard/toolchain pairing, and the selected layout source. CLI flags or library callers may override the keyboard, toolchain, or target list before calling `.build()`.
+3. Builder resolves targets: pick explicit `BuildTargetRef`s when provided, otherwise expand every target tied to the chosen keyboard. Each target inherits toolchain overrides, env vars, cmake defs, and repo/branch hints as described earlier.
+4. Workspace manager allocates a temp directory such as `<tmp>/zmk-layout-<timestamp>/<toolchain>/<target-id>`. The manager hydrates workspace caches (repo checkouts, base files) when enabled and records everything in a manifest file stored under the workspace root for debugging.
+5. Layout stager materializes any JSON or `DtsDocument` sources into the workspace: generated keymap and config files land where each toolchain expects them (`config/boards/*` for MoErgo, `config/<shield>.conf` + `boards/<board>.keymap` for West). If callers already passed file paths the stager simply copies or hard-links them into place.
+6. Toolchain `prepare()` hook tweaks the workspace (e.g., MoErgo writes `build-vars.mk`, ZMK config ensures `west.yml` modules exist). Once ready, `invoke()` constructs a `DockerInvocation` with proper mounts (`workspace:/workdir`, optional caches under `$HOME/.cache/zmk-layout/…`), env, and commands.
+7. Docker backend runs the container while streaming stdout/stderr into a `ProgressReporter`. Checkpoints include `manifest/load`, `layout/stage`, `toolchain/prepare`, `docker/run`, and `artifacts/collect`. Toolchain-specific progress (per target compile, `west build` percent) flows through `update_progress`.
+8. When the container exits, the toolchain `collect()` hook finds produced artifacts, copies them into `<output>/<keyboard>/<target-id>/`, writes `build-info.json` (metadata, git hash, command array, duration), and persists log files. Cache store snapshots updated files when `CacheMode::ReadWrite`.
+
+## Toolchain details
+
+### MoErgo (Nix image)
+- Workspace layout mirrors their reference repo: `workspace/app/` contains keyboard sources, `workspace/keymap/` stores generated config, and `workspace/build.sh` is provided by the container.
+- Required inputs: layout keymap (JSON or DTS converted to `keymap.dtsi`), optional `config.h`, and MoErgo-specific metadata (profile name, variant). `ToolchainProfile.metadata` stores defaults such as `variant = "default"` to avoid manual flags.
+- `prepare()` writes a `build.env` file with env overrides, ensures `nix.conf` matches the requested channel, and downloads pinned sources if caches are disabled. Cache hydration primarily copies `nix-store` derivations into a shared volume so repeated builds skip fetches.
+- `invoke()` executes `["/bin/bash", "-lc", "./build.sh --board ${board} --shield ${shield:-glove80}"]`. For boards without shields the flag is omitted. Logs are raw `nix build` output, and `ProgressReporter` converts known MoErgo markers (e.g., `building '${drv}'`) into checkpoints.
+- `collect()` grabs `firmware/*.uf2`, `logs/*.txt`, and `manifest.json` from the container workspace. These artifacts land beneath `output/<keyboard>/<target>/moergo/` to keep separation from other toolchains.
+
+### ZMK Config (west + Zephyr)
+- Workspace houses a shallow clone of `zmk_config` (`workspace/app/`), the Zephyr fork (if `repository` differs), and modules defined in `west.yml`. Cache hydration seeds `.west/` and `build/<board>` directories to accelerate incremental builds.
+- `prepare()` ensures `west init` and `west update` run once per workspace. It writes staged keymap/config files into `config/` relative to `app/` following ZMK conventions, generates `build-targets.json` describing the list of board/shield pairs, and patches `CMakeLists.txt` if manifest metadata injects extra settings.
+- `invoke()` typically calls `west build -s app -b <board> -- -DZMK_CONFIG=/workspace/config ...`. Targets that specify `shield` append `-DSHIELD=<shield>`. Optional manifest flags such as `cmake_defs` become additional `-DKEY=VALUE`. When the manifest indicates a repo/branch override, the workspace manager ensures the `west` manifest uses that remote before invocation.
+- Progress reporting hooks into `west` output: parse `[n/%]` markers, surface compile errors immediately, and wrap each target build with `start_checkpoint("target::<id>")`.
+- `collect()` copies build artifacts (`build/zephyr/zmk.uf2`, `build/zephyr/zephyr.hex`, `build.log`), plus `west.meta.json` (a summary containing git revisions, cmake cache, and target info). Artifacts live alongside MoErgo results but include the toolchain id and board/shield in their directory name for clarity.
+
+## CLI & configuration defaults
+- Primary entry point: `zmk-layout firmware build --keyboard glove80 --target left --layout layout.json --output ./dist`. CLI infers manifest path (search order mentioned earlier) and exposes flags `--toolchain`, `--target` (repeatable), `--list-targets`, `--list-toolchains`.
+- Global flags: `--no-cache`, `--progress plain|json|auto`, `--docker-binary` (default `docker`), `--manifest /path/to/file`, `--workspace /tmp/foo` (optional override for debugging).
+- CLI always writes a short `build-summary.json` near the output directory capturing request info, success/failure, and artifact pointers, enabling wrappers or CI steps to parse results without scanning stdout.
+- Library callers may skip the CLI entirely by instantiating `FirmwareBuilder` with a manifest `Arc` and injecting a fake `ProgressReporter` and `DockerBackend` for testing or remote execution.
+
+## Structured progress semantics
+- All progress events share a `context_id` built from `<keyboard>::<toolchain>::<target-id>` so concurrent builds can multiplex output cleanly.
+- Baseline checkpoints: `manifest/load`, `request/resolve`, `workspace/create`, `workspace/cache`, `layout/stage`, `toolchain/prepare`, `docker/run`, `artifacts/collect`, `cache/store`. Each checkpoint emits `start`, `complete`, `fail` transitions.
+- `update_progress(current, total, status)` is used sparingly: MoErgo surfaces the number of derivations built, while ZMK config uses `west`’s native percentage. CLI adapters can convert these events into text spinners or JSON payloads for machine consumption.
+- Raw docker logs still flow through `log(level, message)` ensuring users can inspect verbose compiler output even if structured events misbehave.
+
+## Definition of done (initial shipping criteria)
+- Phase 2 (MoErgo) completes when a Glove80 layout JSON builds end-to-end via CLI with streamed logs, artifacts written to disk, and unit tests covering manifest parsing plus docker invocation assembly.
+- Phase 3 (ZMK config) is complete when at least one reference board/shield pair compiles via the new pipeline, caches can be toggled from CLI, and fake docker tests assert `west` command assembly (boards, shields, `cmake_defs`).
+- Phase 4 finishes once progress events cover every major step, documentation for manifest/toolchain usage exists under `docs/firmware-build.md`, and CI optionally runs integration tests when docker is available.

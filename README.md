@@ -161,6 +161,13 @@ full-featured template mirroring the Python generator output.
 The project includes Docker-based toolchains for building ZMK firmware. The MoErgo toolchain
 (formerly known as glove80-zmk-config) is located in `toolchains/moergo/`.
 
+For manifest schema details, CLI usage, and artifact/log expectations see
+[`docs/firmware_building.md`](docs/firmware_building.md). Every `zmk-layout firmware build`
+invocation emits:
+
+- `build-<keyboard>-<toolchain>.log` with the combined Docker output.
+- `build-info-<keyboard>-<toolchain>.json` summarizing metadata, targets, and artifacts.
+
 ### Building the Docker Image
 
 Build the MoErgo toolchain image using one of the provided Dockerfiles:

@@ -6,6 +6,7 @@ use crate::{
         docker::{DockerBackend, DockerInvocation, OutputHandler, VolumeMode, VolumeMount},
         error::BuildError,
         layout::KeymapArtifacts,
+        logs::LogFile,
         manifest::{BuildTarget, ToolchainKind},
         progress::{LogLevel, ProgressReporter},
         request::BuildRequest,
@@ -99,7 +100,12 @@ impl Toolchain for MoergoToolchain {
             mode: VolumeMode::ReadWrite,
         });
 
-        invocation.log_handler = Arc::new(ProgressOutputHandler::new(ctx.progress.clone()));
+        let log_label = format!("{}::{}", ctx.profile.id, target.id);
+        invocation.log_handler = Arc::new(ProgressOutputHandler::new(
+            ctx.progress.clone(),
+            ctx.log_file.clone(),
+            log_label,
+        ));
 
         let checkpoint = format!("moergo-{}", target.id);
         ctx.progress
@@ -202,20 +208,38 @@ fn collect_artifacts(
 
 struct ProgressOutputHandler {
     progress: Arc<dyn ProgressReporter>,
+    log: Option<LogFile>,
+    stdout_tag: String,
+    stderr_tag: String,
 }
 
 impl ProgressOutputHandler {
-    fn new(progress: Arc<dyn ProgressReporter>) -> Self {
-        Self { progress }
+    fn new(progress: Arc<dyn ProgressReporter>, log: Option<LogFile>, label: String) -> Self {
+        let stdout_tag = format!("{label}:stdout");
+        let stderr_tag = format!("{label}:stderr");
+        Self {
+            progress,
+            log,
+            stdout_tag,
+            stderr_tag,
+        }
+    }
+
+    fn append(&self, tag: &str, line: &str) {
+        if let Some(logger) = &self.log {
+            logger.append(tag, line);
+        }
     }
 }
 
 impl OutputHandler for ProgressOutputHandler {
     fn handle_stdout(&self, line: &str) {
+        self.append(&self.stdout_tag, line);
         self.progress.log(LogLevel::Info, line);
     }
 
     fn handle_stderr(&self, line: &str) {
+        self.append(&self.stderr_tag, line);
         self.progress.log(LogLevel::Warn, line);
     }
 }

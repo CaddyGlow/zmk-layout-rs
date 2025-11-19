@@ -1,11 +1,20 @@
 //! High-level firmware builder facade used by the CLI/library.
 
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Instant,
+};
+
+use serde::Serialize;
 
 use super::{
     docker::DockerBackend,
     error::BuildError,
     layout::LayoutStager,
+    logs::LogFile,
     manifest::{BuildTarget, FirmwareManifest, KeyboardProfile, ToolchainProfile},
     progress::ProgressReporter,
     request::{BuildRequest, BuildRequestBuilder},
@@ -63,6 +72,16 @@ impl FirmwareBuilder {
             .ok_or_else(|| BuildError::UnknownToolchain(toolchain_id.clone()))?;
         let toolchain = create_toolchain(profile)?;
 
+        fs::create_dir_all(&request.output_dir).map_err(BuildError::Io)?;
+        let log_filename = format!(
+            "build-{}-{}.log",
+            sanitize_slug(&keyboard.id),
+            sanitize_slug(&profile.id)
+        );
+        let log_path = request.output_dir.join(log_filename);
+        let log_file = LogFile::create(&log_path)?;
+        let build_started = Instant::now();
+
         let workspace = self.workspace_manager.create_workspace(
             &profile.id,
             &profile.cache,
@@ -79,10 +98,12 @@ impl FirmwareBuilder {
             workspace: &workspace,
             layout: &layout,
             progress: request.progress.clone(),
+            log_file: Some(log_file.clone()),
         };
 
         let mut report = BuildReport::default();
         report.success = true;
+        report.logs_path = Some(log_path.clone());
         let total_targets = request.targets.len();
         let checkpoint_id = format!(
             "firmware-{}-{}",
@@ -109,9 +130,18 @@ impl FirmwareBuilder {
                     &format!("building target {}", target_ref.id),
                 );
             }
+            if let Some(logger) = &ctx.log_file {
+                logger.append("builder", &format!("starting target {}", target_ref.id));
+            }
             let target = match resolve_target(keyboard, &target_ref.id) {
                 Ok(target) => target,
                 Err(err) => {
+                    if let Some(logger) = &ctx.log_file {
+                        logger.append(
+                            "builder",
+                            &format!("failed to resolve target {}: {err}", target_ref.id),
+                        );
+                    }
                     if total_targets > 0 {
                         request.progress.fail_checkpoint(&checkpoint_id);
                     }
@@ -121,6 +151,9 @@ impl FirmwareBuilder {
             let result = match toolchain.build_target(&ctx, target, self.docker()) {
                 Ok(result) => result,
                 Err(err) => {
+                    if let Some(logger) = &ctx.log_file {
+                        logger.append("builder", &format!("target {} failed: {err}", target.id));
+                    }
                     if total_targets > 0 {
                         request.progress.fail_checkpoint(&checkpoint_id);
                     }
@@ -137,6 +170,9 @@ impl FirmwareBuilder {
             }
             report.artifacts.files.extend(result.artifacts);
             built_targets.push(target.id.clone());
+            if let Some(logger) = &ctx.log_file {
+                logger.append("builder", &format!("completed target {}", target.id));
+            }
             if total_targets > 0 {
                 request.progress.update_progress(
                     (index as u32) + 1,
@@ -165,6 +201,16 @@ impl FirmwareBuilder {
             &built_targets,
             report.artifacts.files.len(),
         );
+        let duration_ms = build_started.elapsed().as_millis();
+        let info_path = write_build_info(
+            &request,
+            keyboard,
+            profile,
+            &report,
+            report.logs_path.as_deref(),
+            duration_ms,
+        )?;
+        report.build_info_path = Some(info_path);
 
         Ok(report)
     }
@@ -176,6 +222,7 @@ pub struct BuildReport {
     pub success: bool,
     pub artifacts: ArtifactReport,
     pub logs_path: Option<PathBuf>,
+    pub build_info_path: Option<PathBuf>,
     pub metadata: BuildMetadata,
 }
 
@@ -185,6 +232,7 @@ impl Default for BuildReport {
             success: false,
             artifacts: ArtifactReport::default(),
             logs_path: None,
+            build_info_path: None,
             metadata: BuildMetadata::default(),
         }
     }
@@ -273,6 +321,92 @@ fn populate_metadata(
     metadata
         .entries
         .insert("artifacts.count".into(), artifact_count.to_string());
+}
+
+fn write_build_info(
+    request: &BuildRequest,
+    keyboard: &KeyboardProfile,
+    profile: &ToolchainProfile,
+    report: &BuildReport,
+    log_path: Option<&Path>,
+    duration_ms: u128,
+) -> Result<PathBuf, BuildError> {
+    let filename = format!(
+        "build-info-{}-{}.json",
+        sanitize_slug(&keyboard.id),
+        sanitize_slug(&profile.id)
+    );
+    let info_path = request.output_dir.join(filename);
+    let targets = request
+        .targets
+        .iter()
+        .map(|target| BuildInfoTarget {
+            id: target.id.clone(),
+            artifacts: report
+                .artifacts
+                .per_target
+                .get(&target.id)
+                .map(|paths| paths.iter().map(|p| p.display().to_string()).collect())
+                .unwrap_or_default(),
+        })
+        .collect::<Vec<_>>();
+    let info = BuildInfo {
+        keyboard: keyboard.id.clone(),
+        toolchain: profile.id.clone(),
+        toolchain_kind: format!("{:?}", profile.kind),
+        success: report.success,
+        duration_ms,
+        log_file: log_path.map(|path| path.display().to_string()),
+        artifacts: report
+            .artifacts
+            .files
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect(),
+        metadata: report.metadata.entries.clone(),
+        targets,
+    };
+    let data = serde_json::to_vec_pretty(&info)
+        .map_err(|err| BuildError::InvalidRequest(format!("serialize build-info: {err}")))?;
+    fs::write(&info_path, data).map_err(BuildError::Io)?;
+    Ok(info_path)
+}
+
+#[derive(Serialize)]
+struct BuildInfo {
+    keyboard: String,
+    toolchain: String,
+    toolchain_kind: String,
+    success: bool,
+    duration_ms: u128,
+    log_file: Option<String>,
+    artifacts: Vec<String>,
+    metadata: BTreeMap<String, String>,
+    targets: Vec<BuildInfoTarget>,
+}
+
+#[derive(Serialize)]
+struct BuildInfoTarget {
+    id: String,
+    artifacts: Vec<String>,
+}
+
+fn sanitize_slug(value: &str) -> String {
+    let mut slug = String::with_capacity(value.len());
+    let mut last_was_dash = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            slug.push(ch.to_ascii_lowercase());
+            last_was_dash = false;
+        } else if !last_was_dash && !slug.is_empty() {
+            slug.push('-');
+            last_was_dash = true;
+        }
+    }
+    if slug.is_empty() {
+        slug.push_str("build");
+    }
+    slug.trim_matches('-').to_string()
 }
 
 fn resolve_target<'a>(

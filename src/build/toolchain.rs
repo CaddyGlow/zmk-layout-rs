@@ -4,6 +4,7 @@ use super::{
     docker::DockerBackend,
     error::BuildError,
     layout::KeymapArtifacts,
+    logs::LogFile,
     manifest::{
         BuildTarget, FirmwareManifest, KeyboardProfile, ToolchainKind, ToolchainOverride,
         ToolchainProfile,
@@ -24,6 +25,7 @@ pub struct BuildContext<'a> {
     pub workspace: &'a WorkspaceHandle,
     pub layout: &'a KeymapArtifacts,
     pub progress: Arc<dyn ProgressReporter>,
+    pub log_file: Option<LogFile>,
 }
 
 /// Result returned by a toolchain run.
