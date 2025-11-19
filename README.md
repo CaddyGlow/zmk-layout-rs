@@ -143,8 +143,32 @@ zmk-layout validate --tasks layout_tasks.toml --base-layout config/keymap.dts
 zmk-layout diff --tasks layout_tasks.toml --base-layout config/keymap.dts
 ```
 
+Helpful flags:
+
+- `--conflicts override|skip|prompt|script` overrides the task file's default conflict policy for a single run.
+- `--base-template NAME` / `--base-version VERSION` document which upstream template/version you expected and warn when the task file disagrees.
+- `--combo-conditions` prints a post-run summary of combo tasks that declare `conditions = ["..."]` for easier review.
+
 See the docs for conflict policies, `target` naming guidance, and troubleshooting tips.
 The same document covers the Rhai scripting hooks that power `script` tasks and conflict handlers.
+
+### Standalone Rhai Scripts
+
+For one-off automation or debugging, run Rhai scripts directly without creating a full task file:
+
+```bash
+zmk-layout script \
+  --script tasks/swap_layer_names.rhai \
+  --layout config/keymap.dts \
+  --output config/keymap.generated.dts
+
+# Preview without writing a file
+zmk-layout script --script scratch/update_layers.rhai --layout config/keymap.dts --diff
+```
+
+Scripts receive the same helper API as `script` tasks (`set_binding`, `set_layer`, `upsert_combo`, etc.) and can emit notes
+with `log("...")`. Pass `--diff` to print a unified diff instead of writing files, or omit `--output` entirely to stream the
+updated DTS to stdout. See `docs/customization_tasks.md` for the full scripting surface.
 
 ### Template-based generation
 
@@ -161,8 +185,24 @@ full-featured template mirroring the Python generator output.
 The project includes Docker-based toolchains for building ZMK firmware. The MoErgo toolchain
 (formerly known as glove80-zmk-config) is located in `toolchains/moergo/`.
 
-For manifest schema details, CLI usage, and artifact/log expectations see
-[`docs/firmware_building.md`](docs/firmware_building.md). Every `zmk-layout firmware build`
+### Running a firmware build
+
+```bash
+zmk-layout firmware build \
+  --manifest firmware_profiles/glove80.toml \
+  --keyboard glove80 \
+  --toolchain zmk \
+  --target left \
+  --layout-dts config/keymap.generated.dts \
+  --output dist/glove80-left
+```
+
+Key options: supply exactly one layout input (`--layout-json`, `--layout-dts`, or `--keymap` plus an optional `--kconfig`),
+repeat `--target` to limit which manifest targets build, use `--env KEY=VALUE` for ad-hoc environment overrides, and add
+`--disable-cache` or `--dry-run` when you want clean workspaces or a printed request without touching Docker. For manifest
+schema details, caching policies, and artifact/log expectations see [`docs/firmware_building.md`](docs/firmware_building.md).
+
+Every `zmk-layout firmware build`
 invocation emits:
 
 - `build-<keyboard>-<toolchain>.log` with the combined Docker output.
