@@ -7,6 +7,14 @@ format_version = "1.0.0"
 default_conflict = "prompt"
 
 [[tasks]]
+id = "reorder-layers"
+type = "layer-order"
+layer = "layer_Typing"
+position = 0
+target = "layers.order.layer_Typing"
+comment = "move layer_Typing to first position"
+
+[[tasks]]
 id = "swap-base-q"
 type = "override"
 path = "layers.layer_Typing.bindings[0]"

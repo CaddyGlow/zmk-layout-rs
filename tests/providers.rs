@@ -113,3 +113,34 @@ fn keymap_document_round_trip() -> Result<(), Box<dyn Error>> {
     assert!(output.contains("&kp Z"));
     Ok(())
 }
+
+#[test]
+fn reorder_layer_updates_layer_define_macros() -> Result<(), Box<dyn Error>> {
+    let input = r#"
+#define LAYER_base 0
+#define LAYER_NAV 1    // nav comment
+#define LAYER_fn_layer (LAYER_NAV + 1)   /* block comment */
+
+keymap {
+    compatible = "zmk,keymap";
+    layer_base {
+        bindings = < &kp A >;
+    };
+    layer_nav {
+        bindings = < &kp B >;
+    };
+    layer_fn-layer {
+        bindings = < &kp C >;
+    };
+};
+"#;
+
+    let mut keymap = KeymapDocument::parse_str(input)?;
+    keymap.reorder_layer("layer_fn-layer", 0)?;
+    let output = keymap.document().to_string()?;
+
+    assert!(output.contains("#define LAYER_fn_layer 0   /* block comment */"));
+    assert!(output.contains("#define LAYER_base 1"));
+    assert!(output.contains("#define LAYER_NAV 2    // nav comment"));
+    Ok(())
+}

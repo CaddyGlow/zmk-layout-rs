@@ -140,17 +140,17 @@ struct FirmwareBuildArgs {
     )]
     layout_dts: Option<PathBuf>,
     #[arg(
-        long = "layout-keymap",
+        long = "keymap",
         value_name = "FILE",
-        help = "Pre-generated keymap.dtsi file"
+        help = "Keymap Devicetree source (.keymap/.dtsi)"
     )]
-    layout_keymap: Option<PathBuf>,
+    keymap: Option<PathBuf>,
     #[arg(
-        long = "layout-config",
+        long = "kconfig",
         value_name = "FILE",
-        help = "Optional extra overlay (e.g. config.dtsi or Kconfig fragment)"
+        help = "Optional CONFIG overlay (.conf/.config.dtsi)"
     )]
-    layout_config: Option<PathBuf>,
+    kconfig: Option<PathBuf>,
     #[arg(
         long = "output-dir",
         value_name = "DIR",
@@ -313,7 +313,7 @@ fn apply_firmware_layout(
         builder = builder.layout_document(document);
         layout_set = true;
     }
-    match (&args.layout_keymap, &args.layout_config) {
+    match (&args.keymap, &args.kconfig) {
         (Some(keymap), extra) => {
             if layout_set {
                 return Err(CliError::FirmwareLayout(
@@ -325,14 +325,14 @@ fn apply_firmware_layout(
         }
         (None, Some(_)) => {
             return Err(CliError::FirmwareLayout(
-                "--layout-config requires --layout-keymap".into(),
+                "--kconfig requires --keymap".into(),
             ));
         }
         (None, None) => {}
     }
     if !layout_set {
         return Err(CliError::FirmwareLayout(
-            "provide one of --layout-json, --layout-dts, or --layout-keymap/--layout-config".into(),
+            "provide one of --layout-json, --layout-dts, or --keymap/--kconfig".into(),
         ));
     }
     Ok(builder)

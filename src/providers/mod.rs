@@ -1228,7 +1228,146 @@ impl KeymapDocument {
         let mut provider = KeymapProvider::new(self.document.clone());
         provider.move_layer_to_index(layer, new_index)?;
         self.document = provider.into_document();
+
+        // Update LAYER_* defines to match new order
+        self.update_layer_defines()?;
+
         Ok(())
+    }
+
+    fn update_layer_defines(&mut self) -> Result<(), ProviderError> {
+        use crate::ast::DtItem;
+
+        // Get current layer order
+        let layer_names = self.layer_names();
+
+        // Build a map of canonical layer names to indices so we can match
+        // macros regardless of case or sanitization differences.
+        let mut layer_indices = std::collections::HashMap::new();
+        for (idx, name) in layer_names.iter().enumerate() {
+            layer_indices.insert(Self::canonical_layer_define_key(name), idx);
+        }
+
+        // Update all matching macros
+        for item in &mut self.document.items {
+            if let DtItem::Macro(mac) = item {
+                if let Some(parsed) = Self::parse_layer_define(&mac.text) {
+                    let canonical = Self::canonical_layer_define_key(&parsed.name);
+                    if let Some(&new_idx) = layer_indices.get(&canonical) {
+                        let mut updated = format!(
+                            "{}#define LAYER_{} {}",
+                            parsed.leading, parsed.name, new_idx
+                        );
+                        if let Some(comment) = parsed.comment {
+                            if comment
+                                .chars()
+                                .next()
+                                .map_or(false, |ch| ch.is_whitespace())
+                            {
+                                updated.push_str(&comment);
+                            } else {
+                                updated.push(' ');
+                                updated.push_str(&comment);
+                            }
+                        }
+                        mac.text = updated;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_layer_define(text: &str) -> Option<LayerDefineLine> {
+        let (code, comment) = Self::split_layer_define_comment(text);
+        if code.is_empty() {
+            return None;
+        }
+        let trimmed_start = code.trim_start_matches(|c| matches!(c, ' ' | '\t'));
+        let leading_len = code.len() - trimmed_start.len();
+        let leading = code[..leading_len].to_string();
+        let mut parts = trimmed_start.split_whitespace();
+        if parts.next()? != "#define" {
+            return None;
+        }
+        let identifier = parts.next()?;
+        if !identifier.starts_with("LAYER_") {
+            return None;
+        }
+        // Ensure a value exists but we don't care what it is.
+        parts.next()?;
+        Some(LayerDefineLine {
+            leading,
+            name: identifier["LAYER_".len()..].to_string(),
+            comment: comment.map(|value| value.to_string()),
+        })
+    }
+
+    fn sanitize_layer_define_name(name: &str) -> String {
+        let trimmed = if name.len() >= 6 && name[..6].eq_ignore_ascii_case("layer_") {
+            &name[6..]
+        } else {
+            name
+        };
+        let mut result = String::new();
+        for ch in trimmed.chars() {
+            if ch.is_ascii_alphanumeric() {
+                result.push(ch);
+                continue;
+            }
+            result.push('_');
+        }
+        if result.is_empty() {
+            "LAYER".to_string()
+        } else {
+            result
+        }
+    }
+
+    fn canonical_layer_define_key(name: &str) -> String {
+        Self::sanitize_layer_define_name(name).to_ascii_lowercase()
+    }
+
+    fn split_layer_define_comment(text: &str) -> (&str, Option<&str>) {
+        let mut chars = text.char_indices().peekable();
+        while let Some((idx, ch)) = chars.next() {
+            match ch {
+                '"' | '\'' => {
+                    let quote = ch;
+                    let mut escaped = false;
+                    while let Some((_, next)) = chars.next() {
+                        if escaped {
+                            escaped = false;
+                            continue;
+                        }
+                        if next == '\\' {
+                            escaped = true;
+                            continue;
+                        }
+                        if next == quote {
+                            break;
+                        }
+                    }
+                }
+                '/' => {
+                    if let Some((_, next)) = chars.peek().copied() {
+                        if next == '/' || next == '*' {
+                            let prefix = &text[..idx];
+                            let trimmed = Self::trim_trailing_inline_ws(prefix);
+                            let comment = &text[trimmed.len()..];
+                            return (trimmed, Some(comment));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        (Self::trim_trailing_inline_ws(text), None)
+    }
+
+    fn trim_trailing_inline_ws(text: &str) -> &str {
+        text.trim_end_matches(|c| matches!(c, ' ' | '\t' | '\r'))
     }
 
     pub fn layer_names(&self) -> Vec<String> {
@@ -1238,4 +1377,10 @@ impl KeymapDocument {
     pub fn into_document(self) -> DtsDocument {
         self.document
     }
+}
+
+struct LayerDefineLine {
+    leading: String,
+    name: String,
+    comment: Option<String>,
 }
