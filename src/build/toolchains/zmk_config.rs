@@ -25,6 +25,7 @@ const DEFAULT_REPOSITORY: &str = "https://github.com/zmkfirmware/zmk.git";
 const DEFAULT_REPOSITORY_ID: &str = "zmkfirmware/zmk";
 const DEFAULT_BRANCH: &str = "main";
 const WORKSPACE_STATE_FILE: &str = ".zmk-workspace.json";
+const DEFAULT_MANIFEST_FILE: &str = "app/west.yml";
 
 pub struct ZmkConfigToolchain;
 
@@ -342,6 +343,8 @@ impl ZmkConfigToolchain {
             spec.url.clone(),
             "--mr".into(),
             spec.branch.clone(),
+            "--mf".into(),
+            DEFAULT_MANIFEST_FILE.into(),
             container_app_dir.display().to_string(),
         ];
         self.run_west_command(
