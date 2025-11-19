@@ -66,19 +66,19 @@ impl LayoutEngine {
         self.document.layer_names()
     }
 
-    pub fn layer_snapshot(&self, layer: &str) -> Option<String> {
-        layer_snapshot(self.document.document(), layer)
+    pub fn layer_to_string(&self, layer: &str) -> Option<String> {
+        layer_to_string(self.document.document(), layer)
     }
 
-    pub fn combo_snapshot(&self, combo: &str) -> Option<String> {
-        combo_snapshot(self.document.document(), combo)
+    pub fn combo_to_string(&self, combo: &str) -> Option<String> {
+        combo_to_string(self.document.document(), combo)
     }
 
-    pub fn layer_order_snapshot(&self) -> String {
-        layer_order_snapshot(self.document.document())
+    pub fn layer_order_to_string(&self) -> String {
+        layer_order_to_string(self.document.document())
     }
 
-    pub fn layer_binding_strings(&self, layer: &str) -> Result<Vec<String>, LayoutEngineError> {
+    pub fn layer_bindings(&self, layer: &str) -> Result<Vec<String>, LayoutEngineError> {
         let entries = self.document.bindings_for_layer(layer)?;
         Ok(entries
             .into_iter()
@@ -277,19 +277,19 @@ impl LayoutEngine {
         Ok(result)
     }
 
-    pub fn metadata_properties(metadata: &MetadataMap) -> Vec<(String, String)> {
+    pub fn metadata_to_properties(metadata: &MetadataMap) -> Vec<(String, String)> {
         metadata
             .iter()
             .map(|(key, value)| (key.clone(), format_metadata_value(value)))
             .collect()
     }
 
-    pub fn behavior_snapshot(&self, behavior: &str) -> Option<String> {
-        behavior_snapshot(self.document.document(), behavior)
+    pub fn behavior_to_string(&self, behavior: &str) -> Option<String> {
+        behavior_to_string(self.document.document(), behavior)
     }
 
-    pub fn meta_snapshot(&self, key: &str) -> Option<String> {
-        meta_snapshot(self.document.document(), key)
+    pub fn meta_to_string(&self, key: &str) -> Option<String> {
+        meta_to_string(self.document.document(), key)
     }
 
     pub fn set_meta_entry(
@@ -301,9 +301,125 @@ impl LayoutEngine {
         set_meta_property(self.document.document_mut(), key, formatted);
         Ok(())
     }
+
+    /// Add a new layer with the given name and bindings.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the new layer
+    /// * `bindings` - The key bindings for the layer
+    ///
+    /// # Returns
+    /// * `Ok(())` if successful
+    /// * `Err(LayoutEngineError)` if layer already exists or bindings are invalid
+    pub fn add_layer(&mut self, name: &str, bindings: &[String]) -> Result<(), LayoutEngineError> {
+        // Check if layer already exists
+        if self.layer_names().contains(&name.to_string()) {
+            return Err(LayoutEngineError::Validation(format!(
+                "layer '{}' already exists",
+                name
+            )));
+        }
+
+        // Validate bindings
+        if bindings.is_empty() {
+            return Err(LayoutEngineError::Validation(
+                "layer must have at least one binding".into(),
+            ));
+        }
+
+        // Add the layer using the provider
+        self.document
+            .add_layer(name, bindings)
+            .map_err(LayoutEngineError::from)
+    }
+
+    /// Remove a layer by name.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the layer to remove
+    ///
+    /// # Returns
+    /// * `Ok(())` if successful
+    /// * `Err(LayoutEngineError)` if layer doesn't exist or cannot be removed
+    pub fn remove_layer(&mut self, name: &str) -> Result<(), LayoutEngineError> {
+        // Check if layer exists
+        if !self.layer_names().contains(&name.to_string()) {
+            return Err(LayoutEngineError::Validation(format!(
+                "layer '{}' does not exist",
+                name
+            )));
+        }
+
+        // Remove the layer using the provider
+        self.document
+            .remove_layer(name)
+            .map_err(LayoutEngineError::from)
+    }
+
+    /// Get information about a specific layer.
+    ///
+    /// # Arguments
+    /// * `name` - The name of the layer
+    ///
+    /// # Returns
+    /// * `Some(LayerInfo)` if the layer exists
+    /// * `None` if the layer doesn't exist
+    pub fn get_layer(&self, name: &str) -> Option<LayerInfo> {
+        if !self.layer_names().contains(&name.to_string()) {
+            return None;
+        }
+
+        let bindings = self.layer_bindings(name).ok()?;
+        let index = self
+            .layer_names()
+            .iter()
+            .position(|n| n == name)
+            .unwrap_or(0);
+
+        Some(LayerInfo {
+            name: name.to_string(),
+            index,
+            binding_count: bindings.len(),
+            bindings,
+        })
+    }
+
+    /// List all layers with their information.
+    ///
+    /// # Returns
+    /// * Vector of `LayerInfo` for all layers in the keymap
+    pub fn list_layers(&self) -> Vec<LayerInfo> {
+        let names = self.layer_names();
+        names
+            .iter()
+            .enumerate()
+            .filter_map(|(index, name)| {
+                let bindings = self.layer_bindings(name).ok()?;
+                Some(LayerInfo {
+                    name: name.clone(),
+                    index,
+                    binding_count: bindings.len(),
+                    bindings,
+                })
+            })
+            .collect()
+    }
 }
 
-fn layer_snapshot(document: &DtsDocument, layer: &str) -> Option<String> {
+/// Information about a layer in the keymap.
+#[derive(Debug, Clone)]
+pub struct LayerInfo {
+    /// The name of the layer
+    pub name: String,
+    /// The index/position of the layer in the keymap
+    pub index: usize,
+    /// The number of bindings in the layer
+    pub binding_count: usize,
+    /// The actual bindings
+    pub bindings: Vec<String>,
+}
+
+fn layer_to_string(document: &DtsDocument, layer: &str) -> Option<String> {
     let node = find_layer_node(&document.items, layer)?;
     let prop = find_bindings_property(node)?;
     let bindings = parse_binding_list(&prop.value.raw);
@@ -314,7 +430,7 @@ fn layer_snapshot(document: &DtsDocument, layer: &str) -> Option<String> {
     }
 }
 
-fn combo_snapshot(document: &DtsDocument, combo: &str) -> Option<String> {
+fn combo_to_string(document: &DtsDocument, combo: &str) -> Option<String> {
     let combos_root = find_layer_node(&document.items, "combos")?;
     let combo_node = find_child_node(combos_root, combo)?;
     let mut parts = Vec::new();
@@ -357,7 +473,7 @@ fn combo_snapshot(document: &DtsDocument, combo: &str) -> Option<String> {
     }
 }
 
-fn layer_order_snapshot(document: &DtsDocument) -> String {
+fn layer_order_to_string(document: &DtsDocument) -> String {
     if let Some(keymap) = find_layer_node(&document.items, "keymap") {
         let mut names = Vec::new();
         for item in &keymap.children {
@@ -421,7 +537,7 @@ fn find_child_node<'a>(parent: &'a DtNode, name: &str) -> Option<&'a DtNode> {
     None
 }
 
-fn behavior_snapshot(document: &DtsDocument, behavior: &str) -> Option<String> {
+fn behavior_to_string(document: &DtsDocument, behavior: &str) -> Option<String> {
     let node = find_behavior_node(&document.items, behavior)?;
     let mut parts = Vec::new();
     for prop in &node.properties {
@@ -480,7 +596,7 @@ fn array_to_binding_strings(array: &[TomlValue]) -> Result<Vec<String>, LayoutEn
     Ok(result)
 }
 
-fn meta_snapshot(document: &DtsDocument, key: &str) -> Option<String> {
+fn meta_to_string(document: &DtsDocument, key: &str) -> Option<String> {
     let node = find_meta_node(&document.items)?;
     node.properties
         .iter()

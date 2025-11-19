@@ -17,7 +17,7 @@ use super::{
 };
 
 /// Adapter-friendly view of the parsed layout.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct AdapterLayout {
     pub layers: Vec<LayerSpec>,
     pub combos: Vec<ComboSpec>,

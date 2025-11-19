@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use minijinja::Error as MiniJinjaError;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -245,6 +246,10 @@ pub enum TemplateError {
     UnexpectedContent { literal: String, context: String },
     #[error("rendered DTS has trailing content outside the template: `{trailing}`")]
     TrailingContent { trailing: String },
+    #[error("failed to build template context: {0}")]
+    Context(#[from] serde_json::Error),
+    #[error(transparent)]
+    Render(#[from] MiniJinjaError),
 }
 
 #[cfg(test)]
@@ -288,7 +293,8 @@ mod tests {
             .extras
             .insert("custom_defined_behaviors".into(), json!("/* custom */\n"));
 
-        let rendered = render_layout_with_template(&layout, template);
+        let rendered =
+            render_layout_with_template(&layout, template).expect("template should render");
         let document = DtsDocument::parse_str(&rendered).expect("template renders valid DTS");
         let mut extracted = AdapterLayout::from_document(&document);
         merge_template_metadata(&mut extracted, template, &rendered)
@@ -370,7 +376,8 @@ mod tests {
 {{keymap_node}}
 "#;
 
-        let rendered = render_layout_with_template(&layout, template);
+        let rendered =
+            render_layout_with_template(&layout, template).expect("template should render");
         DtsDocument::parse_str(&rendered).expect("template output should be valid DTS");
 
         assert_eq!(

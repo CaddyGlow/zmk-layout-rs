@@ -1,20 +1,31 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use serde_json::Value;
+use minijinja::{AutoEscape, Environment};
+use serde_json::{Map, Value};
 
 use super::{
     layout::AdapterLayout,
+    template::TemplateError,
     types::{
         BehaviorSpec, ComboSpec, InputListenerNodeSpec, InputListenerSpec, InputProcessorSpec,
         LayerSpec, MacroSpec,
     },
 };
 
-pub(crate) fn render_layout_with_template(layout: &AdapterLayout, template: &str) -> String {
+pub(crate) fn render_layout_with_template(
+    layout: &AdapterLayout,
+    template: &str,
+) -> Result<String, TemplateError> {
     let mut replacements = build_template_replacements(layout);
     let has_explicit_includes = layout.metadata.extras.contains_key("includes");
     normalize_template_includes(template, &mut replacements, has_explicit_includes);
-    apply_template(template, &replacements)
+    let context = build_template_context(layout, replacements)?;
+
+    let mut env = Environment::new();
+    env.set_auto_escape_callback(|_| AutoEscape::None);
+    env.set_keep_trailing_newline(true);
+
+    Ok(env.render_str(template, &context)?)
 }
 
 fn build_template_replacements(layout: &AdapterLayout) -> BTreeMap<String, String> {
@@ -109,11 +120,25 @@ fn normalize_template_includes(
         if replacements.contains_key(key) {
             replacements.insert(key.to_string(), filtered.clone());
         }
-        let content_key = format!("content.{key}");
-        if replacements.contains_key(&content_key) {
-            replacements.insert(content_key, filtered.clone());
-        }
     }
+}
+
+fn build_template_context(
+    layout: &AdapterLayout,
+    placeholders: BTreeMap<String, String>,
+) -> Result<Value, TemplateError> {
+    let mut context = Map::new();
+    let mut content = Map::new();
+    for (key, value) in placeholders {
+        let json_value = Value::String(value);
+        content.insert(key.clone(), json_value.clone());
+        context.insert(key, json_value);
+    }
+
+    context.insert("content".into(), Value::Object(content));
+    context.insert("layout".into(), serde_json::to_value(layout)?);
+
+    Ok(Value::Object(context))
 }
 
 fn collect_template_include_lines(template: &str) -> BTreeSet<String> {
@@ -147,8 +172,7 @@ fn filter_includes_not_in_template(value: &str, template_lines: &BTreeSet<String
 }
 
 fn insert_placeholder(map: &mut BTreeMap<String, String>, key: &str, value: String) {
-    map.insert(key.to_string(), value.clone());
-    map.insert(format!("content.{key}"), value);
+    map.insert(key.to_string(), value);
 }
 
 fn metadata_text(extras: &BTreeMap<String, Value>, key: &str) -> Option<String> {
@@ -811,36 +835,4 @@ fn sanitize_node_identifier(name: &str) -> String {
     } else {
         result
     }
-}
-
-fn apply_template(template: &str, replacements: &BTreeMap<String, String>) -> String {
-    let mut output = String::with_capacity(template.len());
-    let mut cursor = 0;
-    while let Some(start) = template[cursor..].find("{{") {
-        let absolute_start = cursor + start;
-        output.push_str(&template[cursor..absolute_start]);
-        let after_start = absolute_start + 2;
-        if let Some(end) = template[after_start..].find("}}") {
-            let absolute_end = after_start + end;
-            let key = template[after_start..absolute_end].trim();
-            let normalized = key.split_whitespace().collect::<String>();
-            let content_variant = normalized.strip_prefix("content.").map(|s| s.to_string());
-            if let Some(replacement) = replacements.get(&normalized).cloned().or_else(|| {
-                content_variant
-                    .as_ref()
-                    .and_then(|variant| replacements.get(variant).cloned())
-            }) {
-                output.push_str(&replacement);
-                cursor = absolute_end + 2;
-            } else {
-                output.push_str(&template[absolute_start..absolute_end + 2]);
-                cursor = absolute_end + 2;
-            }
-        } else {
-            output.push_str(&template[absolute_start..]);
-            return output;
-        }
-    }
-    output.push_str(&template[cursor..]);
-    output
 }

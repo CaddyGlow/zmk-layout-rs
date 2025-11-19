@@ -28,6 +28,7 @@ fn run_cli() -> Result<(), CliError> {
         Command::Apply(args) => run_apply(&args)?,
         Command::Validate(args) => run_validate(&args)?,
         Command::Diff(args) => run_diff(&args)?,
+        Command::Script(args) => run_script(&args)?,
         Command::Firmware(cmd) => run_firmware(cmd)?,
     };
     std::process::exit(code);
@@ -45,6 +46,7 @@ enum Command {
     Apply(ApplyArgs),
     Validate(ValidateArgs),
     Diff(DiffArgs),
+    Script(ScriptArgs),
     #[command(subcommand)]
     Firmware(FirmwareCommand),
 }
@@ -102,6 +104,18 @@ struct ValidateArgs {
 struct DiffArgs {
     #[command(flatten)]
     shared: SharedArgs,
+}
+
+#[derive(Args, Clone)]
+struct ScriptArgs {
+    #[arg(long, value_name = "FILE", help = "Rhai script file to execute")]
+    script: PathBuf,
+    #[arg(long = "layout", value_name = "DTS", help = "Layout file to transform")]
+    layout: PathBuf,
+    #[arg(long, value_name = "FILE", help = "Write updated layout to this file")]
+    output: Option<PathBuf>,
+    #[arg(long = "diff", help = "Show diff instead of writing output")]
+    show_diff: bool,
 }
 
 #[derive(Subcommand)]
@@ -242,6 +256,61 @@ fn run_diff(args: &DiffArgs) -> Result<i32, CliError> {
     }
     let updated = serialize_document(exec.document)?;
     print_diff(&base_text, &updated, &args.shared.base_layout);
+    Ok(0)
+}
+
+fn run_script(args: &ScriptArgs) -> Result<i32, CliError> {
+    let script_text = fs::read_to_string(&args.script).map_err(|source| CliError::ReadFile {
+        path: args.script.clone(),
+        source,
+    })?;
+
+    let base_text = fs::read_to_string(&args.layout).map_err(|source| CliError::ReadFile {
+        path: args.layout.clone(),
+        source,
+    })?;
+    let dts = DtsDocument::parse_str(&base_text).map_err(|source| CliError::ParseLayout {
+        path: args.layout.clone(),
+        source,
+    })?;
+    let document = KeymapDocument::from_document(dts);
+
+    let script_dir = args.script.parent().map(|p| {
+        if p.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            p.to_path_buf()
+        }
+    });
+
+    let result =
+        zmk_layout_rs::tasks::execute_script(document, &script_text, script_dir.as_deref())?;
+
+    if !result.logs.is_empty() {
+        for log in &result.logs {
+            eprintln!("{}", log);
+        }
+    }
+
+    if let Some(error) = result.error {
+        eprintln!("Script execution failed: {}", error);
+        return Ok(2);
+    }
+
+    let output = serialize_document(result.document)?;
+
+    if args.show_diff {
+        print_diff(&base_text, &output, &args.layout);
+    } else if let Some(path) = &args.output {
+        fs::write(path, output).map_err(|source| CliError::WriteFile {
+            path: path.clone(),
+            source,
+        })?;
+        eprintln!("wrote updated layout to {}", path.display());
+    } else {
+        print!("{}", output);
+    }
+
     Ok(0)
 }
 
@@ -393,6 +462,15 @@ fn print_build_report(report: &BuildReport) {
         for path in &report.artifacts.files {
             println!("  - {}", path.display());
         }
+    }
+    match &report.logs_path {
+        Some(path) => println!("logs     : {}", path.display()),
+        None => println!("logs     : (not captured)"),
+    }
+    if let Some(path) = &report.build_info_path {
+        println!("build-info: {}", path.display());
+    } else {
+        println!("build-info: (not written)");
     }
 }
 fn format_targets(request: &BuildRequest) -> String {
@@ -605,4 +683,6 @@ enum CliError {
     FirmwareLayout(String),
     #[error("invalid env specification `{0}`, expected KEY=VALUE")]
     InvalidEnv(String),
+    #[error("script execution error: {0}")]
+    ScriptExecution(#[from] zmk_layout_rs::tasks::ScriptExecutionError),
 }

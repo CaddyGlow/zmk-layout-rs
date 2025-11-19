@@ -321,6 +321,31 @@ fn template_preserves_spacing() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn template_supports_loops() -> Result<(), Box<dyn Error>> {
+    let doc = DtsDocument::parse_str(&fixture("ast_walker_complex"))?;
+    let layout = AdapterLayout::from_document(&doc);
+    let json = layout.to_standard_json()?;
+
+    let template = r#"
+/ {
+    keymap {
+        compatible = "zmk,keymap";
+{% for layer in layout.layers %}
+        {{ layer.name }} {
+            bindings = < {{ layer.bindings | join(" ") }} >;
+        };
+{% endfor %}
+    };
+};
+"#;
+
+    let rendered = render_standard_template(&json, template)?;
+    assert!(rendered.contains("default_layer"));
+    assert!(rendered.contains("bindings = < &kp A"));
+    Ok(())
+}
+
+#[test]
 fn template_export_strips_metadata_sections_before_parse() -> Result<(), Box<dyn Error>> {
     const TEMPLATE: &str = r#"/* Includes */
 {{includes}}

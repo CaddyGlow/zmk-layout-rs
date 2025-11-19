@@ -101,7 +101,7 @@ pub fn import_standard_str_with_template(
         return Ok(layout.apply_to_document(template)?);
     }
 
-    let rendered = render_layout_with_template(&layout, template_source);
+    let rendered = render_layout_with_template(&layout, template_source)?;
     let document = DtsDocument::parse_str(&rendered).map_err(DtsError::from)?;
     Ok(document)
 }
@@ -120,7 +120,7 @@ pub fn import_standard_file_with_template(
 /// The returned string preserves the template's whitespace instead of going through serialization.
 pub fn render_standard_template(json: &str, template_source: &str) -> Result<String, AdapterError> {
     let layout = AdapterLayout::from_standard_json(json)?;
-    let rendered = render_layout_with_template(&layout, template_source);
+    let rendered = render_layout_with_template(&layout, template_source)?;
     DtsDocument::parse_str(&rendered).map_err(DtsError::from)?;
     Ok(rendered)
 }
