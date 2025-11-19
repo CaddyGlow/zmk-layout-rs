@@ -98,6 +98,14 @@ fn firmware_builder_runs_moergo_toolchain() {
         let artifacts = workspace.join("artifacts");
         fs::create_dir_all(&artifacts).expect("artifact dir");
         fs::write(artifacts.join("left.uf2"), b"demo").expect("artifact");
+        assert!(
+            workspace.join("config/nice_nano_v2.keymap").exists(),
+            "keymap should be staged for the MoErgo toolchain"
+        );
+        assert!(
+            workspace.join("config/nice_nano_v2.conf").exists(),
+            "kconfig should be staged for the MoErgo toolchain"
+        );
     });
     let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()));
     let output_dir = tempdir().expect("tempdir");
@@ -105,7 +113,7 @@ fn firmware_builder_runs_moergo_toolchain() {
         .builder()
         .keyboard("glove80")
         .target("left")
-        .layout_json_path(fixture("demo_layout.json"))
+        .layout_files(fixture("cli_base.dts"), Some(fixture("sample_config.dtsi")))
         .output_dir(output_dir.path().to_path_buf())
         .build()
         .expect("request");
@@ -153,8 +161,20 @@ fn firmware_builder_runs_moergo_toolchain() {
         Some("nice_nano_v2")
     );
     assert_eq!(
+        record.env.get("BOARD_NAME").map(String::as_str),
+        Some("nice_nano_v2")
+    );
+    assert_eq!(
         record.env.get("MOERGO_SHIELD").map(String::as_str),
         Some("glove80_left")
+    );
+    assert_eq!(
+        record.env.get("KEYMAP").map(String::as_str),
+        Some("/workspace/config/nice_nano_v2.keymap")
+    );
+    assert_eq!(
+        record.env.get("KCONFIG").map(String::as_str),
+        Some("/workspace/config/nice_nano_v2.conf")
     );
 }
 
@@ -177,10 +197,7 @@ fn moergo_toolchain_accepts_keymap_inputs() {
         .builder()
         .keyboard("glove80")
         .target("right")
-        .layout_files(
-            fixture("cli_base.dts"),
-            Some(fixture("sample_config.dtsi")),
-        )
+        .layout_files(fixture("cli_base.dts"), Some(fixture("sample_config.dtsi")))
         .output_dir(output_dir.path().to_path_buf())
         .build()
         .expect("request");
@@ -207,10 +224,7 @@ fn firmware_builder_runs_zmk_toolchain() {
         .keyboard("glove80")
         .toolchain("zmk")
         .target("right")
-        .layout_files(
-            fixture("sample_keymap.dtsi"),
-            Some(fixture("sample_config.dtsi")),
-        )
+        .layout_files(fixture("cli_base.dts"), Some(fixture("sample_config.dtsi")))
         .output_dir(output_dir.path().to_path_buf())
         .build()
         .expect("request");
@@ -260,7 +274,7 @@ fn firmware_builder_emits_progress_updates() {
     let request = builder
         .builder()
         .keyboard("glove80")
-        .layout_json_path(fixture("demo_layout.json"))
+        .layout_files(fixture("cli_base.dts"), Some(fixture("sample_config.dtsi")))
         .output_dir(output_dir.path().to_path_buf())
         .progress(progress_handle)
         .build()
@@ -338,7 +352,10 @@ board = "nice_nano_v2"
         .builder()
         .keyboard("demo")
         .target("main")
-        .layout_json_path(fixture("demo_layout.json"))
+        .layout_files(
+            fixture("sample_keymap.dtsi"),
+            Some(fixture("sample_config.dtsi")),
+        )
         .output_dir(output_dir.path().to_path_buf())
         .build()
         .expect("request");

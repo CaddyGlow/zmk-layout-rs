@@ -42,6 +42,7 @@ impl Toolchain for MoergoToolchain {
     ) -> Result<ToolchainRunResult, BuildError> {
         let config = resolve_toolchain_config(ctx.profile, target, &ctx.profile.id);
         let layout_path = ensure_layout_json(ctx.workspace, ctx.layout)?;
+        let keymap_inputs = stage_moergo_inputs(ctx.workspace, ctx.layout, &target.board)?;
         let container_layout = ctx
             .workspace
             .container_path(&layout_path)
@@ -49,12 +50,29 @@ impl Toolchain for MoergoToolchain {
 
         let mut env = config.env.clone();
         env.insert("MOERGO_BOARD".into(), target.board.clone());
+        env.insert("BOARD_NAME".into(), target.board.clone());
         if let Some(shield) = &target.shield {
             env.insert("MOERGO_SHIELD".into(), shield.clone());
         }
         if let Some(variant) = &target.variant {
             env.insert("MOERGO_VARIANT".into(), variant.clone());
         }
+        env.insert(
+            "KEYMAP".into(),
+            ctx.workspace
+                .container_path(&keymap_inputs.keymap)
+                .ok_or(BuildError::MissingLayoutArtifact("keymap"))?
+                .display()
+                .to_string(),
+        );
+        env.insert(
+            "KCONFIG".into(),
+            ctx.workspace
+                .container_path(&keymap_inputs.kconfig)
+                .ok_or(BuildError::MissingLayoutArtifact("kconfig"))?
+                .display()
+                .to_string(),
+        );
         env.insert(
             "MOERGO_LAYOUT_JSON".into(),
             container_layout.display().to_string(),
@@ -109,6 +127,39 @@ fn ensure_layout_json(
         return Ok(dest);
     }
     Err(BuildError::MissingLayoutArtifact("layout.json"))
+}
+
+struct MoergoInputPaths {
+    keymap: PathBuf,
+    kconfig: PathBuf,
+}
+
+fn stage_moergo_inputs(
+    workspace: &WorkspaceHandle,
+    artifacts: &KeymapArtifacts,
+    board: &str,
+) -> Result<MoergoInputPaths, BuildError> {
+    let keymap_src = artifacts
+        .keymap
+        .as_ref()
+        .ok_or(BuildError::MissingLayoutArtifact("keymap"))?;
+    let config_src = artifacts
+        .config
+        .as_ref()
+        .ok_or(BuildError::MissingLayoutArtifact("kconfig"))?;
+
+    let config_root = workspace.config_dir();
+    fs::create_dir_all(config_root).map_err(BuildError::Io)?;
+
+    let keymap_dest = config_root.join(format!("{board}.keymap"));
+    fs::copy(keymap_src, &keymap_dest).map_err(BuildError::Io)?;
+    let kconfig_dest = config_root.join(format!("{board}.conf"));
+    fs::copy(config_src, &kconfig_dest).map_err(BuildError::Io)?;
+
+    Ok(MoergoInputPaths {
+        keymap: keymap_dest,
+        kconfig: kconfig_dest,
+    })
 }
 
 fn collect_artifacts(
