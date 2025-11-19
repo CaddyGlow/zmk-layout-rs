@@ -4,8 +4,8 @@ use std::{fs, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use zmk_layout_rs::{
     build::{
-        BuildReport, BuildRequest, BuildRequestBuilder, BuildRequestError, CliDockerBackend,
-        CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
+        BuildError, BuildReport, BuildRequest, BuildRequestBuilder, BuildRequestError,
+        CliDockerBackend, CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
     },
     dts::DtsDocument,
     providers::KeymapDocument,
@@ -108,7 +108,7 @@ struct DiffArgs {
 
 #[derive(Args, Clone)]
 struct ScriptArgs {
-    #[arg(long, value_name = "FILE", help = "Rhai script file to execute")]
+    #[arg(long, value_name = "FILE", help = "Lua script file to execute")]
     script: PathBuf,
     #[arg(long = "layout", value_name = "DTS", help = "Layout file to transform")]
     layout: PathBuf,
@@ -328,7 +328,14 @@ fn run_firmware_build(args: &FirmwareBuildArgs) -> Result<i32, CliError> {
     if args.dry_run {
         return Ok(0);
     }
-    let report = builder.build(request)?;
+    let report = match builder.build(request) {
+        Ok(report) => report,
+        Err(BuildError::Cancelled) => {
+            eprintln!("build cancelled by user");
+            return Ok(130);
+        }
+        Err(err) => return Err(err.into()),
+    };
     print_build_report(&report);
     if report.success { Ok(0) } else { Ok(2) }
 }

@@ -30,7 +30,7 @@ comment = "Move ESC onto TAB"
 - `[base]` is informational metadata so humans remember which template/version the plan expects.
   The CLI always requires the actual base layout via `--base-layout`, so these fields are warnings only.
 - `[config]` stores the schema format version, default conflict policy, optional global comment, and (later)
-  a path to a Rhai conflict script. Every file must set `format_version`.
+  a path to a Lua conflict script. Every file must set `format_version`.
 - `[[tasks]]` entries describe ordered operations. Each task needs a unique `target` string that describes
   which structure it owns (e.g., `layers.base.bindings[0]`, `combos.my_combo`). Targets power conflict
   detection so overlapping edits are obvious.
@@ -45,7 +45,7 @@ comment = "Move ESC onto TAB"
 | `layer-order` | `layer` plus `position` *or* `before`/`after`                            | `layers.order.<layer>`        | Reorders the layer list in the keymap node. |
 | `behavior`    | `behavior`, `settings` map                                              | `behaviors.<name>`            | Updates behavior properties (`bindings`, timing fields, labels, etc.). |
 | `meta`        | `key`, `value`                                                          | `meta.<key>`                  | Stores arbitrary metadata under a top-level `meta { key = value; }` block for documentation/export tooling. |
-| `script`      | `filename` or `script`, optional `args`                                 | `scripts.<identifier>`        | Executes Rhai automation with access to the same layout engine used by declarative tasks. |
+| `script`      | `filename` or `script`, optional `args`                                 | `scripts.<identifier>`        | Executes Lua automation with access to the same layout engine used by declarative tasks. |
 
 ### Conflict Policies & `expected`
 
@@ -54,7 +54,7 @@ Each task inherits `config.default_conflict` and may override it per entry. Poli
 - `prompt` (default): report a conflict and stop the run.
 - `override`: log the mismatch and keep going.
 - `skip`: log the mismatch and ignore the task.
-- `script`: reserved for Rhai automation (no-op today).
+- `script`: reserved for Lua automation (no-op today).
 
 To guard against upstream changes, provide either `from = "&kp Q"` (override tasks) or the generic
 `expected = "layers base order"` field. When the actual layout does not match `expected`, the per-task
@@ -148,10 +148,10 @@ These comments are idempotent — editing the task file and reapplying updates t
 duplicated lines — and they are included in `TaskOutcome` logs (“combo conditions: …”) so plain runs
 still surface the data.
 
-## Rhai Scripting
+## Lua Scripting
 
-`script` tasks are now powered by an embedded Rhai engine. Scripts can either be inline
-(`script = """ ... """`) or reference a `.rhai` file relative to the task file. Each script
+`script` tasks are now powered by an embedded Lua engine. Scripts can either be inline
+(`script = """ ... """`) or reference a `.lua` file relative to the task file. Each script
 receives a helper API roughly equivalent to the declarative task set:
 
 - `set_binding(layer: string, index: int, binding: string)` – replace a single binding (`override`).
@@ -171,14 +171,14 @@ succeeds and the CLI is in apply mode. `validate` still executes the script so l
 but the resulting layout is discarded.
 
 When `config.conflict_script` is set and a task uses `conflict = "script"`, conflicts call into the
-referenced Rhai file. Define a `resolve(conflict)` function that returns a map with an `action`
+referenced Lua file. Define a `resolve(conflict)` function that returns a map with an `action`
 (`"override"`, `"skip"`, or `"abort"`) and an optional `message`. Example:
 
-```rhai
-fn resolve(conflict) {
-    if conflict.reason.contains("layers.base") {
-        return #{ action: "override", message: "trusted override" };
-    }
-    return #{ action: "abort", message: "needs manual review" };
-}
+```lua
+function resolve(conflict)
+    if string.find(conflict.reason, "layers.base") then
+        return { action = "override", message = "trusted override" }
+    end
+    return { action = "abort", message = "needs manual review" }
+end
 ```

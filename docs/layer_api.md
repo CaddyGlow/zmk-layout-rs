@@ -1,6 +1,6 @@
 # Layer Management API Documentation
 
-This document describes the layer management functions available in Rhai scripts for ZMK keymap manipulation.
+This document describes the layer management functions available in Lua scripts for ZMK keymap manipulation.
 
 ## Overview
 
@@ -22,14 +22,14 @@ fn add_layer(name: &str, bindings: Array) -> Result<(), Error>
 - `bindings`: Array of binding strings (e.g., `["&kp A", "&kp B", "&kp C"]`)
 
 **Example:**
-```rhai
-// Add a new layer with basic bindings
-add_layer("CustomNav", [
+```lua
+-- Add a new layer with basic bindings
+add_layer("CustomNav", {
     "&kp LEFT",
     "&kp DOWN",
     "&kp UP",
-    "&kp RIGHT"
-]);
+    "&kp RIGHT",
+})
 ```
 
 **Error Cases:**
@@ -52,17 +52,18 @@ fn remove_layer(name: &str) -> Result<(), Error>
 - `name`: The name of the layer to remove
 
 **Example:**
-```rhai
-// Remove a layer by name
-remove_layer("Typing");
+```lua
+-- Remove a layer by name
+remove_layer("Typing")
 
-// With error handling
-try {
-    remove_layer("OldLayer");
-    log("Layer removed successfully");
-} catch (error) {
-    log(`Failed to remove layer: ${error}`);
-}
+-- With error handling
+local ok, err = pcall(function()
+    remove_layer("OldLayer")
+    log("Layer removed successfully")
+end)
+if not ok then
+    log(string.format("Failed to remove layer: %s", err))
+end
 ```
 
 **Error Cases:**
@@ -91,19 +92,19 @@ A map containing:
 - `bindings` (array): Array of binding strings
 
 **Example:**
-```rhai
-let cursor = get_layer("Cursor");
-log(`Layer: ${cursor.name}`);
-log(`Index: ${cursor.index}`);
-log(`Bindings: ${cursor.binding_count}`);
+```lua
+local cursor = get_layer("Cursor")
+log(string.format("Layer: %s", cursor.name))
+log(string.format("Index: %d", cursor.index))
+log(string.format("Bindings: %d", cursor.binding_count))
 
-// Access specific binding
-log(`First binding: ${cursor.bindings[0]}`);
+-- Access specific binding (Lua arrays are 1-based)
+log(string.format("First binding: %s", cursor.bindings[1]))
 
-// Iterate over bindings
-for binding in cursor.bindings {
-    log(`  ${binding}`);
-}
+-- Iterate over bindings
+for _, binding in ipairs(cursor.bindings) do
+    log(string.format("  %s", binding))
+end
 ```
 
 **Error Cases:**
@@ -124,17 +125,22 @@ fn list_layers() -> Result<Array, Error>
 Array of maps, each containing the same fields as `get_layer()`
 
 **Example:**
-```rhai
-let layers = list_layers();
+```lua
+local layers = list_layers()
 
-log(`Total layers: ${layers.len()}`);
+log(string.format("Total layers: %d", #layers))
 
-for layer in layers {
-    log(`${layer.index}. ${layer.name} (${layer.binding_count} bindings)`);
-}
+for _, layer in ipairs(layers) do
+    log(string.format("%d. %s (%d bindings)", layer.index, layer.name, layer.binding_count))
+end
 
-// Filter for specific layers
-let nav_layers = layers.filter(|l| l.name.contains("Nav"));
+-- Filter for specific layers
+local nav_layers = {}
+for _, layer in ipairs(layers) do
+    if string.find(layer.name, "Nav") then
+        table.insert(nav_layers, layer)
+    end
+end
 ```
 
 ---
@@ -152,14 +158,14 @@ fn layer_count() -> int
 Integer count of layers in the keymap
 
 **Example:**
-```rhai
-let count = layer_count();
-log(`Keymap has ${count} layers`);
+```lua
+local count = layer_count()
+log(string.format("Keymap has %d layers", count))
 
-// Check before adding
-if layer_count() < 20 {
-    add_layer("NewLayer", ["&kp A"]);
-}
+-- Check before adding
+if layer_count() < 20 then
+    add_layer("NewLayer", {"&kp A"})
+end
 ```
 
 ---
@@ -168,36 +174,38 @@ if layer_count() < 20 {
 
 Here's a complete script demonstrating layer management:
 
-```rhai
-log("=== Layer Management Example ===");
+```lua
+log("=== Layer Management Example ===")
 
-// 1. List current layers
-log("\nCurrent layers:");
-for layer in list_layers() {
-    log(`  ${layer.index}. ${layer.name}`);
-}
+-- 1. List current layers
+log("\nCurrent layers:")
+for _, layer in ipairs(list_layers()) do
+    log(string.format("  %d. %s", layer.index, layer.name))
+end
 
-// 2. Get specific layer info
-let cursor = get_layer("Cursor");
-log(`\nCursor layer has ${cursor.binding_count} bindings`);
+-- 2. Get specific layer info
+local cursor = get_layer("Cursor")
+log(string.format("\nCursor layer has %d bindings", cursor.binding_count))
 
-// 3. Remove unwanted layer
-try {
-    remove_layer("Typing");
-    log("\nRemoved Typing layer");
-} catch (error) {
-    log(`\nCould not remove Typing layer: ${error}`);
-}
+-- 3. Remove unwanted layer
+local removed, remove_err = pcall(function()
+    remove_layer("Typing")
+end)
+if removed then
+    log("\nRemoved Typing layer")
+else
+    log(string.format("\nCould not remove Typing layer: %s", remove_err))
+end
 
-// 4. Add new layer
-add_layer("CustomFunc", [
+-- 4. Add new layer
+add_layer("CustomFunc", {
     "&kp F1", "&kp F2", "&kp F3", "&kp F4",
-    "&kp F5", "&kp F6", "&kp F7", "&kp F8"
-]);
-log("\nAdded CustomFunc layer");
+    "&kp F5", "&kp F6", "&kp F7", "&kp F8",
+})
+log("\nAdded CustomFunc layer")
 
-// 5. Verify changes
-log(`\nFinal layer count: ${layer_count()}`);
+-- 5. Verify changes
+log(string.format("\nFinal layer count: %d", layer_count()))
 ```
 
 ## Best Practices
@@ -206,25 +214,28 @@ log(`\nFinal layer count: ${layer_count()}`);
 
 Always use `try-catch` blocks when removing layers:
 
-```rhai
-try {
-    remove_layer("OldLayer");
-} catch (error) {
-    log(`Warning: ${error}`);
-}
+```lua
+local ok, err = pcall(function()
+    remove_layer("OldLayer")
+end)
+if not ok then
+    log(string.format("Warning: %s", err))
+end
 ```
 
 ### 2. Validation
 
 Check if a layer exists before operations:
 
-```rhai
-try {
-    let layer = get_layer("Target");
-    // Layer exists, proceed
-} catch {
-    // Layer doesn't exist, handle accordingly
-}
+```lua
+local exists = pcall(function()
+    get_layer("Target")
+end)
+if exists then
+    -- Layer exists, proceed
+else
+    -- Layer doesn't exist, handle accordingly
+end
 ```
 
 ### 3. Naming Conventions
@@ -238,36 +249,35 @@ Follow these naming conventions for layers:
 
 Remember that layer indices change when layers are added/removed:
 
-```rhai
-// Get current state before modifications
-let initial_layers = list_layers();
+```lua
+-- Get current state before modifications
+local initial_layers = list_layers()
 
-// Perform modifications
-remove_layer("OldLayer");
-add_layer("NewLayer", bindings);
+-- Perform modifications
+remove_layer("OldLayer")
+add_layer("NewLayer", bindings)
 
-// Verify new state
-let final_layers = list_layers();
-log(`Layers changed from ${initial_layers.len()} to ${final_layers.len()}`);
+-- Verify new state
+local final_layers = list_layers()
+log(string.format("Layers changed from %d to %d", #initial_layers, #final_layers))
 ```
 
 ## Integration with Existing Functions
 
 These layer management functions work seamlessly with existing binding functions:
 
-```rhai
-// Get layer
-let nav = get_layer("Navigation");
+```lua
+-- Get layer
+local nav = get_layer("Navigation")
 
-// Modify specific binding
-set_binding("Navigation", 0, "&kp HOME");
+-- Modify specific binding
+set_binding("Navigation", 0, "&kp HOME")
 
-// Update entire layer
-set_layer("Navigation", ["&kp HOME", "&kp END", "&kp PG_UP", "&kp PG_DN"]);
+-- Update entire layer
+set_layer("Navigation", {"&kp HOME", "&kp END", "&kp PG_UP", "&kp PG_DN"})
 
-// Reorder layers
-// (assuming reorder_layer function exists)
-reorder_layer("Navigation", 2);
+-- Reorder layers
+move_layer("Navigation", 2)
 ```
 
 ## Rust API Reference
@@ -304,9 +314,9 @@ pub struct LayerInfo {
 
 ## Error Handling
 
-All layer management functions return `Result` types in Rust and can throw exceptions in Rhai:
+All layer management functions return `Result` types in Rust and surface as runtime errors in Lua:
 
-| Error | Cause | Rhai Behavior |
+| Error | Cause | Lua Behavior |
 |-------|-------|---------------|
 | `LayerNotFound` | Layer doesn't exist | Throws exception |
 | `LayerAlreadyExists` | Duplicate layer name | Throws exception |
@@ -325,19 +335,19 @@ All layer management functions return `Result` types in Rust and can throw excep
 If you have existing scripts that manually manipulate layer nodes, update them to use these functions:
 
 **Before:**
-```rhai
-// Manual manipulation (fragile)
-log("You need to manually remove layer_Typing");
+```lua
+-- Manual manipulation (fragile)
+log("You need to manually remove layer_Typing")
 ```
 
 **After:**
-```rhai
-// Use the API (robust)
-remove_layer("Typing");
+```lua
+-- Use the API (robust)
+remove_layer("Typing")
 ```
 
 ## See Also
 
 - Binding management functions: `set_binding()`, `set_layer()`
-- Layer reordering: `reorder_layer()`
+- Layer reordering: `move_layer()`
 - Combo management: `upsert_combo()`
