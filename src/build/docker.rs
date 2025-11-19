@@ -4,12 +4,13 @@ use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::Duration,
 };
 
 use super::{
@@ -32,6 +33,7 @@ pub struct CliDockerBackend {
 
 impl CliDockerBackend {
     pub fn new() -> Self {
+        Self::install_signal_handlers();
         Self {
             binary: PathBuf::from("docker"),
             checked: AtomicBool::new(false),
@@ -39,6 +41,7 @@ impl CliDockerBackend {
     }
 
     pub fn with_binary(path: impl Into<PathBuf>) -> Self {
+        Self::install_signal_handlers();
         Self {
             binary: path.into(),
             checked: AtomicBool::new(false),
@@ -47,6 +50,17 @@ impl CliDockerBackend {
 
     fn binary(&self) -> &Path {
         &self.binary
+    }
+
+    fn install_signal_handlers() {
+        static SIGNALS: OnceLock<()> = OnceLock::new();
+        SIGNALS.get_or_init(|| {
+            let flag = cancellation_flag();
+            for sig in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {
+                signal_hook::flag::register(sig, flag.clone())
+                    .expect("failed to register signal handler");
+            }
+        });
     }
 }
 
@@ -108,12 +122,7 @@ impl DockerBackend for CliDockerBackend {
             let handler = handler.clone();
             thread::spawn(move || pump_output(stderr, handler, false));
         }
-        let status = child
-            .wait()
-            .map_err(|err| BuildError::Docker(err.to_string()))?;
-        Ok(ProcessStatus {
-            code: status.code().unwrap_or(-1),
-        })
+        wait_on_child(child)
     }
 
     fn build(&self, opts: DockerBuildOptions) -> Result<(), BuildError> {
@@ -130,9 +139,10 @@ impl DockerBackend for CliDockerBackend {
             cmd.arg("--build-arg").arg(format!("{key}={value}"));
         }
         cmd.arg(&opts.context);
-        let status = cmd
-            .status()
+        let child = cmd
+            .spawn()
             .map_err(|err| BuildError::Docker(err.to_string()))?;
+        let status = wait_on_child(child)?;
         if !status.success() {
             return Err(BuildError::Docker("docker build failed".into()));
         }
@@ -150,6 +160,35 @@ impl ProcessStatus {
     pub fn success(&self) -> bool {
         self.code == 0
     }
+}
+
+fn wait_on_child(mut child: Child) -> Result<ProcessStatus, BuildError> {
+    let flag = cancellation_flag();
+    flag.store(false, Ordering::SeqCst);
+    loop {
+        if flag.swap(false, Ordering::SeqCst) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(BuildError::Cancelled);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return Ok(ProcessStatus {
+                    code: status.code().unwrap_or(-1),
+                });
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(150)),
+            Err(err) => {
+                return Err(BuildError::Docker(err.to_string()));
+            }
+        }
+    }
+}
+
+fn cancellation_flag() -> Arc<AtomicBool> {
+    static FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+    FLAG.get_or_init(|| Arc::new(AtomicBool::new(false)))
+        .clone()
 }
 
 /// `docker run` invocation description.

@@ -39,4 +39,6 @@ pub enum BuildError {
     CommandFailed { toolchain: String, code: i32 },
     #[error("missing staged layout artifact `{0}`")]
     MissingLayoutArtifact(&'static str),
+    #[error("build cancelled by signal")]
+    Cancelled,
 }
