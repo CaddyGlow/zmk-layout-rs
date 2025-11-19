@@ -185,6 +185,14 @@ full-featured template mirroring the Python generator output.
 The project includes Docker-based toolchains for building ZMK firmware. The MoErgo toolchain
 (formerly known as glove80-zmk-config) is located in `toolchains/moergo/`.
 
+## Keyboard Profiles
+
+Keyboard profiles describe a keyboard’s hardware spec, firmware catalog, available
+behaviors/combos, and layout templates in a structured YAML format. They live under
+directories such as `example_profile/` and are referenced by firmware manifests
+(`firmware_profiles/*.toml`). See `docs/keyboard_profiles.md` for the spec and
+guidance on creating new profiles.
+
 ### Running a firmware build
 
 ```bash

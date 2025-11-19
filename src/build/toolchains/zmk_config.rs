@@ -290,11 +290,12 @@ impl ZmkConfigToolchain {
             .container_path(ctx.workspace.config_dir())
             .unwrap_or_else(|| PathBuf::from("/workspace/config"));
 
+        let source_dir = container_app_dir.join("app");
         let mut command = vec![
             "west".into(),
             "build".into(),
             "-s".into(),
-            container_app_dir.join("zmk/app").display().to_string(),
+            source_dir.display().to_string(),
             "-d".into(),
             container_build_dir.display().to_string(),
             "-b".into(),
