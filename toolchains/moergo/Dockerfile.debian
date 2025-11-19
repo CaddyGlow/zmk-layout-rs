@@ -1,0 +1,96 @@
+# based on https://github.com/moergo-sc/glove80-zmk-config
+FROM nixpkgs/nix:nixos-23.11 AS base
+ENV PATH=/root/.nix-profile/bin:/usr/bin:/bin
+SHELL ["/usr/bin/bash", "-c"]
+RUN <<EOF
+    set -euo pipefail
+    nix-env -iA cachix -f https://cachix.org/api/v1/install
+    cachix use moergo-glove80-zmk-dev
+    mkdir /config
+    # Mirror ZMK repository to make it easier to reference both branches and
+    # tags without remote namespacing
+    git clone --mirror https://github.com/moergo-sc/zmk /zmk
+    GIT_DIR=/zmk git worktree add --detach /src
+EOF
+# Prepopulate the container's nix store with the build dependencies for the main
+# branch and the most recent three tags
+WORKDIR /src
+RUN <<EOF
+    set -euo pipefail
+    for tag in main $(git tag -l --sort=committerdate | tail -n 3); do
+      git checkout -q --detach $tag
+      nix-shell --run true -A zmk ./default.nix
+    done
+EOF
+
+# We are using debian to get access to packages
+# since we didn't manage to get nixpkgs working on this
+# version of nixpkg/nix
+FROM debian:bullseye-slim
+
+# Install dependencies needed for Nix to work in Debian
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  apt-get update && apt-get install -y \
+  curl \
+  xz-utils \
+  git \
+  ca-certificates \
+  gosu \ 
+  jq \
+  && rm -rf /vars/lib/apt/lists/* && rm -rf /var/lib/apt/lists/* && \
+  gosu --version && \
+  gosu nobody true
+
+
+# Create the nixbld group and users
+RUN groupadd -g 30000 nixbld && \
+  for i in $(seq 1 32); do \
+  useradd -u $((30000 + i)) -g nixbld -G nixbld -d /var/empty -s /sbin/nologin nixbld$i; \
+  done
+
+
+# Copy entire Nix store and related files from the base stage
+COPY --from=base /nix /nix
+
+# Copy the Nix binaries from /usr/bin
+COPY --from=base /usr/bin/nix* /usr/bin/
+
+# Copy the user profile and all its symlinks
+COPY --from=base /root/.nix-profile /root/.nix-profile
+# COPY --from=base /root/.nix-defexpr /root/.nix-defexpr
+# COPY --from=base /root/.nix-channels /root/.nix-channels
+
+# Copy source directories
+COPY --from=base /src /src
+COPY --from=base /zmk /zmk
+
+# Create necessary directories for Nix
+RUN mkdir -p /nix/var/nix/gcroots \
+  /nix/var/nix/profiles/per-user/root \
+  /nix/var/nix/temproots \
+  /nix/var/nix/userpool \
+  /nix/var/nix/db \
+  /nix/var/log/nix/drvs \
+  /workspace /app/bin
+
+# Set up the profile symlinks properly
+RUN ln -sf /root/.nix-profile /nix/var/nix/profiles/per-user/root/profile && \
+  ln -sf /nix/var/nix/profiles/per-user/root/profile /nix/var/nix/profiles/default
+
+RUN chmod 755 /nix/var/nix/profiles/per-user
+
+# Set up Nix environment variables
+ENV PATH=/root/.nix-profile/bin:/usr/bin:/app/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/bin:/sbin
+ENV NIX_PROFILES="/nix/var/nix/profiles/default /root/.nix-profile"
+ENV NIX_PATH=moergo-zmk=/src
+ENV NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+ARG BUILDTIME
+ENV BUILDTIME=${BUILDTIME:-}
+
+RUN echo "buildtime: $BUILDTIME"
+COPY --chmod=755 entrypoint.sh build.sh libutils.sh /app/bin/
+
+ENTRYPOINT ["entrypoint.sh"]
+CMD ["build.sh"]
