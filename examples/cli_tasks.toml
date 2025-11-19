@@ -1,0 +1,25 @@
+[base]
+template = "cli-template"
+version = "1.0.0"
+
+[config]
+format_version = "1.0.0"
+default_conflict = "prompt"
+
+[[tasks]]
+id = "swap-base-q"
+type = "override"
+path = "layers.layer_Typing.bindings[0]"
+value = "&kp ESC"
+target = "layers.layer_Typing.bindings[0]"
+comment = "replace first binding"
+
+[[tasks]]
+id = "combo-demo"
+type = "combo"
+name = "combo_demo"
+key_positions = [0, 1]
+binding = "&kp TAB"
+target = "combos.combo_demo"
+comment = "add a sample combo"
+conditions = ["layer_state == base"]

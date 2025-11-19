@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use thiserror::Error;
 
-use crate::serialization::SerializeError;
+use crate::{dts::DtsError, serialization::SerializeError};
 
 use super::manifest::{ManifestError, ToolchainKind};
 
@@ -25,6 +25,8 @@ pub enum BuildError {
     },
     #[error("layout serialization failed: {0}")]
     LayoutSerialize(SerializeError),
+    #[error("layout parse failed: {0}")]
+    LayoutParse(#[from] DtsError),
     #[error("keyboard `{0}` not found in manifest")]
     UnknownKeyboard(String),
     #[error("toolchain `{0}` not found in manifest")]

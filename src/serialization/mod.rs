@@ -111,23 +111,22 @@ impl Serializer {
 
     fn write_property(&mut self, prop: &DtProperty, indent: usize) -> Result<(), SerializeError> {
         self.write_comments(&prop.leading_comments, indent);
-        if prop.value.raw.trim().is_empty() {
-            return Err(SerializeError::MissingValue {
-                name: prop.name.clone(),
-                span: prop.span,
-            });
-        }
 
         let name = if prop.raw_name.is_empty() {
             prop.name.as_str()
         } else {
             prop.raw_name.as_str()
         };
+        let is_flag = prop.value.raw.trim().is_empty();
         self.push_indent(indent);
         self.output.push_str(name);
-        self.output.push_str(" = ");
-        self.output.push_str(&prop.value.raw);
-        self.output.push(';');
+        if is_flag {
+            self.output.push(';');
+        } else {
+            self.output.push_str(" = ");
+            self.output.push_str(&prop.value.raw);
+            self.output.push(';');
+        }
         if let Some(comment) = &prop.trailing_comment {
             let starts_with_ws = comment
                 .text

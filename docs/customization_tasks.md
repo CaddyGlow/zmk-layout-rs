@@ -43,9 +43,9 @@ comment = "Move ESC onto TAB"
 | `combo`       | `name`, `key_positions`, `binding`; optional `timeout_ms`, `layers`, `conditions` | `combos.<name>`               | `layers` accepts numeric indexes or layer names. `conditions` is a list of strings (e.g., `layer_state == nav`) stored alongside the combo. |
 | `layer`       | `name`, `bindings`; optional `metadata` map                              | `layers.<name>`               | Metadata entries (color, label, etc.) are written into properties. |
 | `layer-order` | `layer` plus `position` *or* `before`/`after`                            | `layers.order.<layer>`        | Reorders the layer list in the keymap node. |
-| `behavior`    | `behavior`, `settings` map                                              | `behaviors.<name>`            | Parsed but currently skipped until behavior editing lands. |
-| `meta`        | `key`, `value`                                                          | `meta.<key>`                  | Reserved for future metadata injection. |
-| `script`      | `filename` or `script`, optional `args`                                 | `scripts.<identifier>`        | Deferred until the Rhai phase ships. |
+| `behavior`    | `behavior`, `settings` map                                              | `behaviors.<name>`            | Updates behavior properties (`bindings`, timing fields, labels, etc.). |
+| `meta`        | `key`, `value`                                                          | `meta.<key>`                  | Stores arbitrary metadata under a top-level `meta { key = value; }` block for documentation/export tooling. |
+| `script`      | `filename` or `script`, optional `args`                                 | `scripts.<identifier>`        | Executes Rhai automation with access to the same layout engine used by declarative tasks. |
 
 ### Conflict Policies & `expected`
 
@@ -160,6 +160,9 @@ receives a helper API roughly equivalent to the declarative task set:
 - `move_layer(layer: string, index: int)` – reorder a layer to an absolute index (`layer-order`).
 - `upsert_combo(name: string, positions: array<int>, binding: string)` – basic combo creation.
 - `upsert_combo_full(name, positions, binding, timeout_ms_or_unit, layers: array<int|string>, conditions: array<string>)` – full combo editing, including timeout overrides, layer masks, and condition strings.
+- `set_behavior_bindings(name: string, bindings: array<string>)` – replace a behavior’s bindings.
+- `set_behavior_settings(name: string, settings: map)` – update behavior properties (tapping term, labels, etc.).
+- `set_meta(key: string, value: any)` – add/update entries in the `meta { ... }` block.
 - `log(message: string)` – append notes to the task outcome.
 - `ARGS` – a map built from the task’s `args = { ... }` table, exposed as a global variable.
 

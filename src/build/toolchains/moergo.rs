@@ -1,14 +1,18 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
-use crate::build::{
-    docker::{DockerBackend, DockerInvocation, OutputHandler, VolumeMode, VolumeMount},
-    error::BuildError,
-    layout::KeymapArtifacts,
-    manifest::{BuildTarget, ToolchainKind},
-    progress::{LogLevel, ProgressReporter},
-    request::BuildRequest,
-    toolchain::{BuildContext, Toolchain, ToolchainRunResult, resolve_toolchain_config},
-    workspace::WorkspaceHandle,
+use crate::{
+    adapters::standard::AdapterLayout,
+    build::{
+        docker::{DockerBackend, DockerInvocation, OutputHandler, VolumeMode, VolumeMount},
+        error::BuildError,
+        layout::KeymapArtifacts,
+        manifest::{BuildTarget, ToolchainKind},
+        progress::{LogLevel, ProgressReporter},
+        request::BuildRequest,
+        toolchain::{resolve_toolchain_config, BuildContext, Toolchain, ToolchainRunResult},
+        workspace::WorkspaceHandle,
+    },
+    dts::DtsDocument,
 };
 
 pub struct MoergoToolchain;
@@ -37,7 +41,7 @@ impl Toolchain for MoergoToolchain {
         docker: &dyn DockerBackend,
     ) -> Result<ToolchainRunResult, BuildError> {
         let config = resolve_toolchain_config(ctx.profile, target, &ctx.profile.id);
-        let layout_path = select_layout_json(ctx.layout)?;
+        let layout_path = ensure_layout_json(ctx.workspace, ctx.layout)?;
         let container_layout = ctx
             .workspace
             .container_path(&layout_path)
@@ -60,8 +64,7 @@ impl Toolchain for MoergoToolchain {
         }
 
         let mut invocation = DockerInvocation::new(config.image);
-        invocation.command = vec!["/bin/sh".into(), "-c".into(), "./build.sh".into()];
-        invocation.workdir = Some(ctx.workspace.container_root().to_path_buf());
+        invocation.command = vec!["build.sh".into()];
         invocation.env = env;
         invocation.volumes.push(VolumeMount {
             host_path: ctx.workspace.root().to_path_buf(),
@@ -88,11 +91,24 @@ impl Toolchain for MoergoToolchain {
     }
 }
 
-fn select_layout_json(artifacts: &KeymapArtifacts) -> Result<PathBuf, BuildError> {
-    artifacts
-        .json
-        .clone()
-        .ok_or(BuildError::MissingLayoutArtifact("layout.json"))
+fn ensure_layout_json(
+    workspace: &WorkspaceHandle,
+    artifacts: &KeymapArtifacts,
+) -> Result<PathBuf, BuildError> {
+    if let Some(path) = &artifacts.json {
+        return Ok(path.clone());
+    }
+    if let Some(keymap) = &artifacts.keymap {
+        let document = DtsDocument::parse_file(keymap)?;
+        let layout = AdapterLayout::from_document(&document);
+        let json_text = layout
+            .to_standard_json()
+            .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+        let dest = workspace.layout_dir().join("layout.json");
+        fs::write(&dest, json_text).map_err(BuildError::Io)?;
+        return Ok(dest);
+    }
+    Err(BuildError::MissingLayoutArtifact("layout.json"))
 }
 
 fn collect_artifacts(
@@ -112,6 +128,7 @@ fn collect_artifacts(
         }
         let dest = request.output_dir.join(entry.file_name());
         fs::copy(entry.path(), &dest).map_err(BuildError::Io)?;
+        fs::remove_file(entry.path()).map_err(BuildError::Io)?;
         collected.push(dest);
     }
     Ok(collected)

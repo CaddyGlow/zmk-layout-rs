@@ -6,7 +6,7 @@ use super::{
     docker::DockerBackend,
     error::BuildError,
     layout::LayoutStager,
-    manifest::{BuildTarget, FirmwareManifest, KeyboardProfile},
+    manifest::{BuildTarget, FirmwareManifest, KeyboardProfile, ToolchainProfile},
     progress::ProgressReporter,
     request::{BuildRequest, BuildRequestBuilder},
     toolchain::{BuildContext, create_toolchain},
@@ -17,6 +17,7 @@ use super::{
 pub struct FirmwareBuilder {
     manifest: Arc<FirmwareManifest>,
     docker: Box<dyn DockerBackend>,
+    workspace_manager: WorkspaceManager,
 }
 
 impl FirmwareBuilder {
@@ -24,7 +25,13 @@ impl FirmwareBuilder {
         Self {
             manifest: Arc::new(manifest),
             docker,
+            workspace_manager: WorkspaceManager::new(),
         }
+    }
+
+    pub fn with_workspace_manager(mut self, manager: WorkspaceManager) -> Self {
+        self.workspace_manager = manager;
+        self
     }
 
     pub fn builder(&self) -> BuildRequestBuilder {
@@ -56,8 +63,11 @@ impl FirmwareBuilder {
             .ok_or_else(|| BuildError::UnknownToolchain(toolchain_id.clone()))?;
         let toolchain = create_toolchain(profile)?;
 
-        let workspace_manager = WorkspaceManager::new();
-        let workspace = workspace_manager.create_workspace(&profile.id)?;
+        let workspace = self.workspace_manager.create_workspace(
+            &profile.id,
+            &profile.cache,
+            request.disable_cache,
+        )?;
         let stager = LayoutStager::new();
         let layout = stager.stage(&request.layout, &workspace)?;
 
@@ -73,11 +83,88 @@ impl FirmwareBuilder {
 
         let mut report = BuildReport::default();
         report.success = true;
-        for target_ref in &request.targets {
-            let target = resolve_target(keyboard, &target_ref.id)?;
-            let result = toolchain.build_target(&ctx, target, self.docker())?;
-            report.artifacts.files.extend(result.artifacts);
+        let total_targets = request.targets.len();
+        let checkpoint_id = format!(
+            "firmware-{}-{}",
+            keyboard.id.replace(' ', "-"),
+            toolchain_id.as_str()
+        );
+        if total_targets > 0 {
+            let plural = if total_targets == 1 { "" } else { "s" };
+            request.progress.start_checkpoint(
+                &checkpoint_id,
+                &format!(
+                    "Building {} via {} ({} target{})",
+                    keyboard.id, profile.id, total_targets, plural
+                ),
+            );
         }
+        let progress_total = total_targets as u32;
+        let mut built_targets = Vec::with_capacity(total_targets);
+        for (index, target_ref) in request.targets.iter().enumerate() {
+            if total_targets > 0 {
+                request.progress.update_progress(
+                    index as u32,
+                    progress_total,
+                    &format!("building target {}", target_ref.id),
+                );
+            }
+            let target = match resolve_target(keyboard, &target_ref.id) {
+                Ok(target) => target,
+                Err(err) => {
+                    if total_targets > 0 {
+                        request.progress.fail_checkpoint(&checkpoint_id);
+                    }
+                    return Err(err);
+                }
+            };
+            let result = match toolchain.build_target(&ctx, target, self.docker()) {
+                Ok(result) => result,
+                Err(err) => {
+                    if total_targets > 0 {
+                        request.progress.fail_checkpoint(&checkpoint_id);
+                    }
+                    return Err(err);
+                }
+            };
+            for artifact in &result.artifacts {
+                report
+                    .artifacts
+                    .per_target
+                    .entry(target.id.clone())
+                    .or_default()
+                    .push(artifact.clone());
+            }
+            report.artifacts.files.extend(result.artifacts);
+            built_targets.push(target.id.clone());
+            if total_targets > 0 {
+                request.progress.update_progress(
+                    (index as u32) + 1,
+                    progress_total,
+                    &format!("completed target {}", target.id),
+                );
+            }
+        }
+
+        if let Err(err) = workspace.persist_caches() {
+            if total_targets > 0 {
+                request.progress.fail_checkpoint(&checkpoint_id);
+            }
+            return Err(err);
+        }
+
+        if total_targets > 0 {
+            request.progress.complete_checkpoint(&checkpoint_id);
+        }
+
+        populate_metadata(
+            &mut report.metadata,
+            keyboard,
+            profile,
+            &request,
+            &built_targets,
+            report.artifacts.files.len(),
+        );
 
         Ok(report)
     }
@@ -107,6 +194,7 @@ impl Default for BuildReport {
 #[derive(Debug, Clone, Default)]
 pub struct ArtifactReport {
     pub files: Vec<PathBuf>,
+    pub per_target: BTreeMap<String, Vec<PathBuf>>,
 }
 
 /// Extra metadata captured during a build (toolchain info, timings, etc.).
@@ -134,6 +222,57 @@ impl ProgressReporter for CliProgressReporter {
     fn fail_checkpoint(&self, id: &str) {
         eprintln!("[FAIL ] {id}");
     }
+
+    fn update_progress(&self, current: u32, total: u32, status: &str) {
+        if total == 0 {
+            eprintln!("[PROG ] {status}");
+        } else {
+            eprintln!("[PROG ] {current}/{total} {status}");
+        }
+    }
+}
+
+fn populate_metadata(
+    metadata: &mut BuildMetadata,
+    keyboard: &KeyboardProfile,
+    profile: &ToolchainProfile,
+    request: &BuildRequest,
+    completed_targets: &[String],
+    artifact_count: usize,
+) {
+    metadata
+        .entries
+        .insert("keyboard".into(), keyboard.id.clone());
+    metadata
+        .entries
+        .insert("toolchain".into(), profile.id.clone());
+    metadata
+        .entries
+        .insert("toolchain.kind".into(), format!("{:?}", profile.kind));
+    metadata.entries.insert(
+        "manifest.version".into(),
+        request.manifest.version.to_string(),
+    );
+    metadata
+        .entries
+        .insert("targets.count".into(), request.targets.len().to_string());
+    if !request.targets.is_empty() {
+        let selected = request
+            .targets
+            .iter()
+            .map(|target| target.id.clone())
+            .collect::<Vec<_>>()
+            .join(",");
+        metadata.entries.insert("targets.selected".into(), selected);
+    }
+    if !completed_targets.is_empty() {
+        metadata
+            .entries
+            .insert("targets.completed".into(), completed_targets.join(","));
+    }
+    metadata
+        .entries
+        .insert("artifacts.count".into(), artifact_count.to_string());
 }
 
 fn resolve_target<'a>(

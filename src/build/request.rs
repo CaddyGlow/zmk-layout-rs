@@ -19,7 +19,10 @@ pub enum LayoutSource {
     JsonPath(PathBuf),
     JsonValue(JsonValue),
     Document(DtsDocument),
-    Files { keymap: PathBuf, config: PathBuf },
+    Files {
+        keymap: PathBuf,
+        extra: Option<PathBuf>,
+    },
 }
 
 /// Target reference selected for a build.
@@ -129,10 +132,10 @@ impl BuildRequestBuilder {
         self
     }
 
-    pub fn layout_files(mut self, keymap: impl Into<PathBuf>, config: impl Into<PathBuf>) -> Self {
+    pub fn layout_files(mut self, keymap: impl Into<PathBuf>, extra: Option<PathBuf>) -> Self {
         self.layout = Some(LayoutSource::Files {
             keymap: keymap.into(),
-            config: config.into(),
+            extra,
         });
         self
     }

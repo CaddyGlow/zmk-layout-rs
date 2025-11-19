@@ -3,7 +3,7 @@ use std::{error::Error, path::PathBuf};
 use zmk_layout_rs::{
     ast::{DtItem, DtNode, DtProperty, DtValue},
     parser::parse_layout,
-    serialization::{SerializeConfig, SerializeError, serialize, serialize_with_config},
+    serialization::{SerializeConfig, serialize, serialize_with_config},
     tokenizer::TokenSpan,
 };
 
@@ -71,7 +71,7 @@ fn targeted_mutation_only_changes_value() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn serialization_fails_when_value_missing() {
+fn serialization_writes_flag_properties() {
     let span = TokenSpan::new(0, 0, 1, 1, 1, 1);
     let node = DtNode {
         name: "broken".into(),
@@ -93,13 +93,12 @@ fn serialization_fails_when_value_missing() {
         trailing_comments: vec![],
     };
 
-    let err = serialize(&[DtItem::Node(node.clone())]).expect_err("should fail");
-    assert!(matches!(err, SerializeError::MissingValue { .. }));
+    let output = serialize(&[DtItem::Node(node.clone())]).expect("serialize flag property");
+    assert_eq!(output, "broken {\n  example;\n};\n");
 
-    // Ensure custom indent can still be configured even when unused in this error scenario.
-    let err = serialize_with_config(&[DtItem::Node(node)], SerializeConfig { indent: "\t" })
-        .expect_err("should still fail");
-    assert!(matches!(err, SerializeError::MissingValue { .. }));
+    let output = serialize_with_config(&[DtItem::Node(node)], SerializeConfig { indent: "\t" })
+        .expect("serialize flag property with custom indent");
+    assert_eq!(output, "broken {\n\texample;\n};\n");
 }
 
 fn expect_node_mut<'a>(items: &'a mut [DtItem], name: &str) -> &'a mut DtNode {

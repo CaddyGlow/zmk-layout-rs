@@ -148,7 +148,7 @@ struct FirmwareBuildArgs {
     #[arg(
         long = "layout-config",
         value_name = "FILE",
-        help = "Pre-generated config.dtsi file"
+        help = "Optional extra overlay (e.g. config.dtsi or Kconfig fragment)"
     )]
     layout_config: Option<PathBuf>,
     #[arg(
@@ -314,18 +314,18 @@ fn apply_firmware_layout(
         layout_set = true;
     }
     match (&args.layout_keymap, &args.layout_config) {
-        (Some(keymap), Some(config)) => {
+        (Some(keymap), extra) => {
             if layout_set {
                 return Err(CliError::FirmwareLayout(
                     "multiple layout inputs were provided".into(),
                 ));
             }
-            builder = builder.layout_files(keymap.clone(), config.clone());
+            builder = builder.layout_files(keymap.clone(), extra.clone());
             layout_set = true;
         }
-        (Some(_), None) | (None, Some(_)) => {
+        (None, Some(_)) => {
             return Err(CliError::FirmwareLayout(
-                "--layout-keymap and --layout-config must be supplied together".into(),
+                "--layout-config requires --layout-keymap".into(),
             ));
         }
         (None, None) => {}
@@ -378,6 +378,14 @@ fn print_firmware_request(request: &BuildRequest) {
     }
 }
 fn print_build_report(report: &BuildReport) {
+    if report.metadata.entries.is_empty() {
+        println!("metadata: (none)");
+    } else {
+        println!("metadata:");
+        for (key, value) in &report.metadata.entries {
+            println!("  - {key}={value}");
+        }
+    }
     if report.artifacts.files.is_empty() {
         println!("artifacts: (none)");
     } else {
@@ -401,9 +409,12 @@ fn describe_layout(source: &LayoutSource) -> String {
         LayoutSource::JsonPath(path) => format!("json:{}", path.display()),
         LayoutSource::JsonValue(_) => "json:value".into(),
         LayoutSource::Document(_) => "dts:document".into(),
-        LayoutSource::Files { keymap, config } => {
-            format!("files:{} + {}", keymap.display(), config.display())
-        }
+        LayoutSource::Files { keymap, extra } => match extra {
+            Some(config) => {
+                format!("files:{} + {}", keymap.display(), config.display())
+            }
+            None => format!("files:{}", keymap.display()),
+        },
     }
 }
 

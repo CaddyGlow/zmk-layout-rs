@@ -4,6 +4,8 @@
 //! auto-generating missing task identifiers, and enforcing per-task
 //! targets so later phases can reason about conflicts.
 
+pub use crate::layout_engine::MetadataMap;
+
 use rhai::{
     Array as RhaiArray, Dynamic, Engine, EvalAltResult, FLOAT, INT, Map as RhaiMap, Position,
     Scope, module_resolvers::DummyModuleResolver,
@@ -11,7 +13,7 @@ use rhai::{
 use serde::Deserialize;
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     rc::Rc,
@@ -20,14 +22,9 @@ use thiserror::Error;
 use toml::{Value as TomlValue, map::Map as TomlMap};
 
 use crate::{
-    ast::{DtItem, DtNode, DtProperty},
-    bindings::BindingParser,
-    dts::DtsDocument,
-    providers::{COMBO_CONDITION_COMMENT_PREFIX, KeymapDocument, ProviderError},
+    layout_engine::{LayerSelector, LayoutEngine, LayoutEngineError},
+    providers::KeymapDocument,
 };
-
-/// Convenience alias for arbitrary TOML metadata blobs.
-pub type MetadataMap = BTreeMap<String, TomlValue>;
 
 /// Parsed representation of a task configuration file.
 #[derive(Debug, Clone)]
@@ -259,12 +256,6 @@ pub struct MetaTask {
 }
 
 #[derive(Debug, Clone)]
-pub enum LayerSelector {
-    Index(u32),
-    Name(String),
-}
-
-#[derive(Debug, Clone)]
 pub enum ScriptSource {
     Inline(String),
     File(String),
@@ -356,64 +347,52 @@ pub fn apply_tasks(document: KeymapDocument, file: &TaskFile) -> TaskExecution {
 
 /// Apply tasks with explicit engine options.
 pub fn apply_tasks_with_options(
-    mut document: KeymapDocument,
+    document: KeymapDocument,
     file: &TaskFile,
     options: TaskEngineOptions,
 ) -> TaskExecution {
+    let mut engine = LayoutEngine::new(document);
     let mut results = Vec::new();
-    let mut parser = BindingParser::new();
     let script_env = ScriptEnvironment::new(file);
 
     for task in &file.tasks {
         let outcome = match &task.action {
-            TaskAction::Override(action) => apply_override_task(
-                &mut document,
-                task,
-                action,
-                options.mode,
-                &mut parser,
-                &script_env,
-            ),
-            TaskAction::Layer(action) => apply_layer_task(
-                &mut document,
-                task,
-                action,
-                options.mode,
-                &mut parser,
-                &script_env,
-            ),
-            TaskAction::Combo(action) => apply_combo_task(
-                &mut document,
-                task,
-                action,
-                options.mode,
-                &mut parser,
-                &script_env,
-            ),
-            TaskAction::LayerOrder(action) => {
-                apply_layer_order_task(&mut document, task, action, options.mode, &script_env)
+            TaskAction::Override(action) => {
+                apply_override_task(&mut engine, task, action, options.mode, &script_env)
             }
-            TaskAction::Behavior(_) | TaskAction::Meta(_) => TaskOutcome {
-                status: TaskStatus::Skipped,
-                message: Some("behavior/meta tasks not implemented yet".into()),
-                ..TaskOutcome::new(task)
-            },
+            TaskAction::Layer(action) => {
+                apply_layer_task(&mut engine, task, action, options.mode, &script_env)
+            }
+            TaskAction::Combo(action) => {
+                apply_combo_task(&mut engine, task, action, options.mode, &script_env)
+            }
+            TaskAction::LayerOrder(action) => {
+                apply_layer_order_task(&mut engine, task, action, options.mode, &script_env)
+            }
+            TaskAction::Behavior(action) => {
+                apply_behavior_task(&mut engine, task, action, options.mode, &script_env)
+            }
+            TaskAction::Meta(action) => {
+                apply_meta_task(&mut engine, task, action, options.mode, &script_env)
+            }
             TaskAction::Script(action) => {
-                apply_script_task(&mut document, task, action, options.mode, &script_env)
+                apply_script_task(&mut engine, task, action, options.mode, &script_env)
             }
         };
         results.push(outcome);
     }
 
-    TaskExecution { document, results }
+    TaskExecution {
+        document: engine.into_document(),
+        results,
+    }
 }
 
 fn apply_override_task(
-    document: &mut KeymapDocument,
+    engine: &mut LayoutEngine,
     task: &Task,
     action: &OverrideTask,
     mode: ExecutionMode,
-    parser: &mut BindingParser,
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
@@ -426,19 +405,10 @@ fn apply_override_task(
         }
     };
 
-    let normalized = match normalize_binding(parser, &action.value) {
-        Ok(val) => val,
-        Err(message) => {
-            outcome.status = TaskStatus::Error;
-            outcome.message = Some(message);
-            return outcome;
-        }
-    };
-
-    let bindings = match document.bindings_for_layer(&layer) {
+    let bindings = match engine.layer_binding_strings(&layer) {
         Ok(value) => value,
         Err(err) => {
-            apply_provider_error(&mut outcome, err);
+            apply_engine_error(&mut outcome, err);
             return outcome;
         }
     };
@@ -453,8 +423,16 @@ fn apply_override_task(
         return outcome;
     }
 
-    let before_value = Some(bindings[slot].to_binding_string());
+    let before_value = Some(bindings[slot].clone());
     outcome.before = before_value.clone();
+
+    let normalized = match engine.normalize_binding(&action.value) {
+        Ok(val) => val,
+        Err(err) => {
+            apply_engine_error(&mut outcome, err);
+            return outcome;
+        }
+    };
 
     let before_snapshot = outcome.before.clone();
     if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
@@ -462,8 +440,8 @@ fn apply_override_task(
     }
 
     if mode == ExecutionMode::Apply {
-        if let Err(err) = document.set_binding(&layer, slot, &normalized) {
-            apply_provider_error(&mut outcome, err);
+        if let Err(err) = engine.set_binding(&layer, slot, &normalized) {
+            apply_engine_error(&mut outcome, err);
             return outcome;
         }
     } else {
@@ -478,15 +456,14 @@ fn apply_override_task(
 }
 
 fn apply_layer_task(
-    document: &mut KeymapDocument,
+    engine: &mut LayoutEngine,
     task: &Task,
     action: &LayerTask,
     mode: ExecutionMode,
-    parser: &mut BindingParser,
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
-    let before = layer_snapshot(document.document(), &action.name);
+    let before = engine.layer_snapshot(&action.name);
     outcome.before = before.clone();
 
     let before_snapshot = outcome.before.clone();
@@ -494,24 +471,23 @@ fn apply_layer_task(
         return outcome;
     }
 
-    let normalized = match normalize_binding_list(parser, &action.bindings) {
+    let normalized = match engine.normalize_binding_list(&action.bindings) {
         Ok(values) => values,
-        Err(message) => {
-            outcome.status = TaskStatus::Error;
-            outcome.message = Some(message);
+        Err(err) => {
+            apply_engine_error(&mut outcome, err);
             return outcome;
         }
     };
 
     if mode == ExecutionMode::Apply {
-        if let Err(err) = document.set_layer_bindings(&action.name, &normalized) {
-            apply_provider_error(&mut outcome, err);
+        if let Err(err) = engine.set_layer_bindings(&action.name, &normalized) {
+            apply_engine_error(&mut outcome, err);
             return outcome;
         }
         if !action.metadata.is_empty() {
-            let metadata = metadata_properties(&action.metadata);
-            if let Err(err) = document.set_layer_metadata(&action.name, &metadata) {
-                apply_provider_error(&mut outcome, err);
+            let metadata = LayoutEngine::metadata_properties(&action.metadata);
+            if let Err(err) = engine.set_layer_metadata(&action.name, &metadata) {
+                apply_engine_error(&mut outcome, err);
                 return outcome;
             }
         }
@@ -533,41 +509,38 @@ fn apply_layer_task(
 }
 
 fn apply_combo_task(
-    document: &mut KeymapDocument,
+    engine: &mut LayoutEngine,
     task: &Task,
     action: &ComboTask,
     mode: ExecutionMode,
-    parser: &mut BindingParser,
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
-    outcome.before = combo_snapshot(document.document(), &action.name);
+    outcome.before = engine.combo_snapshot(&action.name);
 
     let before_snapshot = outcome.before.clone();
     if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
         return outcome;
     }
 
-    let normalized_binding = match normalize_binding(parser, &action.binding) {
+    let normalized_binding = match engine.normalize_binding(&action.binding) {
         Ok(value) => value,
-        Err(message) => {
-            outcome.status = TaskStatus::Error;
-            outcome.message = Some(message);
+        Err(err) => {
+            apply_engine_error(&mut outcome, err);
             return outcome;
         }
     };
 
-    let layers = match resolve_combo_layers(document, &action.layers) {
+    let layers = match engine.resolve_layer_selectors(&action.layers) {
         Ok(values) => values,
-        Err(message) => {
-            outcome.status = TaskStatus::Error;
-            outcome.message = Some(message);
+        Err(err) => {
+            apply_engine_error(&mut outcome, err);
             return outcome;
         }
     };
 
     if mode == ExecutionMode::Apply {
-        if let Err(err) = document.upsert_combo(
+        if let Err(err) = engine.upsert_combo(
             &action.name,
             &normalized_binding,
             &action.key_positions,
@@ -575,7 +548,7 @@ fn apply_combo_task(
             &layers,
             &action.conditions,
         ) {
-            apply_provider_error(&mut outcome, err);
+            apply_engine_error(&mut outcome, err);
             return outcome;
         }
     } else {
@@ -584,7 +557,7 @@ fn apply_combo_task(
             "dry-run: combo task recorded but not applied to document",
         );
     }
-    outcome.after = combo_snapshot(document.document(), &action.name);
+    outcome.after = engine.combo_snapshot(&action.name);
     if !action.conditions.is_empty() {
         append_message(
             &mut outcome.message,
@@ -596,14 +569,14 @@ fn apply_combo_task(
 }
 
 fn apply_layer_order_task(
-    document: &mut KeymapDocument,
+    engine: &mut LayoutEngine,
     task: &Task,
     action: &LayerOrderTask,
     mode: ExecutionMode,
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
-    let before = layer_order_snapshot(document.document());
+    let before = engine.layer_order_snapshot();
     outcome.before = Some(before);
 
     let before_snapshot = outcome.before.clone();
@@ -611,7 +584,7 @@ fn apply_layer_order_task(
         return outcome;
     }
 
-    let names = document.layer_names();
+    let names = engine.layer_names();
     let current_index = match names.iter().position(|name| name == &action.layer) {
         Some(idx) => idx,
         None => {
@@ -656,8 +629,8 @@ fn apply_layer_order_task(
     }
 
     if mode == ExecutionMode::Apply {
-        if let Err(err) = document.reorder_layer(&action.layer, target_index) {
-            apply_provider_error(&mut outcome, err);
+        if let Err(err) = engine.reorder_layer(&action.layer, target_index) {
+            apply_engine_error(&mut outcome, err);
             return outcome;
         }
     } else {
@@ -667,7 +640,78 @@ fn apply_layer_order_task(
         );
     }
 
-    outcome.after = Some(layer_order_snapshot(document.document()));
+    outcome.after = Some(engine.layer_order_snapshot());
+    outcome.status = TaskStatus::Applied;
+    outcome
+}
+
+fn apply_behavior_task(
+    engine: &mut LayoutEngine,
+    task: &Task,
+    action: &BehaviorTask,
+    mode: ExecutionMode,
+    scripts: &ScriptEnvironment,
+) -> TaskOutcome {
+    let mut outcome = TaskOutcome::new(task);
+    outcome.before = engine.behavior_snapshot(&action.behavior);
+
+    let before_snapshot = outcome.before.clone();
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
+        return outcome;
+    }
+
+    if action.settings.is_empty() {
+        outcome.status = TaskStatus::Skipped;
+        append_message(
+            &mut outcome.message,
+            "behavior task skipped: settings cannot be empty",
+        );
+        return outcome;
+    }
+
+    if mode == ExecutionMode::Apply {
+        if let Err(err) = engine.set_behavior_settings(&action.behavior, &action.settings) {
+            apply_engine_error(&mut outcome, err);
+            return outcome;
+        }
+    } else {
+        append_message(
+            &mut outcome.message,
+            "dry-run: behavior settings not applied (reporting desired result)",
+        );
+    }
+    outcome.after = engine.behavior_snapshot(&action.behavior);
+    outcome.status = TaskStatus::Applied;
+    outcome
+}
+
+fn apply_meta_task(
+    engine: &mut LayoutEngine,
+    task: &Task,
+    action: &MetaTask,
+    mode: ExecutionMode,
+    scripts: &ScriptEnvironment,
+) -> TaskOutcome {
+    let mut outcome = TaskOutcome::new(task);
+    outcome.before = engine.meta_snapshot(&action.key);
+
+    let before_snapshot = outcome.before.clone();
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
+        return outcome;
+    }
+
+    if mode == ExecutionMode::Apply {
+        if let Err(err) = engine.set_meta_entry(&action.key, &action.value) {
+            apply_engine_error(&mut outcome, err);
+            return outcome;
+        }
+    } else {
+        append_message(
+            &mut outcome.message,
+            "dry-run: meta entry not applied (reporting desired result)",
+        );
+    }
+    outcome.after = engine.meta_snapshot(&action.key);
     outcome.status = TaskStatus::Applied;
     outcome
 }
@@ -825,7 +869,7 @@ fn parse_conflict_resolution(map: RhaiMap) -> Result<ConflictResolution, String>
 }
 
 fn apply_script_task(
-    document: &mut KeymapDocument,
+    layout: &mut LayoutEngine,
     task: &Task,
     action: &ScriptTask,
     mode: ExecutionMode,
@@ -841,12 +885,12 @@ fn apply_script_task(
         }
     };
 
-    let working_doc = document.clone();
-    let shared_doc = Rc::new(RefCell::new(working_doc));
+    let working_engine = layout.clone();
+    let shared_engine = Rc::new(RefCell::new(working_engine));
     let logs = Rc::new(RefCell::new(Vec::new()));
 
     let mut engine = sandboxed_engine();
-    register_script_api(&mut engine, shared_doc.clone(), logs.clone());
+    register_script_api(&mut engine, shared_engine.clone(), logs.clone());
 
     let mut scope = Scope::new();
     scope.push_dynamic(
@@ -872,7 +916,7 @@ fn apply_script_task(
                 append_message(&mut outcome.message, log_messages.join(" | "));
             }
             if mode == ExecutionMode::Apply {
-                *document = shared_doc.borrow().clone();
+                *layout = shared_engine.borrow().clone();
             } else {
                 append_message(
                     &mut outcome.message,
@@ -899,41 +943,47 @@ fn sandboxed_engine() -> Engine {
 
 fn register_script_api(
     engine: &mut Engine,
-    document: Rc<RefCell<KeymapDocument>>,
+    layout: Rc<RefCell<LayoutEngine>>,
     logs: Rc<RefCell<Vec<String>>>,
 ) {
-    let doc_binding = Rc::clone(&document);
+    let doc_binding = Rc::clone(&layout);
     engine.register_fn(
         "set_binding",
         move |layer: &str, index: INT, binding: &str| -> Result<(), Box<EvalAltResult>> {
             if index < 0 {
                 return Err(script_error("binding index must be non-negative"));
             }
-            doc_binding
-                .borrow_mut()
-                .set_binding(layer, index as usize, binding)
+            let mut engine = doc_binding.borrow_mut();
+            let normalized = engine
+                .normalize_binding(binding)
+                .map_err(|err| script_error(err.to_string()))?;
+            engine
+                .set_binding(layer, index as usize, &normalized)
                 .map_err(|err| script_error(err.to_string()))
         },
     );
 
-    let doc_layer = Rc::clone(&document);
+    let doc_layer = Rc::clone(&layout);
     engine.register_fn(
         "set_layer",
         move |layer: &str, bindings: RhaiArray| -> Result<(), Box<EvalAltResult>> {
-            let normalized = array_to_string_vec(&bindings).map_err(|err| script_error(err))?;
-            doc_layer
-                .borrow_mut()
+            let desired = array_to_string_vec(&bindings).map_err(|err| script_error(err))?;
+            let mut engine = doc_layer.borrow_mut();
+            let normalized = engine
+                .normalize_binding_list(&desired)
+                .map_err(|err| script_error(err.to_string()))?;
+            engine
                 .set_layer_bindings(layer, &normalized)
                 .map_err(|err| script_error(err.to_string()))
         },
     );
 
-    let doc_layer_metadata = Rc::clone(&document);
+    let doc_layer_metadata = Rc::clone(&layout);
     engine.register_fn(
         "set_layer_metadata",
         move |layer: &str, metadata: RhaiMap| -> Result<(), Box<EvalAltResult>> {
             let map = rhai_map_to_metadata(&metadata).map_err(|err| script_error(err))?;
-            let props = metadata_properties(&map);
+            let props = LayoutEngine::metadata_properties(&map);
             doc_layer_metadata
                 .borrow_mut()
                 .set_layer_metadata(layer, &props)
@@ -941,7 +991,7 @@ fn register_script_api(
         },
     );
 
-    let doc_combo = Rc::clone(&document);
+    let doc_combo = Rc::clone(&layout);
     engine.register_fn(
         "upsert_combo",
         move |name: &str,
@@ -949,23 +999,17 @@ fn register_script_api(
               binding: &str|
               -> Result<(), Box<EvalAltResult>> {
             let positions = array_to_u32_vec(&key_positions).map_err(|err| script_error(err))?;
-            let empty_layers: [u32; 0] = [];
-            let empty_conditions: Vec<String> = Vec::new();
-            doc_combo
-                .borrow_mut()
-                .upsert_combo(
-                    name,
-                    binding,
-                    &positions,
-                    None,
-                    &empty_layers,
-                    empty_conditions.as_slice(),
-                )
+            let mut engine = doc_combo.borrow_mut();
+            let normalized = engine
+                .normalize_binding(binding)
+                .map_err(|err| script_error(err.to_string()))?;
+            engine
+                .upsert_combo(name, &normalized, &positions, None, &[], &[])
                 .map_err(|err| script_error(err.to_string()))
         },
     );
 
-    let doc_combo_full = Rc::clone(&document);
+    let doc_combo_full = Rc::clone(&layout);
     engine.register_fn(
         "upsert_combo_full",
         move |name: &str,
@@ -977,17 +1021,18 @@ fn register_script_api(
               -> Result<(), Box<EvalAltResult>> {
             let positions = array_to_u32_vec(&key_positions).map_err(|err| script_error(err))?;
             let timeout = parse_optional_u32(&timeout_ms).map_err(|err| script_error(err))?;
-            let layer_indexes = {
-                let borrowed = doc_combo_full.borrow();
-                array_to_layer_indexes(&borrowed, &layers).map_err(|err| script_error(err))?
-            };
+            let mut engine = doc_combo_full.borrow_mut();
+            let normalized = engine
+                .normalize_binding(binding)
+                .map_err(|err| script_error(err.to_string()))?;
+            let layer_indexes =
+                script_layers_to_indexes(&engine, &layers).map_err(|err| script_error(err))?;
             let condition_list =
                 array_to_string_vec(&conditions).map_err(|err| script_error(err))?;
-            doc_combo_full
-                .borrow_mut()
+            engine
                 .upsert_combo(
                     name,
-                    binding,
+                    &normalized,
                     &positions,
                     timeout,
                     &layer_indexes,
@@ -997,7 +1042,7 @@ fn register_script_api(
         },
     );
 
-    let doc_layer_order = Rc::clone(&document);
+    let doc_layer_order = Rc::clone(&layout);
     engine.register_fn(
         "move_layer",
         move |layer: &str, index: INT| -> Result<(), Box<EvalAltResult>> {
@@ -1015,6 +1060,53 @@ fn register_script_api(
     engine.register_fn("log", move |message: &str| {
         log_sink.borrow_mut().push(message.to_string());
     });
+
+    let doc_behavior = Rc::clone(&layout);
+    engine.register_fn(
+        "set_behavior_bindings",
+        move |behavior: &str, bindings: RhaiArray| -> Result<(), Box<EvalAltResult>> {
+            let desired = array_to_string_vec(&bindings).map_err(|err| script_error(err))?;
+            if desired.is_empty() {
+                return Err(script_error("behavior bindings cannot be empty"));
+            }
+            let mut engine = doc_behavior.borrow_mut();
+            let mut normalized = Vec::with_capacity(desired.len());
+            for binding in desired {
+                normalized.push(
+                    engine
+                        .normalize_binding(&binding)
+                        .map_err(|err| script_error(err.to_string()))?,
+                );
+            }
+            engine
+                .set_behavior_bindings(behavior, &normalized)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let doc_behavior_settings = Rc::clone(&layout);
+    engine.register_fn(
+        "set_behavior_settings",
+        move |behavior: &str, settings: RhaiMap| -> Result<(), Box<EvalAltResult>> {
+            let metadata = rhai_map_to_metadata(&settings).map_err(|err| script_error(err))?;
+            doc_behavior_settings
+                .borrow_mut()
+                .set_behavior_settings(behavior, &metadata)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let doc_meta = Rc::clone(&layout);
+    engine.register_fn(
+        "set_meta",
+        move |key: &str, value: Dynamic| -> Result<(), Box<EvalAltResult>> {
+            let toml = dynamic_to_toml(&value).map_err(|err| script_error(err))?;
+            doc_meta
+                .borrow_mut()
+                .set_meta_entry(key, &toml)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
 }
 
 fn metadata_to_rhai_map(metadata: &MetadataMap) -> RhaiMap {
@@ -1117,6 +1209,42 @@ fn array_to_u32_vec(values: &RhaiArray) -> Result<Vec<u32>, String> {
         .collect()
 }
 
+fn script_layers_to_indexes(engine: &LayoutEngine, values: &RhaiArray) -> Result<Vec<u32>, String> {
+    if values.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = engine.layer_names();
+    let mut lookup = HashMap::new();
+    for (index, name) in names.iter().enumerate() {
+        lookup.insert(name.clone(), index as u32);
+    }
+    let mut result = Vec::with_capacity(values.len());
+    for value in values {
+        if let Some(index) = value.clone().try_cast::<INT>() {
+            if index < 0 {
+                return Err("layer index must be non-negative".into());
+            }
+            if (index as usize) >= names.len() {
+                return Err(format!(
+                    "layer index {} out of range (len {})",
+                    index,
+                    names.len()
+                ));
+            }
+            result.push(index as u32);
+        } else if let Some(name) = value.clone().try_cast::<String>() {
+            if let Some(idx) = lookup.get(&name) {
+                result.push(*idx);
+            } else {
+                return Err(format!("layer `{}` not found", name));
+            }
+        } else {
+            return Err("layer reference must be a string or integer".into());
+        }
+    }
+    Ok(result)
+}
+
 fn parse_optional_u32(value: &Dynamic) -> Result<Option<u32>, String> {
     if value.is::<()>() {
         return Ok(None);
@@ -1172,204 +1300,6 @@ fn parse_override_path(path: &str) -> Result<(String, usize), String> {
     Ok((layer.to_string(), index))
 }
 
-fn normalize_binding(parser: &mut BindingParser, value: &str) -> Result<String, String> {
-    if value.trim().is_empty() {
-        return Err("binding value cannot be empty".into());
-    }
-    Ok(parser.parse_with_behavior_rules(value).to_binding_string())
-}
-
-fn normalize_binding_list(
-    parser: &mut BindingParser,
-    bindings: &[String],
-) -> Result<Vec<String>, String> {
-    if bindings.is_empty() {
-        return Err("layer must define at least one binding".into());
-    }
-    bindings
-        .iter()
-        .map(|binding| normalize_binding(parser, binding))
-        .collect()
-}
-
-fn layer_snapshot(document: &DtsDocument, layer: &str) -> Option<String> {
-    let node = find_layer_node(&document.items, layer)?;
-    let prop = find_bindings_property(node)?;
-    let bindings = parse_binding_list(&prop.value.raw);
-    if bindings.is_empty() {
-        None
-    } else {
-        Some(bindings.join(" "))
-    }
-}
-
-fn combo_snapshot(document: &DtsDocument, combo: &str) -> Option<String> {
-    let combos_root = find_layer_node(&document.items, "combos")?;
-    let combo_node = find_child_node(combos_root, combo)?;
-    let mut parts = Vec::new();
-    if let Some(prop) = combo_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "key-positions")
-    {
-        parts.push(format!("key-positions={}", prop.value.raw.trim()));
-    }
-    if let Some(prop) = combo_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "bindings")
-    {
-        parts.push(format!("bindings={}", prop.value.raw.trim()));
-    }
-    if let Some(prop) = combo_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "timeout-ms")
-    {
-        parts.push(format!("timeout-ms={}", prop.value.raw.trim()));
-    }
-    if let Some(prop) = combo_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "layers")
-    {
-        parts.push(format!("layers={}", prop.value.raw.trim()));
-    }
-    let conditions = combo_condition_comments(combo_node);
-    if !conditions.is_empty() {
-        parts.push(format!("conditions={}", conditions.join(" && ")));
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(format!("combo:{}:{}", combo, parts.join(";")))
-    }
-}
-
-fn combo_condition_comments(node: &DtNode) -> Vec<String> {
-    node.leading_comments
-        .iter()
-        .filter_map(|comment| extract_condition_comment(&comment.text))
-        .collect()
-}
-
-fn extract_condition_comment(text: &str) -> Option<String> {
-    let trimmed = text.trim_start();
-    if !trimmed.starts_with(COMBO_CONDITION_COMMENT_PREFIX) {
-        return None;
-    }
-    let body = trimmed[COMBO_CONDITION_COMMENT_PREFIX.len()..].trim();
-    if body.is_empty() {
-        None
-    } else {
-        Some(body.to_string())
-    }
-}
-
-fn layer_order_snapshot(document: &DtsDocument) -> String {
-    if let Some(keymap) = find_layer_node(&document.items, "keymap") {
-        let mut names = Vec::new();
-        for item in &keymap.children {
-            if let DtItem::Node(node) = item {
-                if find_bindings_property(node).is_some() {
-                    names.push(node.name.clone());
-                }
-            }
-        }
-        names.join(",")
-    } else {
-        String::new()
-    }
-}
-
-fn find_child_node<'a>(parent: &'a DtNode, name: &str) -> Option<&'a DtNode> {
-    for item in &parent.children {
-        if let DtItem::Node(node) = item {
-            if node.name == name {
-                return Some(node);
-            }
-        }
-    }
-    None
-}
-
-fn resolve_combo_layers(
-    document: &KeymapDocument,
-    selectors: &[LayerSelector],
-) -> Result<Vec<u32>, String> {
-    if selectors.is_empty() {
-        return Ok(Vec::new());
-    }
-    let names = document.layer_names();
-    let mut name_to_index = HashMap::new();
-    for (index, name) in names.iter().enumerate() {
-        name_to_index.insert(name.clone(), index as u32);
-    }
-    let mut result = Vec::with_capacity(selectors.len());
-    for selector in selectors {
-        match selector {
-            LayerSelector::Index(idx) => {
-                if (*idx as usize) < names.len() {
-                    result.push(*idx);
-                } else {
-                    return Err(format!(
-                        "layer index {} out of range (len {})",
-                        idx,
-                        names.len()
-                    ));
-                }
-            }
-            LayerSelector::Name(name) => {
-                if let Some(index) = name_to_index.get(name) {
-                    result.push(*index);
-                } else {
-                    return Err(format!("layer `{}` not found for combo", name));
-                }
-            }
-        }
-    }
-    Ok(result)
-}
-
-fn array_to_layer_indexes(
-    document: &KeymapDocument,
-    values: &RhaiArray,
-) -> Result<Vec<u32>, String> {
-    if values.is_empty() {
-        return Ok(Vec::new());
-    }
-    let names = document.layer_names();
-    let mut lookup = HashMap::new();
-    for (index, name) in names.iter().enumerate() {
-        lookup.insert(name.clone(), index as u32);
-    }
-    let mut result = Vec::with_capacity(values.len());
-    for value in values {
-        if let Some(index) = value.clone().try_cast::<INT>() {
-            if index < 0 {
-                return Err("layer index must be non-negative".into());
-            }
-            if (index as usize) >= names.len() {
-                return Err(format!(
-                    "layer index {} out of range (len {})",
-                    index,
-                    names.len()
-                ));
-            }
-            result.push(index as u32);
-        } else if let Some(name) = value.clone().try_cast::<String>() {
-            if let Some(idx) = lookup.get(&name) {
-                result.push(*idx);
-            } else {
-                return Err(format!("layer `{}` not found", name));
-            }
-        } else {
-            return Err("layer reference must be a name or index".into());
-        }
-    }
-    Ok(result)
-}
-
 fn append_message(target: &mut Option<String>, note: impl Into<String>) {
     let note = note.into();
     match target {
@@ -1386,30 +1316,9 @@ fn append_message(target: &mut Option<String>, note: impl Into<String>) {
     }
 }
 
-fn apply_provider_error(outcome: &mut TaskOutcome, err: ProviderError) {
+fn apply_engine_error(outcome: &mut TaskOutcome, err: LayoutEngineError) {
     outcome.status = TaskStatus::Error;
     append_message(&mut outcome.message, err.to_string());
-}
-
-fn find_layer_node<'a>(items: &'a [DtItem], name: &str) -> Option<&'a DtNode> {
-    for item in items {
-        match item {
-            DtItem::Node(node) => {
-                if node.name == name {
-                    return Some(node);
-                }
-                if let Some(found) = find_layer_node(&node.children, name) {
-                    return Some(found);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn find_bindings_property(node: &DtNode) -> Option<&DtProperty> {
-    node.properties.iter().find(|prop| prop.name == "bindings")
 }
 
 fn format_bindings_raw(bindings: &[String]) -> String {
@@ -1422,145 +1331,6 @@ fn format_list(values: &[String]) -> String {
     } else {
         format!("< {} >", values.join(" "))
     }
-}
-
-fn metadata_properties(metadata: &MetadataMap) -> Vec<(String, String)> {
-    metadata
-        .iter()
-        .map(|(key, value)| (key.clone(), format_metadata_value(value)))
-        .collect()
-}
-
-fn format_metadata_value(value: &TomlValue) -> String {
-    match value {
-        TomlValue::String(text) => format!("\"{}\"", escape_string(text)),
-        TomlValue::Integer(num) => num.to_string(),
-        TomlValue::Float(num) => num.to_string(),
-        TomlValue::Boolean(flag) => {
-            if *flag {
-                "true".to_string()
-            } else {
-                "false".to_string()
-            }
-        }
-        TomlValue::Array(items) => format_metadata_array(items),
-        TomlValue::Table(entries) => {
-            let body = entries
-                .iter()
-                .map(|(key, value)| format!("{} = {}", key, format_metadata_value(value)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("{{ {} }}", body)
-        }
-        TomlValue::Datetime(dt) => format!("\"{}\"", dt),
-    }
-}
-
-fn format_metadata_array(items: &[TomlValue]) -> String {
-    if items.is_empty() {
-        "< >".to_string()
-    } else if items
-        .iter()
-        .all(|item| matches!(item, TomlValue::Integer(_) | TomlValue::Float(_)))
-    {
-        let values = items
-            .iter()
-            .map(|item| format_metadata_value(item))
-            .collect::<Vec<_>>();
-        format!("< {} >", values.join(" "))
-    } else {
-        items
-            .iter()
-            .map(|item| match item {
-                TomlValue::String(text) => format!("\"{}\"", escape_string(text)),
-                _ => format_metadata_value(item),
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
-fn escape_string(input: &str) -> String {
-    input.replace('"', "\\\"")
-}
-
-fn parse_binding_list(raw: &str) -> Vec<String> {
-    parse_binding_groups(raw)
-}
-
-fn parse_binding_groups(raw: &str) -> Vec<String> {
-    let mut groups = Vec::new();
-    let mut depth = 0;
-    let mut current = String::new();
-    for ch in raw.chars() {
-        match ch {
-            '<' => {
-                depth += 1;
-            }
-            '>' => {
-                if depth > 0 {
-                    depth -= 1;
-                }
-                if depth == 0 && !current.is_empty() {
-                    let trimmed = current.trim();
-                    if !trimmed.is_empty() {
-                        if trimmed.matches('&').count() > 1 {
-                            groups.extend(split_binding_sequence(trimmed));
-                        } else {
-                            groups.push(trimmed.to_string());
-                        }
-                    }
-                    current.clear();
-                } else if depth > 0 {
-                    current.push(ch);
-                }
-            }
-            _ => {
-                if depth > 0 {
-                    current.push(ch);
-                }
-            }
-        }
-    }
-    if groups.is_empty() {
-        let trimmed = raw
-            .trim()
-            .trim_start_matches('<')
-            .trim_end_matches('>')
-            .trim_end_matches(';')
-            .trim();
-        if !trimmed.is_empty() {
-            if trimmed.matches('&').count() > 1 {
-                groups.extend(split_binding_sequence(trimmed));
-            } else {
-                groups.push(trimmed.to_string());
-            }
-        }
-    }
-    groups
-}
-
-fn split_binding_sequence(sequence: &str) -> Vec<String> {
-    let mut bindings = Vec::new();
-    let mut current = String::new();
-    for token in sequence.split_whitespace() {
-        if token.starts_with('&') {
-            if !current.is_empty() {
-                bindings.push(current.trim().to_string());
-                current.clear();
-            }
-            current.push_str(token);
-        } else {
-            if !current.is_empty() {
-                current.push(' ');
-            }
-            current.push_str(token);
-        }
-    }
-    if !current.is_empty() {
-        bindings.push(current.trim().to_string());
-    }
-    bindings
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -2123,6 +1893,7 @@ impl TaskKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{DtItem, DtNode};
     use std::path::PathBuf;
 
     #[test]
@@ -2312,7 +2083,8 @@ target = "layers.base.bindings[0]"
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results.len(), 1);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
-        let updated = layer_snapshot(exec.document.document(), "base").expect("layer snapshot");
+        let engine = LayoutEngine::new(exec.document.clone());
+        let updated = engine.layer_snapshot("base").expect("layer snapshot");
         assert!(updated.contains("&kp SPACE"));
     }
 
@@ -2339,7 +2111,8 @@ target = "layers.base.bindings[0]"
         let document = KeymapDocument::from_document(base_doc);
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
-        assert!(combo_snapshot(exec.document.document(), "combo_new").is_some());
+        let engine = LayoutEngine::new(exec.document.clone());
+        assert!(engine.combo_snapshot("combo_new").is_some());
     }
 
     #[test]
@@ -2365,7 +2138,8 @@ target = "layers.base.bindings[0]"
         let document = KeymapDocument::from_document(base_doc);
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
-        let snapshot = combo_snapshot(exec.document.document(), "combo_new").unwrap();
+        let engine = LayoutEngine::new(exec.document.clone());
+        let snapshot = engine.combo_snapshot("combo_new").unwrap();
         assert!(
             snapshot.contains("layers=<1>") || snapshot.contains("layers=< 1 >"),
             "snapshot: {}",
@@ -2412,12 +2186,78 @@ target = "layers.base.bindings[0]"
         );
         assert!(comments.iter().any(|text| text.contains("mods.shift")));
 
-        let snapshot = combo_snapshot(exec.document.document(), "combo_cond").unwrap();
+        let engine = LayoutEngine::new(exec.document.clone());
+        let snapshot = engine.combo_snapshot("combo_cond").unwrap();
         assert!(
             snapshot.contains("conditions=layer_state == base && mods.shift"),
             "snapshot missing conditions: {}",
             snapshot
         );
+    }
+
+    #[test]
+    fn behavior_task_updates_settings() {
+        let mut settings = MetadataMap::new();
+        settings.insert(
+            "bindings".into(),
+            TomlValue::Array(vec![TomlValue::String("&kp ENTER".into())]),
+        );
+        settings.insert("tapping-term-ms".into(), TomlValue::Integer(350));
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "behavior-update".into(),
+            target: "behaviors.simple_tap".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: None,
+            action: TaskAction::Behavior(BehaviorTask {
+                behavior: "simple_tap".into(),
+                settings,
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+        let engine = LayoutEngine::new(exec.document.clone());
+        let snapshot = engine
+            .behavior_snapshot("simple_tap")
+            .expect("behavior snapshot");
+        assert!(
+            snapshot.contains("bindings=< &kp ENTER >"),
+            "snapshot: {}",
+            snapshot
+        );
+        assert!(
+            snapshot.contains("tapping-term-ms=< 350 >"),
+            "snapshot: {}",
+            snapshot
+        );
+    }
+
+    #[test]
+    fn meta_task_updates_entries() {
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "meta-update".into(),
+            target: "meta.author".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: Some("\"Alice\"".into()),
+            action: TaskAction::Meta(MetaTask {
+                key: "author".into(),
+                value: TomlValue::String("Bob".into()),
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+        let engine = LayoutEngine::new(exec.document.clone());
+        let snapshot = engine.meta_snapshot("author").expect("meta entry");
+        assert_eq!(snapshot, "\"Bob\"");
     }
 
     #[test]
@@ -2439,7 +2279,8 @@ target = "layers.base.bindings[0]"
         let document = KeymapDocument::from_document(base_doc);
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
-        assert_eq!(layer_order_snapshot(exec.document.document()), "nav,base");
+        let engine = LayoutEngine::new(exec.document.clone());
+        assert_eq!(engine.layer_order_snapshot(), "nav,base");
     }
 
     #[test]
@@ -2461,7 +2302,8 @@ target = "layers.base.bindings[0]"
         let document = KeymapDocument::from_document(base_doc);
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
-        assert_eq!(layer_order_snapshot(exec.document.document()), "nav,base");
+        let engine = LayoutEngine::new(exec.document.clone());
+        assert_eq!(engine.layer_order_snapshot(), "nav,base");
     }
 
     #[test]
@@ -2558,7 +2400,8 @@ set_binding("base", 0, "&kp ESC");
         let document = KeymapDocument::from_document(base_doc);
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
-        let updated = layer_snapshot(exec.document.document(), "base").expect("layer snapshot");
+        let engine = LayoutEngine::new(exec.document.clone());
+        let updated = engine.layer_snapshot("base").expect("layer snapshot");
         assert!(updated.contains("&kp ESC"));
         assert!(
             exec.results[0]
@@ -2589,7 +2432,8 @@ set_binding("base", 0, "&kp ESC");
         let document = KeymapDocument::from_document(base_doc);
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
-        let updated = layer_snapshot(exec.document.document(), "base").expect("layer snapshot");
+        let engine = LayoutEngine::new(exec.document.clone());
+        let updated = engine.layer_snapshot("base").expect("layer snapshot");
         assert!(updated.contains("&kp TAB"));
     }
 
@@ -2629,9 +2473,11 @@ upsert_combo_full("combo_new", [0, 1], "&kp ENTER", 50, ["nav"], ["layer_state =
             .expect("display_name");
         assert_eq!(display.value.raw, "\"Primary\"");
 
-        assert_eq!(layer_order_snapshot(exec.document.document()), "nav,base");
+        let engine = LayoutEngine::new(exec.document.clone());
+        assert_eq!(engine.layer_order_snapshot(), "nav,base");
 
-        let snapshot = combo_snapshot(exec.document.document(), "combo_new").unwrap();
+        let engine = LayoutEngine::new(exec.document.clone());
+        let snapshot = engine.combo_snapshot("combo_new").unwrap();
         assert!(
             snapshot.contains("timeout-ms=< 50 >") || snapshot.contains("timeout-ms=<50>"),
             "snapshot: {}",
@@ -2748,6 +2594,47 @@ combos {
         bindings = < &kp ESC >;
     };
 };
+
+behaviors {
+    simple_tap {
+        compatible = "zmk,behavior-hold-tap";
+        #binding-cells = <0>;
+        bindings = < &kp A >;
+        tapping-term-ms = <200>;
+    };
+};
+
+meta {
+    author = "Alice";
+};
 "#
+    }
+
+    fn find_layer_node<'a>(items: &'a [DtItem], name: &str) -> Option<&'a DtNode> {
+        for item in items {
+            match item {
+                DtItem::Node(node) => {
+                    if node.name == name {
+                        return Some(node);
+                    }
+                    if let Some(found) = find_layer_node(&node.children, name) {
+                        return Some(found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn find_child_node<'a>(parent: &'a DtNode, name: &str) -> Option<&'a DtNode> {
+        for item in &parent.children {
+            if let DtItem::Node(node) = item {
+                if node.name == name {
+                    return Some(node);
+                }
+            }
+        }
+        None
     }
 }

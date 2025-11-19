@@ -8,7 +8,8 @@ use std::{
 use tempfile::tempdir;
 use zmk_layout_rs::build::{
     BuildError, BuildRequestError, CliDockerBackend, DockerBackend, DockerBuildOptions,
-    DockerInvocation, FirmwareBuilder, FirmwareManifest, ManifestError, ProcessStatus,
+    DockerInvocation, FirmwareBuilder, FirmwareManifest, LogLevel, ManifestError, ProcessStatus,
+    ProgressReporter, WorkspaceManager,
 };
 
 fn fixture(name: &str) -> PathBuf {
@@ -93,13 +94,7 @@ fn firmware_builder_runs_moergo_toolchain() {
         .expect("manifest");
     let docker = FakeDockerBackend::new();
     docker.set_on_run(|invocation| {
-        let workspace = invocation
-            .volumes
-            .iter()
-            .find(|mount| mount.container_path == PathBuf::from("/workspace"))
-            .expect("workspace mount")
-            .host_path
-            .clone();
+        let workspace = host_workspace(invocation);
         let artifacts = workspace.join("artifacts");
         fs::create_dir_all(&artifacts).expect("artifact dir");
         fs::write(artifacts.join("left.uf2"), b"demo").expect("artifact");
@@ -117,6 +112,37 @@ fn firmware_builder_runs_moergo_toolchain() {
     let report = builder.build(request).expect("build");
     assert!(report.success);
     assert!(output_dir.path().join("left.uf2").exists());
+    assert_eq!(
+        report.metadata.entries.get("keyboard").map(String::as_str),
+        Some("glove80")
+    );
+    assert_eq!(
+        report.metadata.entries.get("toolchain").map(String::as_str),
+        Some("moergo")
+    );
+    assert_eq!(
+        report
+            .metadata
+            .entries
+            .get("targets.completed")
+            .map(String::as_str),
+        Some("left")
+    );
+    assert_eq!(
+        report
+            .metadata
+            .entries
+            .get("artifacts.count")
+            .map(String::as_str),
+        Some("1")
+    );
+    let left_artifacts = report
+        .artifacts
+        .per_target
+        .get("left")
+        .expect("left artifacts");
+    assert_eq!(left_artifacts.len(), 1);
+    assert_eq!(left_artifacts[0], output_dir.path().join("left.uf2"));
 
     let invocations = docker.invocations();
     assert_eq!(invocations.len(), 1);
@@ -133,18 +159,43 @@ fn firmware_builder_runs_moergo_toolchain() {
 }
 
 #[test]
+fn moergo_toolchain_accepts_keymap_inputs() {
+    let manifest = FirmwareManifest::from_toml_str(include_str!("fixtures/firmware_manifest.toml"))
+        .expect("manifest");
+    let docker = FakeDockerBackend::new();
+    docker.set_on_run(|invocation| {
+        let workspace = host_workspace(invocation);
+        let artifacts = workspace.join("artifacts");
+        fs::create_dir_all(&artifacts).expect("artifact dir");
+        fs::write(artifacts.join("right.uf2"), b"demo").expect("artifact");
+        // Generated JSON should exist even when only keymap/config inputs were provided.
+        assert!(workspace.join("layout/layout.json").exists());
+    });
+    let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()));
+    let output_dir = tempdir().expect("tempdir");
+    let request = builder
+        .builder()
+        .keyboard("glove80")
+        .target("right")
+        .layout_files(
+            fixture("cli_base.dts"),
+            Some(fixture("sample_config.dtsi")),
+        )
+        .output_dir(output_dir.path().to_path_buf())
+        .build()
+        .expect("request");
+    let report = builder.build(request).expect("build");
+    assert!(report.success);
+    assert!(output_dir.path().join("right.uf2").exists());
+}
+
+#[test]
 fn firmware_builder_runs_zmk_toolchain() {
     let manifest = FirmwareManifest::from_toml_str(include_str!("fixtures/firmware_manifest.toml"))
         .expect("manifest");
     let docker = FakeDockerBackend::new();
     docker.set_on_run(|invocation| {
-        let workspace = invocation
-            .volumes
-            .iter()
-            .find(|mount| mount.container_path == PathBuf::from("/workspace"))
-            .expect("workspace mount")
-            .host_path
-            .clone();
+        let workspace = host_workspace(invocation);
         let build_dir = workspace.join("build/right/zephyr");
         fs::create_dir_all(&build_dir).expect("build dir");
         fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
@@ -156,7 +207,10 @@ fn firmware_builder_runs_zmk_toolchain() {
         .keyboard("glove80")
         .toolchain("zmk")
         .target("right")
-        .layout_files(fixture("sample_keymap.dtsi"), fixture("sample_config.dtsi"))
+        .layout_files(
+            fixture("sample_keymap.dtsi"),
+            Some(fixture("sample_config.dtsi")),
+        )
         .output_dir(output_dir.path().to_path_buf())
         .build()
         .expect("request");
@@ -178,6 +232,337 @@ fn firmware_builder_runs_zmk_toolchain() {
         record.env.get("ZMK_CONFIG").map(String::as_str),
         Some("/workspace/config")
     );
+}
+
+#[test]
+fn firmware_builder_emits_progress_updates() {
+    let manifest = FirmwareManifest::from_toml_str(include_str!("fixtures/firmware_manifest.toml"))
+        .expect("manifest");
+    let docker = FakeDockerBackend::new();
+    docker.set_on_run(|invocation| {
+        let workspace = host_workspace(invocation);
+        let artifacts = workspace.join("artifacts");
+        if artifacts.exists() {
+            fs::remove_dir_all(&artifacts).expect("clean artifacts");
+        }
+        fs::create_dir_all(&artifacts).expect("artifact dir");
+        let artifact_name = invocation
+            .env
+            .get("ARTIFACT_NAME")
+            .cloned()
+            .unwrap_or_else(|| "firmware".into());
+        fs::write(artifacts.join(format!("{artifact_name}.uf2")), b"demo").expect("artifact");
+    });
+    let progress = RecordingProgress::new();
+    let progress_handle: Arc<dyn ProgressReporter> = Arc::new(progress.clone());
+    let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()));
+    let output_dir = tempdir().expect("tempdir");
+    let request = builder
+        .builder()
+        .keyboard("glove80")
+        .layout_json_path(fixture("demo_layout.json"))
+        .output_dir(output_dir.path().to_path_buf())
+        .progress(progress_handle)
+        .build()
+        .expect("request");
+    let report = builder.build(request).expect("build");
+    assert_eq!(
+        report
+            .metadata
+            .entries
+            .get("targets.completed")
+            .map(String::as_str),
+        Some("left,right")
+    );
+    assert_eq!(
+        report
+            .metadata
+            .entries
+            .get("artifacts.count")
+            .map(String::as_str),
+        Some("2")
+    );
+    let updates = progress.updates();
+    assert_eq!(updates.len(), 4);
+    assert_eq!(updates[0], (0, 2, "building target left".to_string()));
+    assert_eq!(updates[1], (1, 2, "completed target left".to_string()));
+    assert_eq!(updates[2], (1, 2, "building target right".to_string()));
+    assert_eq!(updates[3], (2, 2, "completed target right".to_string()));
+    assert_eq!(progress.starts().len(), 3);
+    assert_eq!(progress.completions().len(), 3);
+    assert!(progress.failures().is_empty());
+}
+
+#[test]
+fn workspace_cache_hydrates_existing_files() {
+    let manifest = FirmwareManifest::from_toml_str(
+        r#"
+version = 1
+
+[toolchains.moergo]
+kind = "moergo"
+image = "ghcr.io/demo/moergo"
+[toolchains.moergo.cache]
+workspace = "read_only"
+
+[keyboards.demo]
+default_toolchain = "moergo"
+
+[[keyboards.demo.targets]]
+id = "main"
+board = "nice_nano_v2"
+"#,
+    )
+    .expect("manifest");
+    let cache_dir = tempdir().expect("cache dir");
+    let cache_root = cache_dir.path().join("cache");
+    let cache_app = cache_root
+        .join("firmware")
+        .join("moergo")
+        .join("workspace")
+        .join("app");
+    fs::create_dir_all(&cache_app).expect("cache app dir");
+    fs::write(cache_app.join("cached.txt"), b"cached").expect("cache file");
+
+    let docker = FakeDockerBackend::new();
+    docker.set_on_run(|invocation| {
+        let workspace = host_workspace(invocation);
+        let cached = workspace.join("app/cached.txt");
+        assert!(cached.exists(), "workspace cache should hydrate files");
+    });
+
+    let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()))
+        .with_workspace_manager(WorkspaceManager::with_cache_root(cache_root));
+    let output_dir = tempdir().expect("tempdir");
+    let request = builder
+        .builder()
+        .keyboard("demo")
+        .target("main")
+        .layout_json_path(fixture("demo_layout.json"))
+        .output_dir(output_dir.path().to_path_buf())
+        .build()
+        .expect("request");
+    let report = builder.build(request).expect("build");
+    assert!(report.success);
+}
+
+#[test]
+fn workspace_cache_persists_when_read_write() {
+    let manifest = FirmwareManifest::from_toml_str(
+        r#"
+version = 1
+
+[toolchains.zmk]
+kind = "zmk_config"
+image = "zmkfirmware/zmk-build-arm"
+[toolchains.zmk.cache]
+workspace = "read_write"
+build = "read_write"
+
+[keyboards.demo]
+default_toolchain = "zmk"
+
+[[keyboards.demo.targets]]
+id = "main"
+board = "nice_nano_v2"
+shield = "demo"
+"#,
+    )
+    .expect("manifest");
+    let cache_dir = tempdir().expect("cache dir");
+    let cache_root = cache_dir.path().join("cache");
+    let docker = FakeDockerBackend::new();
+    docker.set_on_run(|invocation| {
+        let workspace = host_workspace(invocation);
+        fs::create_dir_all(workspace.join("app")).expect("app dir");
+        fs::write(workspace.join("app/repo.txt"), b"repo").expect("repo file");
+        let build_dir = workspace.join("build/main/zephyr");
+        fs::create_dir_all(&build_dir).expect("build dir");
+        fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
+    });
+
+    let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()))
+        .with_workspace_manager(WorkspaceManager::with_cache_root(cache_root.clone()));
+    let output_dir = tempdir().expect("output dir");
+    let request = builder
+        .builder()
+        .keyboard("demo")
+        .toolchain("zmk")
+        .target("main")
+        .layout_files(
+            fixture("sample_keymap.dtsi"),
+            Some(fixture("sample_config.dtsi")),
+        )
+        .output_dir(output_dir.path().to_path_buf())
+        .build()
+        .expect("request");
+    builder.build(request).expect("build");
+
+    let workspace_cache = cache_root
+        .join("firmware")
+        .join("zmk")
+        .join("workspace")
+        .join("app")
+        .join("repo.txt");
+    assert!(
+        workspace_cache.exists(),
+        "workspace cache should persist files"
+    );
+    let build_cache = cache_root
+        .join("firmware")
+        .join("zmk")
+        .join("build")
+        .join("main")
+        .join("zephyr")
+        .join("firmware.uf2");
+    assert!(build_cache.exists(), "build cache should persist artifacts");
+}
+
+#[test]
+fn disable_cache_flag_skips_cache_usage() {
+    let manifest = FirmwareManifest::from_toml_str(
+        r#"
+version = 1
+
+[toolchains.zmk]
+kind = "zmk_config"
+image = "zmkfirmware/zmk-build-arm"
+[toolchains.zmk.cache]
+workspace = "read_write"
+build = "read_write"
+
+[keyboards.demo]
+default_toolchain = "zmk"
+
+[[keyboards.demo.targets]]
+id = "main"
+board = "nice_nano_v2"
+"#,
+    )
+    .expect("manifest");
+    let cache_dir = tempdir().expect("cache dir");
+    let cache_root = cache_dir.path().join("cache");
+    let workspace_cache = cache_root
+        .join("firmware")
+        .join("zmk")
+        .join("workspace")
+        .join("app");
+    fs::create_dir_all(&workspace_cache).expect("cache app dir");
+    fs::write(workspace_cache.join("cached.txt"), b"cached").expect("cache seed");
+
+    let docker = FakeDockerBackend::new();
+    docker.set_on_run(|invocation| {
+        let workspace = host_workspace(invocation);
+        assert!(
+            !workspace.join("app/cached.txt").exists(),
+            "disable_cache should prevent hydration"
+        );
+        fs::create_dir_all(workspace.join("app")).expect("app dir");
+        fs::write(workspace.join("app/runtime.txt"), b"runtime").expect("runtime file");
+        let build_dir = workspace.join("build/main/zephyr");
+        fs::create_dir_all(&build_dir).expect("build dir");
+        fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
+    });
+
+    let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()))
+        .with_workspace_manager(WorkspaceManager::with_cache_root(cache_root.clone()));
+    let output_dir = tempdir().expect("output dir");
+    let request = builder
+        .builder()
+        .keyboard("demo")
+        .toolchain("zmk")
+        .target("main")
+        .layout_files(
+            fixture("sample_keymap.dtsi"),
+            Some(fixture("sample_config.dtsi")),
+        )
+        .output_dir(output_dir.path().to_path_buf())
+        .disable_cache(true)
+        .build()
+        .expect("request");
+    builder.build(request).expect("build");
+
+    assert!(
+        !workspace_cache.join("runtime.txt").exists(),
+        "runtime files should not be written back when cache disabled"
+    );
+    let build_cache = cache_root.join("firmware").join("zmk").join("build");
+    assert!(
+        !build_cache.exists(),
+        "build cache should remain untouched when cache disabled"
+    );
+}
+
+fn host_workspace(invocation: &DockerInvocation) -> PathBuf {
+    invocation
+        .volumes
+        .iter()
+        .find(|mount| mount.container_path == PathBuf::from("/workspace"))
+        .expect("workspace mount")
+        .host_path
+        .clone()
+}
+
+#[derive(Clone, Default)]
+struct RecordingProgress {
+    updates: Arc<Mutex<Vec<(u32, u32, String)>>>,
+    starts: Arc<Mutex<Vec<String>>>,
+    completions: Arc<Mutex<Vec<String>>>,
+    failures: Arc<Mutex<Vec<String>>>,
+}
+
+impl RecordingProgress {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn updates(&self) -> Vec<(u32, u32, String)> {
+        self.updates.lock().expect("lock updates").clone()
+    }
+
+    fn starts(&self) -> Vec<String> {
+        self.starts.lock().expect("lock starts").clone()
+    }
+
+    fn completions(&self) -> Vec<String> {
+        self.completions.lock().expect("lock completes").clone()
+    }
+
+    fn failures(&self) -> Vec<String> {
+        self.failures.lock().expect("lock failures").clone()
+    }
+}
+
+impl ProgressReporter for RecordingProgress {
+    fn log(&self, _level: LogLevel, _message: &str) {}
+
+    fn start_checkpoint(&self, id: &str, _message: &str) {
+        self.starts
+            .lock()
+            .expect("lock starts")
+            .push(id.to_string());
+    }
+
+    fn complete_checkpoint(&self, id: &str) {
+        self.completions
+            .lock()
+            .expect("lock completes")
+            .push(id.to_string());
+    }
+
+    fn fail_checkpoint(&self, id: &str) {
+        self.failures
+            .lock()
+            .expect("lock failures")
+            .push(id.to_string());
+    }
+
+    fn update_progress(&self, current: u32, total: u32, status: &str) {
+        self.updates
+            .lock()
+            .expect("lock updates")
+            .push((current, total, status.to_string()));
+    }
 }
 
 #[derive(Clone)]

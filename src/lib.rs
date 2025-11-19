@@ -9,6 +9,7 @@ pub mod ast;
 pub mod bindings;
 pub mod build;
 pub mod dts;
+pub mod layout_engine;
 pub mod macro_support;
 pub mod parser;
 pub mod providers;

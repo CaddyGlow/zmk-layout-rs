@@ -30,7 +30,9 @@ impl LayoutStager {
             LayoutSource::JsonPath(path) => self.copy_json(path, workspace),
             LayoutSource::JsonValue(value) => self.write_json(value, workspace),
             LayoutSource::Document(document) => self.write_document(document, workspace),
-            LayoutSource::Files { keymap, config } => self.copy_files(keymap, config, workspace),
+            LayoutSource::Files { keymap, extra } => {
+                self.copy_files(keymap, extra.as_ref(), workspace)
+            }
         }
     }
 
@@ -80,17 +82,20 @@ impl LayoutStager {
     fn copy_files(
         &self,
         keymap: &PathBuf,
-        config: &PathBuf,
+        extra: Option<&PathBuf>,
         workspace: &WorkspaceHandle,
     ) -> Result<KeymapArtifacts, BuildError> {
         let keymap_dest = workspace.layout_dir().join("keymap.dtsi");
         fs::copy(keymap, &keymap_dest).map_err(BuildError::Io)?;
-        let config_dest = workspace.layout_dir().join("config.dtsi");
-        fs::copy(config, &config_dest).map_err(BuildError::Io)?;
-        Ok(KeymapArtifacts {
+        let mut artifacts = KeymapArtifacts {
             keymap: Some(keymap_dest),
-            config: Some(config_dest),
             ..Default::default()
-        })
+        };
+        if let Some(config) = extra {
+            let config_dest = workspace.layout_dir().join("config.dtsi");
+            fs::copy(config, &config_dest).map_err(BuildError::Io)?;
+            artifacts.config = Some(config_dest);
+        }
+        Ok(artifacts)
     }
 }

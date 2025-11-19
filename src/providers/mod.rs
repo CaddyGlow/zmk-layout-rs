@@ -314,6 +314,22 @@ impl KeymapProvider {
         Ok(())
     }
 
+    pub fn set_behavior_properties(
+        &mut self,
+        behavior: &str,
+        properties: &[(String, String)],
+    ) -> Result<(), ProviderError> {
+        if properties.is_empty() {
+            return Ok(());
+        }
+        let behavior_node = self.behavior_node_mut(behavior)?;
+        for (key, value) in properties {
+            let property = ensure_property(behavior_node, key);
+            property.value.raw = value.clone();
+        }
+        Ok(())
+    }
+
     pub fn set_macro_timing(
         &mut self,
         behavior: &str,
@@ -1105,6 +1121,20 @@ impl KeymapDocument {
     ) -> Result<(), ProviderError> {
         let mut provider = KeymapProvider::new(self.document.clone());
         provider.set_binding(layer, index, binding)?;
+        self.document = provider.into_document();
+        Ok(())
+    }
+
+    pub fn set_behavior_properties(
+        &mut self,
+        behavior: &str,
+        properties: &[(String, String)],
+    ) -> Result<(), ProviderError> {
+        if properties.is_empty() {
+            return Ok(());
+        }
+        let mut provider = KeymapProvider::new(self.document.clone());
+        provider.set_behavior_properties(behavior, properties)?;
         self.document = provider.into_document();
         Ok(())
     }
