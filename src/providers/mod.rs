@@ -9,6 +9,8 @@ use crate::{
     tokenizer::TokenSpan,
 };
 
+pub(crate) const COMBO_CONDITION_COMMENT_PREFIX: &str = "// zmk-task:condition";
+
 /// Provider that exposes convenience APIs for editing keymap layers.
 pub struct KeymapProvider {
     document: DtsDocument,
@@ -88,7 +90,6 @@ impl KeymapProvider {
         bindings_prop.value.raw = format_bindings_raw(&entries);
         Ok(())
     }
-
     pub fn set_layer_bindings(
         &mut self,
         layer: &str,
@@ -200,6 +201,7 @@ impl KeymapProvider {
         key_positions: &[u32],
         timeout_ms: Option<u32>,
         layers: &[u32],
+        conditions: &[String],
     ) -> Result<(), ProviderError> {
         if key_positions.is_empty() {
             return Err(ProviderError::InvalidBinding(
@@ -261,6 +263,7 @@ impl KeymapProvider {
             layer_prop.value.raw = format_u32_list(layers);
         }
 
+        crate::providers::apply_combo_conditions(combo_node, conditions);
         Ok(())
     }
 
@@ -580,6 +583,30 @@ fn ensure_property<'a>(node: &'a mut DtNode, name: &str) -> &'a mut DtProperty {
     node.properties
         .last_mut()
         .expect("just inserted property is present")
+}
+
+fn apply_combo_conditions(node: &mut DtNode, conditions: &[String]) {
+    node.leading_comments
+        .retain(|comment| !self::is_condition_comment(comment));
+    if conditions.is_empty() {
+        return;
+    }
+    for condition in conditions {
+        let content = condition.trim();
+        if content.is_empty() {
+            continue;
+        }
+        let text = format!("{} {}", COMBO_CONDITION_COMMENT_PREFIX, content);
+        node.leading_comments
+            .push(DtComment::new(text, empty_span()));
+    }
+}
+
+fn is_condition_comment(comment: &DtComment) -> bool {
+    comment
+        .text
+        .trim_start()
+        .starts_with(COMBO_CONDITION_COMMENT_PREFIX)
 }
 
 fn empty_span() -> TokenSpan {
@@ -1159,9 +1186,10 @@ impl KeymapDocument {
         key_positions: &[u32],
         timeout_ms: Option<u32>,
         layers: &[u32],
+        conditions: &[String],
     ) -> Result<(), ProviderError> {
         let mut provider = KeymapProvider::new(self.document.clone());
-        provider.upsert_combo(name, binding, key_positions, timeout_ms, layers)?;
+        provider.upsert_combo(name, binding, key_positions, timeout_ms, layers, conditions)?;
         self.document = provider.into_document();
         Ok(())
     }

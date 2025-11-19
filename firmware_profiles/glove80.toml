@@ -1,0 +1,58 @@
+version = 1
+
+[toolchains.moergo]
+kind = "moergo"
+image = "glove80-zmk-config-docker:latest"
+repository = "https://github.com/moergo-sc/zmk.git"
+branch = "v25.05"
+
+[toolchains.moergo.env]
+ZMK_CONFIG = "/workspace/config"
+
+[toolchains.zmk]
+kind = "zmk_config"
+image = "zmkfirmware/zmk-build-arm:stable"
+repository = "https://github.com/moergo-sc/zmk.git"
+branch = "v25.05"
+
+[keyboards.glove80]
+default_toolchain = "moergo"
+
+[keyboards.glove80.metadata]
+vendor = "MoErgo"
+description = "Derived from zmk-glovebox/keyboards/glove80"
+profile = "keyboards/glove80/main.yaml"
+default_firmware = "v25.05"
+
+[keyboards.glove80.metadata.firmwares]
+v25_05 = { repository = "moergo-sc/zmk", branch = "v25.05", channel = "stable" }
+v25_08_beta_1 = { repository = "moergo-sc/zmk", branch = "v25.08-beta.1", channel = "beta" }
+v25_04_beta_1 = { repository = "moergo-sc/zmk", branch = "v25.04-beta.1", channel = "beta" }
+v25_01 = { repository = "moergo-sc/zmk", branch = "v25.01", channel = "stable" }
+pr36 = { repository = "moergo-sc/zmk", branch = "pull/36/head", notes = "per-key RGB" }
+pr38 = { repository = "moergo-sc/zmk", branch = "pull/38/head", notes = "per-key RGB" }
+darknao_v25_04 = { repository = "darknao/zmk", branch = "rgb-layer-25.04", notes = "Darknao per-key RGB" }
+
+[[keyboards.glove80.targets]]
+id = "left"
+board = "glove80_lh"
+comment = "Left half (glove80_lh)"
+cmake_defs = { CONFIG_ZMK_SPLIT_ROLE = "\"left\"" }
+
+[keyboards.glove80.targets.toolchain_overrides.moergo]
+env.ARTIFACT_NAME = "glove80_left"
+
+[keyboards.glove80.targets.toolchain_overrides.zmk]
+env.ZMK_ARTIFACT = "glove80_left"
+
+[[keyboards.glove80.targets]]
+id = "right"
+board = "glove80_rh"
+comment = "Right half (glove80_rh)"
+cmake_defs = { CONFIG_ZMK_SPLIT_ROLE = "\"right\"" }
+
+[keyboards.glove80.targets.toolchain_overrides.moergo]
+env.ARTIFACT_NAME = "glove80_right"
+
+[keyboards.glove80.targets.toolchain_overrides.zmk]
+env.ZMK_ARTIFACT = "glove80_right"

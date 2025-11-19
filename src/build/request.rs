@@ -38,7 +38,7 @@ pub struct BuildRequest {
     pub extra_env: BTreeMap<String, String>,
     pub disable_cache: bool,
     pub manifest: Arc<FirmwareManifest>,
-    pub progress: Box<dyn ProgressReporter + Send>,
+    pub progress: Arc<dyn ProgressReporter>,
 }
 
 impl fmt::Debug for BuildRequest {
@@ -81,7 +81,7 @@ pub struct BuildRequestBuilder {
     output_dir: Option<PathBuf>,
     extra_env: BTreeMap<String, String>,
     disable_cache: bool,
-    progress: Option<Box<dyn ProgressReporter + Send>>,
+    progress: Option<Arc<dyn ProgressReporter>>,
 }
 
 impl BuildRequestBuilder {
@@ -152,7 +152,7 @@ impl BuildRequestBuilder {
         self
     }
 
-    pub fn progress(mut self, reporter: Box<dyn ProgressReporter + Send>) -> Self {
+    pub fn progress(mut self, reporter: Arc<dyn ProgressReporter>) -> Self {
         self.progress = Some(reporter);
         self
     }
@@ -192,7 +192,7 @@ impl BuildRequestBuilder {
             .ok_or(BuildRequestError::MissingOutputDirectory)?;
         let progress = self
             .progress
-            .unwrap_or_else(|| Box::new(NoopProgressReporter::new()));
+            .unwrap_or_else(|| Arc::new(NoopProgressReporter::new()));
 
         Ok(BuildRequest {
             keyboard_id,

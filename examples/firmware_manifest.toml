@@ -1,0 +1,36 @@
+version = 1
+
+[toolchains.zmk]
+kind = "zmk_config"
+image = "zmkfirmware/zmk-build-arm"
+repository = "https://github.com/zmkfirmware/zmk"
+branch = "main"
+[toolchains.zmk.env]
+ZEPHYR_BASE = "/opt/zephyr"
+[toolchains.zmk.cache]
+workspace = "read_only"
+build = "disabled"
+[[toolchains.zmk.cache.extra_paths]]
+relative = "modules/custom"
+
+[toolchains.moergo]
+kind = "moergo"
+image = "ghcr.io/moergo/glove80"
+
+[keyboards.glove80]
+default_toolchain = "moergo"
+metadata = { maintainer = "demo", keyboard = "glove80" }
+
+[[keyboards.glove80.targets]]
+id = "left"
+board = "nice_nano_v2"
+shield = "glove80_left"
+cmake_defs = { CONFIG_ZMK_KEYS_PER_SCAN = "4" }
+toolchain_overrides.moergo.image = "ghcr.io/moergo/custom"
+toolchain_overrides.moergo.env.BUILD_MODE = "release"
+toolchain_overrides.zmk.branch = "dev"
+
+[[keyboards.glove80.targets]]
+id = "right"
+board = "nice_nano_v2"
+shield = "glove80_right"

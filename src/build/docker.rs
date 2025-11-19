@@ -2,7 +2,14 @@
 
 use std::{
     collections::BTreeMap,
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
 };
 
 use super::{
@@ -20,18 +27,21 @@ pub trait DockerBackend: Send + Sync {
 /// Minimal CLI-based Docker backend placeholder.
 pub struct CliDockerBackend {
     binary: PathBuf,
+    checked: AtomicBool,
 }
 
 impl CliDockerBackend {
     pub fn new() -> Self {
         Self {
             binary: PathBuf::from("docker"),
+            checked: AtomicBool::new(false),
         }
     }
 
     pub fn with_binary(path: impl Into<PathBuf>) -> Self {
         Self {
             binary: path.into(),
+            checked: AtomicBool::new(false),
         }
     }
 
@@ -42,16 +52,87 @@ impl CliDockerBackend {
 
 impl DockerBackend for CliDockerBackend {
     fn ensure_available(&self) -> Result<(), BuildError> {
-        let _ = self.binary();
+        if self.checked.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let status = Command::new(self.binary())
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|err| BuildError::Docker(err.to_string()))?;
+        if !status.success() {
+            return Err(BuildError::Docker(
+                "docker binary is not available or failed to run".into(),
+            ));
+        }
+        self.checked.store(true, Ordering::SeqCst);
         Ok(())
     }
 
-    fn run(&self, _invocation: DockerInvocation) -> Result<ProcessStatus, BuildError> {
-        Err(BuildError::Unimplemented("docker run"))
+    fn run(&self, invocation: DockerInvocation) -> Result<ProcessStatus, BuildError> {
+        self.ensure_available()?;
+        let mut cmd = Command::new(self.binary());
+        cmd.arg("run").arg("--rm");
+        if let Some(entrypoint) = &invocation.entrypoint {
+            cmd.arg("--entrypoint").arg(entrypoint);
+        }
+        if let Some(workdir) = invocation.workdir.as_ref() {
+            cmd.arg("-w").arg(workdir);
+        }
+        if let Some(user) = invocation.user {
+            cmd.arg("-u").arg(format!("{}:{}", user.uid, user.gid));
+        }
+        for (key, value) in &invocation.env {
+            cmd.arg("-e").arg(format!("{key}={value}"));
+        }
+        for volume in &invocation.volumes {
+            cmd.arg("-v").arg(format_volume(volume)?);
+        }
+        cmd.arg(&invocation.image);
+        cmd.args(&invocation.command);
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = cmd
+            .spawn()
+            .map_err(|err| BuildError::Docker(err.to_string()))?;
+        let handler = invocation.log_handler.clone();
+        if let Some(stdout) = child.stdout.take() {
+            let handler = handler.clone();
+            thread::spawn(move || pump_output(stdout, handler, true));
+        }
+        if let Some(stderr) = child.stderr.take() {
+            let handler = handler.clone();
+            thread::spawn(move || pump_output(stderr, handler, false));
+        }
+        let status = child
+            .wait()
+            .map_err(|err| BuildError::Docker(err.to_string()))?;
+        Ok(ProcessStatus {
+            code: status.code().unwrap_or(-1),
+        })
     }
 
-    fn build(&self, _opts: DockerBuildOptions) -> Result<(), BuildError> {
-        Err(BuildError::Unimplemented("docker build"))
+    fn build(&self, opts: DockerBuildOptions) -> Result<(), BuildError> {
+        self.ensure_available()?;
+        let mut cmd = Command::new(self.binary());
+        cmd.arg("build");
+        if let Some(dockerfile) = &opts.dockerfile {
+            cmd.arg("-f").arg(dockerfile);
+        }
+        if let Some(tag) = &opts.tag {
+            cmd.arg("-t").arg(tag);
+        }
+        for (key, value) in &opts.build_args {
+            cmd.arg("--build-arg").arg(format!("{key}={value}"));
+        }
+        cmd.arg(&opts.context);
+        let status = cmd
+            .status()
+            .map_err(|err| BuildError::Docker(err.to_string()))?;
+        if !status.success() {
+            return Err(BuildError::Docker("docker build failed".into()));
+        }
+        Ok(())
     }
 }
 
@@ -76,7 +157,7 @@ pub struct DockerInvocation {
     pub volumes: Vec<VolumeMount>,
     pub workdir: Option<PathBuf>,
     pub user: Option<DockerUser>,
-    pub log_handler: Box<dyn OutputHandler>,
+    pub log_handler: Arc<dyn OutputHandler>,
 }
 
 impl DockerInvocation {
@@ -89,7 +170,7 @@ impl DockerInvocation {
             volumes: Vec::new(),
             workdir: None,
             user: None,
-            log_handler: Box::new(NullOutputHandler),
+            log_handler: Arc::new(NullOutputHandler),
         }
     }
 }
@@ -100,7 +181,7 @@ pub struct DockerBuildOptions {
     pub dockerfile: Option<PathBuf>,
     pub tag: Option<String>,
     pub build_args: BTreeMap<String, String>,
-    pub progress: Box<dyn ProgressReporter>,
+    pub progress: Arc<dyn ProgressReporter>,
 }
 
 impl DockerBuildOptions {
@@ -110,7 +191,7 @@ impl DockerBuildOptions {
             dockerfile: None,
             tag: None,
             build_args: BTreeMap::new(),
-            progress: Box::new(NoopProgressReporter::new()),
+            progress: Arc::new(NoopProgressReporter::new()),
         }
     }
 }
@@ -138,7 +219,7 @@ pub struct DockerUser {
 }
 
 /// Log handler receiving stdout/stderr lines from Docker.
-pub trait OutputHandler: Send {
+pub trait OutputHandler: Send + Sync {
     fn handle_stdout(&self, _line: &str) {}
     fn handle_stderr(&self, _line: &str) {}
 }
@@ -148,3 +229,35 @@ pub trait OutputHandler: Send {
 pub struct NullOutputHandler;
 
 impl OutputHandler for NullOutputHandler {}
+
+fn format_volume(mount: &VolumeMount) -> Result<String, BuildError> {
+    let host = mount
+        .host_path
+        .canonicalize()
+        .unwrap_or_else(|_| mount.host_path.clone());
+    let mut spec = format!("{}:{}", host.display(), mount.container_path.display());
+    if mount.mode == VolumeMode::ReadOnly {
+        spec.push_str(":ro");
+    }
+    Ok(spec)
+}
+
+fn pump_output<R: std::io::Read + Send + 'static>(
+    reader: R,
+    handler: Arc<dyn OutputHandler>,
+    stdout: bool,
+) {
+    let buf = BufReader::new(reader);
+    for line in buf.lines() {
+        match line {
+            Ok(text) => {
+                if stdout {
+                    handler.handle_stdout(&text);
+                } else {
+                    handler.handle_stderr(&text);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+}

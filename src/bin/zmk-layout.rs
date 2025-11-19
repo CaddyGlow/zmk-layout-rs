@@ -1,13 +1,17 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use similar::{ChangeTag, TextDiff};
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, sync::Arc};
 use thiserror::Error;
 use zmk_layout_rs::{
+    build::{
+        BuildReport, BuildRequest, BuildRequestBuilder, BuildRequestError, CliDockerBackend,
+        CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
+    },
     dts::DtsDocument,
     providers::KeymapDocument,
     tasks::{
-        ConflictPolicy, ExecutionMode, TaskConfigError, TaskEngineOptions, TaskExecution, TaskFile,
-        TaskOutcome, TaskStatus, apply_tasks_with_options,
+        ConflictPolicy, ExecutionMode, TaskAction, TaskConfigError, TaskEngineOptions,
+        TaskExecution, TaskFile, TaskOutcome, TaskStatus, apply_tasks_with_options,
     },
 };
 
@@ -24,6 +28,7 @@ fn run_cli() -> Result<(), CliError> {
         Command::Apply(args) => run_apply(&args)?,
         Command::Validate(args) => run_validate(&args)?,
         Command::Diff(args) => run_diff(&args)?,
+        Command::Firmware(cmd) => run_firmware(cmd)?,
     };
     std::process::exit(code);
 }
@@ -40,6 +45,8 @@ enum Command {
     Apply(ApplyArgs),
     Validate(ValidateArgs),
     Diff(DiffArgs),
+    #[command(subcommand)]
+    Firmware(FirmwareCommand),
 }
 
 #[derive(Args, Clone)]
@@ -70,6 +77,11 @@ struct SharedArgs {
         help = "Override the default conflict policy (prompt/override/skip/script)"
     )]
     conflicts: Option<ConflictFlag>,
+    #[arg(
+        long = "combo-conditions",
+        help = "Print a summary of combo conditions after task execution"
+    )]
+    combo_conditions: bool,
 }
 
 #[derive(Args, Clone)]
@@ -90,6 +102,74 @@ struct ValidateArgs {
 struct DiffArgs {
     #[command(flatten)]
     shared: SharedArgs,
+}
+
+#[derive(Subcommand)]
+enum FirmwareCommand {
+    Build(FirmwareBuildArgs),
+}
+
+#[derive(Args, Clone)]
+struct FirmwareBuildArgs {
+    #[arg(long, value_name = "FILE", help = "Firmware manifest (TOML)")]
+    manifest: PathBuf,
+    #[arg(
+        long,
+        value_name = "KEYBOARD",
+        help = "Keyboard id declared in the manifest"
+    )]
+    keyboard: String,
+    #[arg(long, value_name = "TOOLCHAIN", help = "Override toolchain id")]
+    toolchain: Option<String>,
+    #[arg(
+        long = "target",
+        value_name = "ID",
+        help = "Target id to build (repeatable)"
+    )]
+    targets: Vec<String>,
+    #[arg(
+        long = "layout-json",
+        value_name = "FILE",
+        help = "Layout JSON file to consume"
+    )]
+    layout_json: Option<PathBuf>,
+    #[arg(
+        long = "layout-dts",
+        value_name = "FILE",
+        help = "DTS layout to use as input"
+    )]
+    layout_dts: Option<PathBuf>,
+    #[arg(
+        long = "layout-keymap",
+        value_name = "FILE",
+        help = "Pre-generated keymap.dtsi file"
+    )]
+    layout_keymap: Option<PathBuf>,
+    #[arg(
+        long = "layout-config",
+        value_name = "FILE",
+        help = "Pre-generated config.dtsi file"
+    )]
+    layout_config: Option<PathBuf>,
+    #[arg(
+        long = "output-dir",
+        value_name = "DIR",
+        help = "Directory where artifacts should land"
+    )]
+    output_dir: PathBuf,
+    #[arg(
+        long = "env",
+        value_name = "KEY=VALUE",
+        help = "Extra env vars forwarded to the toolchain"
+    )]
+    env: Vec<String>,
+    #[arg(long, help = "Disable workspace/build cache hydration")]
+    disable_cache: bool,
+    #[arg(
+        long,
+        help = "Only print the resolved firmware request without running Docker"
+    )]
+    dry_run: bool,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -115,6 +195,9 @@ fn run_apply(args: &ApplyArgs) -> Result<i32, CliError> {
     let PreparedContext { file, document, .. } = prepare(&args.shared)?;
     let exec = execute(document, &file, ExecutionMode::Apply);
     let code = print_results(&exec.results);
+    if args.shared.combo_conditions {
+        print_combo_conditions(&file);
+    }
     if code != 0 {
         return Ok(code);
     }
@@ -136,7 +219,11 @@ fn run_apply(args: &ApplyArgs) -> Result<i32, CliError> {
 fn run_validate(args: &ValidateArgs) -> Result<i32, CliError> {
     let PreparedContext { file, document, .. } = prepare(&args.shared)?;
     let exec = execute(document, &file, ExecutionMode::DryRun);
-    Ok(print_results(&exec.results))
+    let code = print_results(&exec.results);
+    if args.shared.combo_conditions {
+        print_combo_conditions(&file);
+    }
+    Ok(code)
 }
 
 fn run_diff(args: &DiffArgs) -> Result<i32, CliError> {
@@ -147,12 +234,177 @@ fn run_diff(args: &DiffArgs) -> Result<i32, CliError> {
     } = prepare(&args.shared)?;
     let exec = execute(document, &file, ExecutionMode::Apply);
     let code = print_results(&exec.results);
+    if args.shared.combo_conditions {
+        print_combo_conditions(&file);
+    }
     if code != 0 {
         return Ok(code);
     }
     let updated = serialize_document(exec.document)?;
     print_diff(&base_text, &updated, &args.shared.base_layout);
     Ok(0)
+}
+
+fn run_firmware(command: FirmwareCommand) -> Result<i32, CliError> {
+    match command {
+        FirmwareCommand::Build(args) => run_firmware_build(&args),
+    }
+}
+
+fn run_firmware_build(args: &FirmwareBuildArgs) -> Result<i32, CliError> {
+    let manifest = FirmwareManifest::from_file(&args.manifest)?;
+    let builder = FirmwareBuilder::new(manifest, Box::new(CliDockerBackend::new()));
+    let request = build_firmware_request(&builder, args)?;
+    print_firmware_request(&request);
+    if args.dry_run {
+        return Ok(0);
+    }
+    let report = builder.build(request)?;
+    print_build_report(&report);
+    if report.success { Ok(0) } else { Ok(2) }
+}
+
+fn build_firmware_request(
+    firmware: &FirmwareBuilder,
+    args: &FirmwareBuildArgs,
+) -> Result<BuildRequest, CliError> {
+    let mut builder = firmware.builder().keyboard(args.keyboard.clone());
+    if let Some(toolchain) = &args.toolchain {
+        builder = builder.toolchain(toolchain.clone());
+    }
+    for target in &args.targets {
+        builder = builder.target(target.clone());
+    }
+    builder = builder
+        .output_dir(args.output_dir.clone())
+        .disable_cache(args.disable_cache)
+        .progress(Arc::new(CliProgressReporter));
+    for pair in &args.env {
+        let (key, value) = parse_env_var(pair)?;
+        builder = builder.env(key, value);
+    }
+    let builder = apply_firmware_layout(builder, args)?;
+    Ok(builder.build()?)
+}
+
+fn apply_firmware_layout(
+    mut builder: BuildRequestBuilder,
+    args: &FirmwareBuildArgs,
+) -> Result<BuildRequestBuilder, CliError> {
+    let mut layout_set = false;
+    if let Some(path) = &args.layout_json {
+        builder = builder.layout_json_path(path.clone());
+        layout_set = true;
+    }
+    if let Some(path) = &args.layout_dts {
+        if layout_set {
+            return Err(CliError::FirmwareLayout(
+                "multiple layout inputs were provided".into(),
+            ));
+        }
+        let text = fs::read_to_string(path).map_err(|source| CliError::ReadFile {
+            path: path.clone(),
+            source,
+        })?;
+        let document = DtsDocument::parse_str(&text).map_err(|source| CliError::ParseLayout {
+            path: path.clone(),
+            source,
+        })?;
+        builder = builder.layout_document(document);
+        layout_set = true;
+    }
+    match (&args.layout_keymap, &args.layout_config) {
+        (Some(keymap), Some(config)) => {
+            if layout_set {
+                return Err(CliError::FirmwareLayout(
+                    "multiple layout inputs were provided".into(),
+                ));
+            }
+            builder = builder.layout_files(keymap.clone(), config.clone());
+            layout_set = true;
+        }
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(CliError::FirmwareLayout(
+                "--layout-keymap and --layout-config must be supplied together".into(),
+            ));
+        }
+        (None, None) => {}
+    }
+    if !layout_set {
+        return Err(CliError::FirmwareLayout(
+            "provide one of --layout-json, --layout-dts, or --layout-keymap/--layout-config".into(),
+        ));
+    }
+    Ok(builder)
+}
+
+fn parse_env_var(input: &str) -> Result<(String, String), CliError> {
+    let mut parts = input.splitn(2, '=');
+    let key = parts
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| CliError::InvalidEnv(input.to_string()))?;
+    let value = parts
+        .next()
+        .ok_or_else(|| CliError::InvalidEnv(input.to_string()))?;
+    Ok((key.to_string(), value.to_string()))
+}
+
+fn print_firmware_request(request: &BuildRequest) {
+    let toolchain = match (&request.toolchain_id, request.keyboard_profile()) {
+        (Some(id), _) => id.clone(),
+        (None, Some(profile)) => format!("{} (default)", profile.default_toolchain),
+        (None, None) => "<unknown>".into(),
+    };
+    println!("keyboard : {}", request.keyboard_id);
+    println!("toolchain: {toolchain}");
+    println!("targets  : {}", format_targets(request));
+    println!("layout   : {}", describe_layout(&request.layout));
+    println!("output   : {}", request.output_dir.display());
+    println!(
+        "cache    : {}",
+        if request.disable_cache {
+            "disabled"
+        } else {
+            "enabled"
+        }
+    );
+    if request.extra_env.is_empty() {
+        println!("env      : (none)");
+    } else {
+        for (key, value) in &request.extra_env {
+            println!("env      : {key}={value}");
+        }
+    }
+}
+fn print_build_report(report: &BuildReport) {
+    if report.artifacts.files.is_empty() {
+        println!("artifacts: (none)");
+    } else {
+        println!("artifacts:");
+        for path in &report.artifacts.files {
+            println!("  - {}", path.display());
+        }
+    }
+}
+fn format_targets(request: &BuildRequest) -> String {
+    request
+        .targets
+        .iter()
+        .map(|target| target.id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn describe_layout(source: &LayoutSource) -> String {
+    match source {
+        LayoutSource::JsonPath(path) => format!("json:{}", path.display()),
+        LayoutSource::JsonValue(_) => "json:value".into(),
+        LayoutSource::Document(_) => "dts:document".into(),
+        LayoutSource::Files { keymap, config } => {
+            format!("files:{} + {}", keymap.display(), config.display())
+        }
+    }
 }
 
 struct PreparedContext {
@@ -167,6 +419,15 @@ fn prepare(args: &SharedArgs) -> Result<PreparedContext, CliError> {
         source,
     })?;
     let mut file = TaskFile::from_toml_str(&task_text)?;
+    if let Some(parent) = args.tasks.parent().map(|p| {
+        if p.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            p.to_path_buf()
+        }
+    }) {
+        file.set_script_dir(parent);
+    }
     if let Some(policy) = args.conflicts.map(ConflictPolicy::from) {
         apply_conflict_override(&mut file, policy);
     }
@@ -231,6 +492,29 @@ fn print_results(results: &[TaskOutcome]) -> i32 {
         );
     }
     exit_code
+}
+
+fn print_combo_conditions(file: &TaskFile) {
+    let combos: Vec<_> = file
+        .tasks
+        .iter()
+        .filter_map(|task| match &task.action {
+            TaskAction::Combo(combo) if !combo.conditions.is_empty() => Some((task, combo)),
+            _ => None,
+        })
+        .collect();
+    if combos.is_empty() {
+        return;
+    }
+    println!("combo conditions:");
+    for (task, combo) in combos {
+        println!(
+            "  - {} ({}) :: {}",
+            combo.name,
+            task.target,
+            combo.conditions.join(", ")
+        );
+    }
 }
 
 fn apply_conflict_override(file: &mut TaskFile, policy: ConflictPolicy) {
@@ -300,4 +584,14 @@ enum CliError {
     },
     #[error("failed to serialize layout: {0}")]
     Serialize(zmk_layout_rs::serialization::SerializeError),
+    #[error("failed to parse firmware manifest: {0}")]
+    Manifest(#[from] zmk_layout_rs::build::ManifestError),
+    #[error("invalid firmware build request: {0}")]
+    FirmwareRequest(#[from] BuildRequestError),
+    #[error("firmware build failed: {0}")]
+    FirmwareBuild(#[from] zmk_layout_rs::build::BuildError),
+    #[error("invalid firmware layout arguments: {0}")]
+    FirmwareLayout(String),
+    #[error("invalid env specification `{0}`, expected KEY=VALUE")]
+    InvalidEnv(String),
 }

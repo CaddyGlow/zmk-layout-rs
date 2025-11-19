@@ -11,7 +11,7 @@ pub enum LogLevel {
 }
 
 /// Listener trait that receives structured progress events.
-pub trait ProgressReporter: Send {
+pub trait ProgressReporter: Send + Sync {
     fn log(&self, _level: LogLevel, _message: &str) {}
     fn start_checkpoint(&self, _id: &str, _message: &str) {}
     fn complete_checkpoint(&self, _id: &str) {}

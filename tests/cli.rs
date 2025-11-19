@@ -45,6 +45,30 @@ fn cli_apply_writes_output_and_warns_on_mismatch() {
 }
 
 #[test]
+fn cli_apply_prints_combo_conditions_when_requested() {
+    let dir = tempdir().expect("tempdir");
+    let base_src = fixture("cli_base.dts");
+    let base_path = dir.path().join("base.dts");
+    fs::copy(&base_src, &base_path).expect("copy base");
+
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("apply")
+        .arg("--tasks")
+        .arg(fixture("cli_tasks.toml"))
+        .arg("--base-layout")
+        .arg(&base_path)
+        .arg("--combo-conditions");
+
+    cmd.assert()
+        .success()
+        .stdout(
+            predicates::str::contains("combo conditions:").and(predicates::str::contains(
+                "combo_demo (combos.combo_demo) :: layer_state == base",
+            )),
+        );
+}
+
+#[test]
 fn cli_validate_reports_conflicts() {
     let dir = tempdir().expect("tempdir");
     let base_src = fixture("cli_base.dts");
@@ -116,7 +140,8 @@ fn cli_firmware_build_prints_request() {
         .arg("--layout-json")
         .arg(fixture("demo_layout.json"))
         .arg("--output-dir")
-        .arg(dir.path().join("out"));
+        .arg(dir.path().join("out"))
+        .arg("--dry-run");
 
     cmd.assert().success().stdout(
         predicates::str::contains("keyboard : glove80")

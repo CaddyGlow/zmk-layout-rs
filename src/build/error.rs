@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use thiserror::Error;
 
-use super::manifest::ManifestError;
+use crate::serialization::SerializeError;
+
+use super::manifest::{ManifestError, ToolchainKind};
 
 /// Errors surfaced while orchestrating firmware builds.
 #[derive(Debug, Error)]
@@ -21,4 +23,18 @@ pub enum BuildError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("layout serialization failed: {0}")]
+    LayoutSerialize(SerializeError),
+    #[error("keyboard `{0}` not found in manifest")]
+    UnknownKeyboard(String),
+    #[error("toolchain `{0}` not found in manifest")]
+    UnknownToolchain(String),
+    #[error("keyboard `{keyboard}` target `{target}` not found")]
+    UnknownTarget { keyboard: String, target: String },
+    #[error("toolchain `{0:?}` is not supported yet")]
+    UnsupportedToolchain(ToolchainKind),
+    #[error("toolchain `{toolchain}` failed with exit code {code}")]
+    CommandFailed { toolchain: String, code: i32 },
+    #[error("missing staged layout artifact `{0}`")]
+    MissingLayoutArtifact(&'static str),
 }

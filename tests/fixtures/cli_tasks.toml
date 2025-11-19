@@ -22,3 +22,4 @@ key_positions = [0, 1]
 binding = "&kp TAB"
 target = "combos.combo_demo"
 comment = "add a sample combo"
+conditions = ["layer_state == base"]

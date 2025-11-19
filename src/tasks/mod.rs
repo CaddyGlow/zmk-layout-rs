@@ -4,16 +4,26 @@
 //! auto-generating missing task identifiers, and enforcing per-task
 //! targets so later phases can reason about conflicts.
 
+use rhai::{
+    Array as RhaiArray, Dynamic, Engine, EvalAltResult, FLOAT, INT, Map as RhaiMap, Position,
+    Scope, module_resolvers::DummyModuleResolver,
+};
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, HashMap, HashSet},
+    fs,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 use thiserror::Error;
-use toml::Value as TomlValue;
+use toml::{Value as TomlValue, map::Map as TomlMap};
 
 use crate::{
     ast::{DtItem, DtNode, DtProperty},
     bindings::BindingParser,
     dts::DtsDocument,
-    providers::{KeymapDocument, ProviderError},
+    providers::{COMBO_CONDITION_COMMENT_PREFIX, KeymapDocument, ProviderError},
 };
 
 /// Convenience alias for arbitrary TOML metadata blobs.
@@ -25,6 +35,7 @@ pub struct TaskFile {
     pub base: BaseSection,
     pub config: ConfigSection,
     pub tasks: Vec<Task>,
+    pub script_dir: Option<PathBuf>,
 }
 
 impl TaskFile {
@@ -46,24 +57,33 @@ impl TaskFile {
         let mut ids = HashSet::new();
         let mut slug_counts = HashMap::new();
         let mut target_set = HashSet::new();
+        let mut target_hierarchy = Vec::new();
         let mut tasks = Vec::with_capacity(raw.tasks.len());
 
         for (index, mut raw_task) in raw.tasks.into_iter().enumerate() {
+            let kind = raw_task.kind;
             let target = match raw_task.target.as_ref() {
-                Some(value) if !value.trim().is_empty() => value.clone(),
+                Some(value) if !value.trim().is_empty() => normalize_locator(value),
                 Some(_) => {
                     return Err(invalid(
-                        raw_task.kind,
+                        kind,
                         "target",
                         index,
                         "target must be a non-empty string",
                     ));
                 }
-                None => return Err(missing(raw_task.kind, "target", index)),
+                None => return Err(missing(kind, "target", index)),
             };
             if !target_set.insert(target.clone()) {
                 return Err(TaskConfigError::DuplicateTarget(target.clone()));
             }
+            if let Some(existing) = find_overlapping_target(&target_hierarchy, &target) {
+                return Err(TaskConfigError::OverlappingTarget {
+                    existing,
+                    new: target.clone(),
+                });
+            }
+            target_hierarchy.push(target.clone());
 
             let id = match raw_task.id.clone() {
                 Some(id) => {
@@ -105,6 +125,20 @@ impl TaskFile {
             }
             let expected = expected.map(|value| value.trim().to_string());
 
+            if let TaskAction::Override(action) = &action {
+                if normalize_locator(&action.path) != target {
+                    return Err(invalid(
+                        kind,
+                        "target",
+                        index,
+                        format!(
+                            "override target `{}` must match path `{}`",
+                            target, action.path
+                        ),
+                    ));
+                }
+            }
+
             tasks.push(Task {
                 id,
                 target,
@@ -119,7 +153,13 @@ impl TaskFile {
             base: base.into(),
             config,
             tasks,
+            script_dir: None,
         })
+    }
+
+    /// Attach the directory used to resolve script paths.
+    pub fn set_script_dir(&mut self, dir: impl Into<PathBuf>) {
+        self.script_dir = Some(dir.into());
     }
 }
 
@@ -322,31 +362,45 @@ pub fn apply_tasks_with_options(
 ) -> TaskExecution {
     let mut results = Vec::new();
     let mut parser = BindingParser::new();
+    let script_env = ScriptEnvironment::new(file);
 
     for task in &file.tasks {
         let outcome = match &task.action {
-            TaskAction::Override(action) => {
-                apply_override_task(&mut document, task, action, options.mode, &mut parser)
-            }
-            TaskAction::Layer(action) => {
-                apply_layer_task(&mut document, task, action, options.mode, &mut parser)
-            }
-            TaskAction::Combo(action) => {
-                apply_combo_task(&mut document, task, action, options.mode, &mut parser)
-            }
+            TaskAction::Override(action) => apply_override_task(
+                &mut document,
+                task,
+                action,
+                options.mode,
+                &mut parser,
+                &script_env,
+            ),
+            TaskAction::Layer(action) => apply_layer_task(
+                &mut document,
+                task,
+                action,
+                options.mode,
+                &mut parser,
+                &script_env,
+            ),
+            TaskAction::Combo(action) => apply_combo_task(
+                &mut document,
+                task,
+                action,
+                options.mode,
+                &mut parser,
+                &script_env,
+            ),
             TaskAction::LayerOrder(action) => {
-                apply_layer_order_task(&mut document, task, action, options.mode)
+                apply_layer_order_task(&mut document, task, action, options.mode, &script_env)
             }
             TaskAction::Behavior(_) | TaskAction::Meta(_) => TaskOutcome {
                 status: TaskStatus::Skipped,
                 message: Some("behavior/meta tasks not implemented yet".into()),
                 ..TaskOutcome::new(task)
             },
-            TaskAction::Script(_) => TaskOutcome {
-                status: TaskStatus::Skipped,
-                message: Some("script tasks deferred until Rhai integration".into()),
-                ..TaskOutcome::new(task)
-            },
+            TaskAction::Script(action) => {
+                apply_script_task(&mut document, task, action, options.mode, &script_env)
+            }
         };
         results.push(outcome);
     }
@@ -360,6 +414,7 @@ fn apply_override_task(
     action: &OverrideTask,
     mode: ExecutionMode,
     parser: &mut BindingParser,
+    scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
     let (layer, slot) = match parse_override_path(&action.path) {
@@ -402,7 +457,7 @@ fn apply_override_task(
     outcome.before = before_value.clone();
 
     let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome) {
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
         return outcome;
     }
 
@@ -428,13 +483,14 @@ fn apply_layer_task(
     action: &LayerTask,
     mode: ExecutionMode,
     parser: &mut BindingParser,
+    scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
     let before = layer_snapshot(document.document(), &action.name);
     outcome.before = before.clone();
 
     let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome) {
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
         return outcome;
     }
 
@@ -482,12 +538,13 @@ fn apply_combo_task(
     action: &ComboTask,
     mode: ExecutionMode,
     parser: &mut BindingParser,
+    scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
     outcome.before = combo_snapshot(document.document(), &action.name);
 
     let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome) {
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
         return outcome;
     }
 
@@ -516,6 +573,7 @@ fn apply_combo_task(
             &action.key_positions,
             action.timeout_ms,
             &layers,
+            &action.conditions,
         ) {
             apply_provider_error(&mut outcome, err);
             return outcome;
@@ -526,12 +584,11 @@ fn apply_combo_task(
             "dry-run: combo task recorded but not applied to document",
         );
     }
-
     outcome.after = combo_snapshot(document.document(), &action.name);
     if !action.conditions.is_empty() {
         append_message(
             &mut outcome.message,
-            "combo conditions not yet supported; values ignored during apply",
+            format!("combo conditions: {}", action.conditions.join(", ")),
         );
     }
     outcome.status = TaskStatus::Applied;
@@ -543,13 +600,14 @@ fn apply_layer_order_task(
     task: &Task,
     action: &LayerOrderTask,
     mode: ExecutionMode,
+    scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
     let mut outcome = TaskOutcome::new(task);
     let before = layer_order_snapshot(document.document());
     outcome.before = Some(before);
 
     let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome) {
+    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
         return outcome;
     }
 
@@ -620,7 +678,11 @@ enum ConflictResolution {
     Abort(String),
 }
 
-fn resolve_conflict(task: &Task, reason: String) -> ConflictResolution {
+fn resolve_conflict(
+    task: &Task,
+    reason: String,
+    scripts: &ScriptEnvironment,
+) -> ConflictResolution {
     match task.conflict {
         ConflictPolicy::Override => {
             ConflictResolution::Proceed(Some(format!("conflict overridden: {}", reason)))
@@ -628,11 +690,20 @@ fn resolve_conflict(task: &Task, reason: String) -> ConflictResolution {
         ConflictPolicy::Skip => {
             ConflictResolution::Skip(format!("skipped due to conflict: {}", reason))
         }
-        ConflictPolicy::Prompt | ConflictPolicy::Script => ConflictResolution::Abort(reason),
+        ConflictPolicy::Prompt => ConflictResolution::Abort(reason),
+        ConflictPolicy::Script => match scripts.resolve_conflict(task, &reason) {
+            Ok(resolution) => resolution,
+            Err(err) => ConflictResolution::Abort(err),
+        },
     }
 }
 
-fn ensure_expected_state(task: &Task, actual: Option<&str>, outcome: &mut TaskOutcome) -> bool {
+fn ensure_expected_state(
+    task: &Task,
+    actual: Option<&str>,
+    outcome: &mut TaskOutcome,
+    scripts: &ScriptEnvironment,
+) -> bool {
     let Some(expected) = task.expected.as_deref() else {
         return true;
     };
@@ -649,7 +720,7 @@ fn ensure_expected_state(task: &Task, actual: Option<&str>, outcome: &mut TaskOu
         "expected `{}` for target `{}` but found `{}`",
         expected, task.target, actual_display
     );
-    match resolve_conflict(task, reason) {
+    match resolve_conflict(task, reason, scripts) {
         ConflictResolution::Proceed(message) => {
             if let Some(msg) = message {
                 append_message(&mut outcome.message, msg);
@@ -666,6 +737,407 @@ fn ensure_expected_state(task: &Task, actual: Option<&str>, outcome: &mut TaskOu
             append_message(&mut outcome.message, message);
             false
         }
+    }
+}
+
+struct ScriptEnvironment<'a> {
+    script_dir: Option<&'a Path>,
+    conflict_script: Option<&'a str>,
+}
+
+const SCRIPT_MAX_OPERATIONS: u64 = 100_000;
+const SCRIPT_MAX_CALL_DEPTH: usize = 64;
+
+impl<'a> ScriptEnvironment<'a> {
+    fn new(file: &'a TaskFile) -> Self {
+        Self {
+            script_dir: file.script_dir.as_deref(),
+            conflict_script: file.config.conflict_script.as_deref(),
+        }
+    }
+
+    fn resolve_conflict(&self, task: &Task, reason: &str) -> Result<ConflictResolution, String> {
+        let script_path = self.conflict_script.ok_or_else(|| {
+            "config.conflict_script must be set before using script conflicts".to_string()
+        })?;
+        let source = self
+            .read_script(script_path)
+            .map_err(|err| format!("failed to read conflict script `{}`: {}", script_path, err))?;
+        let engine = sandboxed_engine();
+        let ast = engine
+            .compile(&source)
+            .map_err(|err| format!("conflict script compile error: {err}"))?;
+        let mut scope = Scope::new();
+        let payload = build_conflict_payload(task, reason);
+        let result: RhaiMap = engine
+            .call_fn(&mut scope, &ast, "resolve", (payload,))
+            .map_err(|err| format!("conflict script execution failed: {err}"))?;
+        parse_conflict_resolution(result)
+    }
+
+    fn load_source(&self, source: &ScriptSource) -> Result<String, String> {
+        match source {
+            ScriptSource::Inline(code) => Ok(code.clone()),
+            ScriptSource::File(path) => self
+                .read_script(path)
+                .map_err(|err| format!("failed to read script `{}`: {}", path, err)),
+        }
+    }
+
+    fn read_script(&self, path: &str) -> Result<String, std::io::Error> {
+        let resolved = resolve_script_path(self.script_dir, path);
+        fs::read_to_string(&resolved)
+    }
+}
+
+fn build_conflict_payload(task: &Task, reason: &str) -> RhaiMap {
+    let mut payload = RhaiMap::new();
+    payload.insert("id".into(), task.id.clone().into());
+    payload.insert("target".into(), task.target.clone().into());
+    payload.insert("reason".into(), reason.into());
+    if let Some(comment) = &task.comment {
+        payload.insert("comment".into(), comment.clone().into());
+    }
+    if let Some(expected) = &task.expected {
+        payload.insert("expected".into(), expected.clone().into());
+    }
+    payload
+}
+
+fn parse_conflict_resolution(map: RhaiMap) -> Result<ConflictResolution, String> {
+    let action = map
+        .get("action")
+        .and_then(|value| value.clone().into_string().ok())
+        .ok_or_else(|| "conflict script must return a map with `action`".to_string())?;
+    let message = map
+        .get("message")
+        .and_then(|value| value.clone().into_string().ok());
+    match action.as_str() {
+        "override" => Ok(ConflictResolution::Proceed(message)),
+        "skip" => Ok(ConflictResolution::Skip(
+            message.unwrap_or_else(|| "skipped by script".into()),
+        )),
+        "abort" => Ok(ConflictResolution::Abort(
+            message.unwrap_or_else(|| "aborted by script".into()),
+        )),
+        other => Err(format!("unknown conflict action `{}`", other)),
+    }
+}
+
+fn apply_script_task(
+    document: &mut KeymapDocument,
+    task: &Task,
+    action: &ScriptTask,
+    mode: ExecutionMode,
+    scripts: &ScriptEnvironment,
+) -> TaskOutcome {
+    let mut outcome = TaskOutcome::new(task);
+    let source = match scripts.load_source(&action.source) {
+        Ok(value) => value,
+        Err(err) => {
+            outcome.status = TaskStatus::Error;
+            outcome.message = Some(err);
+            return outcome;
+        }
+    };
+
+    let working_doc = document.clone();
+    let shared_doc = Rc::new(RefCell::new(working_doc));
+    let logs = Rc::new(RefCell::new(Vec::new()));
+
+    let mut engine = sandboxed_engine();
+    register_script_api(&mut engine, shared_doc.clone(), logs.clone());
+
+    let mut scope = Scope::new();
+    scope.push_dynamic(
+        "ARGS",
+        Dynamic::from_map(metadata_to_rhai_map(&action.args)),
+    );
+    scope.push("TASK_ID", task.id.clone());
+    scope.push("TARGET", task.target.clone());
+    if let Some(comment) = &task.comment {
+        scope.push("COMMENT", comment.clone());
+    }
+
+    let eval_result = engine.eval_with_scope::<Dynamic>(&mut scope, &source);
+    match eval_result {
+        Ok(_) => {
+            let log_messages = logs
+                .borrow()
+                .iter()
+                .filter(|msg| !msg.is_empty())
+                .cloned()
+                .collect::<Vec<_>>();
+            if !log_messages.is_empty() {
+                append_message(&mut outcome.message, log_messages.join(" | "));
+            }
+            if mode == ExecutionMode::Apply {
+                *document = shared_doc.borrow().clone();
+            } else {
+                append_message(
+                    &mut outcome.message,
+                    "dry-run: script changes not applied to document",
+                );
+            }
+            outcome.status = TaskStatus::Applied;
+        }
+        Err(err) => {
+            outcome.status = TaskStatus::Error;
+            outcome.message = Some(format!("script error: {err}"));
+        }
+    }
+    outcome
+}
+
+fn sandboxed_engine() -> Engine {
+    let mut engine = Engine::new();
+    engine.set_module_resolver(DummyModuleResolver::new());
+    engine.set_max_operations(SCRIPT_MAX_OPERATIONS);
+    engine.set_max_call_levels(SCRIPT_MAX_CALL_DEPTH);
+    engine
+}
+
+fn register_script_api(
+    engine: &mut Engine,
+    document: Rc<RefCell<KeymapDocument>>,
+    logs: Rc<RefCell<Vec<String>>>,
+) {
+    let doc_binding = Rc::clone(&document);
+    engine.register_fn(
+        "set_binding",
+        move |layer: &str, index: INT, binding: &str| -> Result<(), Box<EvalAltResult>> {
+            if index < 0 {
+                return Err(script_error("binding index must be non-negative"));
+            }
+            doc_binding
+                .borrow_mut()
+                .set_binding(layer, index as usize, binding)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let doc_layer = Rc::clone(&document);
+    engine.register_fn(
+        "set_layer",
+        move |layer: &str, bindings: RhaiArray| -> Result<(), Box<EvalAltResult>> {
+            let normalized = array_to_string_vec(&bindings).map_err(|err| script_error(err))?;
+            doc_layer
+                .borrow_mut()
+                .set_layer_bindings(layer, &normalized)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let doc_layer_metadata = Rc::clone(&document);
+    engine.register_fn(
+        "set_layer_metadata",
+        move |layer: &str, metadata: RhaiMap| -> Result<(), Box<EvalAltResult>> {
+            let map = rhai_map_to_metadata(&metadata).map_err(|err| script_error(err))?;
+            let props = metadata_properties(&map);
+            doc_layer_metadata
+                .borrow_mut()
+                .set_layer_metadata(layer, &props)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let doc_combo = Rc::clone(&document);
+    engine.register_fn(
+        "upsert_combo",
+        move |name: &str,
+              key_positions: RhaiArray,
+              binding: &str|
+              -> Result<(), Box<EvalAltResult>> {
+            let positions = array_to_u32_vec(&key_positions).map_err(|err| script_error(err))?;
+            let empty_layers: [u32; 0] = [];
+            let empty_conditions: Vec<String> = Vec::new();
+            doc_combo
+                .borrow_mut()
+                .upsert_combo(
+                    name,
+                    binding,
+                    &positions,
+                    None,
+                    &empty_layers,
+                    empty_conditions.as_slice(),
+                )
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let doc_combo_full = Rc::clone(&document);
+    engine.register_fn(
+        "upsert_combo_full",
+        move |name: &str,
+              key_positions: RhaiArray,
+              binding: &str,
+              timeout_ms: Dynamic,
+              layers: RhaiArray,
+              conditions: RhaiArray|
+              -> Result<(), Box<EvalAltResult>> {
+            let positions = array_to_u32_vec(&key_positions).map_err(|err| script_error(err))?;
+            let timeout = parse_optional_u32(&timeout_ms).map_err(|err| script_error(err))?;
+            let layer_indexes = {
+                let borrowed = doc_combo_full.borrow();
+                array_to_layer_indexes(&borrowed, &layers).map_err(|err| script_error(err))?
+            };
+            let condition_list =
+                array_to_string_vec(&conditions).map_err(|err| script_error(err))?;
+            doc_combo_full
+                .borrow_mut()
+                .upsert_combo(
+                    name,
+                    binding,
+                    &positions,
+                    timeout,
+                    &layer_indexes,
+                    &condition_list,
+                )
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let doc_layer_order = Rc::clone(&document);
+    engine.register_fn(
+        "move_layer",
+        move |layer: &str, index: INT| -> Result<(), Box<EvalAltResult>> {
+            if index < 0 {
+                return Err(script_error("layer index must be non-negative"));
+            }
+            doc_layer_order
+                .borrow_mut()
+                .reorder_layer(layer, index as usize)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    );
+
+    let log_sink = Rc::clone(&logs);
+    engine.register_fn("log", move |message: &str| {
+        log_sink.borrow_mut().push(message.to_string());
+    });
+}
+
+fn metadata_to_rhai_map(metadata: &MetadataMap) -> RhaiMap {
+    let mut map = RhaiMap::new();
+    for (key, value) in metadata {
+        map.insert(key.clone().into(), toml_to_dynamic(value));
+    }
+    map
+}
+
+fn rhai_map_to_metadata(map: &RhaiMap) -> Result<MetadataMap, String> {
+    let mut result = MetadataMap::new();
+    for (key, value) in map {
+        let toml = dynamic_to_toml(value)?;
+        result.insert(key.to_string(), toml);
+    }
+    Ok(result)
+}
+
+fn script_error(message: impl Into<String>) -> Box<EvalAltResult> {
+    EvalAltResult::ErrorRuntime(message.into().into(), Position::NONE).into()
+}
+
+fn toml_to_dynamic(value: &TomlValue) -> Dynamic {
+    match value {
+        TomlValue::String(text) => Dynamic::from(text.clone()),
+        TomlValue::Integer(num) => Dynamic::from(*num),
+        TomlValue::Float(num) => Dynamic::from(*num),
+        TomlValue::Boolean(flag) => Dynamic::from(*flag),
+        TomlValue::Array(items) => {
+            let array = items.iter().map(toml_to_dynamic).collect::<RhaiArray>();
+            Dynamic::from_array(array)
+        }
+        TomlValue::Table(entries) => {
+            let mut map = RhaiMap::new();
+            for (key, entry) in entries {
+                map.insert(key.clone().into(), toml_to_dynamic(entry));
+            }
+            Dynamic::from_map(map)
+        }
+        TomlValue::Datetime(dt) => Dynamic::from(dt.to_string()),
+    }
+}
+
+fn dynamic_to_toml(value: &Dynamic) -> Result<TomlValue, String> {
+    if let Some(text) = value.clone().try_cast::<String>() {
+        return Ok(TomlValue::String(text));
+    }
+    if let Some(flag) = value.clone().try_cast::<bool>() {
+        return Ok(TomlValue::Boolean(flag));
+    }
+    if let Some(number) = value.clone().try_cast::<INT>() {
+        return Ok(TomlValue::Integer(number as i64));
+    }
+    if let Some(number) = value.clone().try_cast::<FLOAT>() {
+        return Ok(TomlValue::Float(number));
+    }
+    if let Some(array) = value.clone().try_cast::<RhaiArray>() {
+        let mut items = Vec::with_capacity(array.len());
+        for entry in &array {
+            items.push(dynamic_to_toml(entry)?);
+        }
+        return Ok(TomlValue::Array(items));
+    }
+    if let Some(map) = value.clone().try_cast::<RhaiMap>() {
+        let mut entries = TomlMap::new();
+        for (key, entry) in map {
+            entries.insert(key.to_string(), dynamic_to_toml(&entry)?);
+        }
+        return Ok(TomlValue::Table(entries));
+    }
+    Err("unsupported value in script metadata".to_string())
+}
+
+fn array_to_string_vec(values: &RhaiArray) -> Result<Vec<String>, String> {
+    values
+        .iter()
+        .map(|value| {
+            value
+                .clone()
+                .into_string()
+                .map_err(|_| "array entry must be a string".to_string())
+        })
+        .collect()
+}
+
+fn array_to_u32_vec(values: &RhaiArray) -> Result<Vec<u32>, String> {
+    values
+        .iter()
+        .map(|value| {
+            let number = value
+                .clone()
+                .try_cast::<INT>()
+                .ok_or_else(|| "array entry must be an integer".to_string())?;
+            if number < 0 {
+                return Err("array entry must be non-negative".to_string());
+            }
+            Ok(number as u32)
+        })
+        .collect()
+}
+
+fn parse_optional_u32(value: &Dynamic) -> Result<Option<u32>, String> {
+    if value.is::<()>() {
+        return Ok(None);
+    }
+    if let Some(number) = value.clone().try_cast::<INT>() {
+        if number < 0 {
+            return Err("value must be non-negative".into());
+        }
+        return Ok(Some(number as u32));
+    }
+    Ok(None)
+}
+
+fn resolve_script_path(root: Option<&Path>, path: &str) -> PathBuf {
+    let candidate = Path::new(path);
+    if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else if let Some(dir) = root {
+        dir.join(candidate)
+    } else {
+        candidate.to_path_buf()
     }
 }
 
@@ -763,10 +1235,34 @@ fn combo_snapshot(document: &DtsDocument, combo: &str) -> Option<String> {
     {
         parts.push(format!("layers={}", prop.value.raw.trim()));
     }
+    let conditions = combo_condition_comments(combo_node);
+    if !conditions.is_empty() {
+        parts.push(format!("conditions={}", conditions.join(" && ")));
+    }
     if parts.is_empty() {
         None
     } else {
         Some(format!("combo:{}:{}", combo, parts.join(";")))
+    }
+}
+
+fn combo_condition_comments(node: &DtNode) -> Vec<String> {
+    node.leading_comments
+        .iter()
+        .filter_map(|comment| extract_condition_comment(&comment.text))
+        .collect()
+}
+
+fn extract_condition_comment(text: &str) -> Option<String> {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with(COMBO_CONDITION_COMMENT_PREFIX) {
+        return None;
+    }
+    let body = trimmed[COMBO_CONDITION_COMMENT_PREFIX.len()..].trim();
+    if body.is_empty() {
+        None
+    } else {
+        Some(body.to_string())
     }
 }
 
@@ -830,6 +1326,45 @@ fn resolve_combo_layers(
                     return Err(format!("layer `{}` not found for combo", name));
                 }
             }
+        }
+    }
+    Ok(result)
+}
+
+fn array_to_layer_indexes(
+    document: &KeymapDocument,
+    values: &RhaiArray,
+) -> Result<Vec<u32>, String> {
+    if values.is_empty() {
+        return Ok(Vec::new());
+    }
+    let names = document.layer_names();
+    let mut lookup = HashMap::new();
+    for (index, name) in names.iter().enumerate() {
+        lookup.insert(name.clone(), index as u32);
+    }
+    let mut result = Vec::with_capacity(values.len());
+    for value in values {
+        if let Some(index) = value.clone().try_cast::<INT>() {
+            if index < 0 {
+                return Err("layer index must be non-negative".into());
+            }
+            if (index as usize) >= names.len() {
+                return Err(format!(
+                    "layer index {} out of range (len {})",
+                    index,
+                    names.len()
+                ));
+            }
+            result.push(index as u32);
+        } else if let Some(name) = value.clone().try_cast::<String>() {
+            if let Some(idx) = lookup.get(&name) {
+                result.push(*idx);
+            } else {
+                return Err(format!("layer `{}` not found", name));
+            }
+        } else {
+            return Err("layer reference must be a name or index".into());
         }
     }
     Ok(result)
@@ -1069,6 +1604,8 @@ pub enum TaskConfigError {
     DuplicateId(String),
     #[error("duplicate target '{0}'")]
     DuplicateTarget(String),
+    #[error("target '{new}' overlaps with '{existing}'")]
+    OverlappingTarget { existing: String, new: String },
     #[error("missing field '{field}' for task #{index} ({kind:?})")]
     MissingField {
         field: &'static str,
@@ -1529,6 +2066,46 @@ fn slugify(input: &str) -> String {
     slug
 }
 
+fn normalize_locator(value: &str) -> String {
+    value.split_whitespace().collect::<String>()
+}
+
+fn find_overlapping_target(existing: &[String], candidate: &str) -> Option<String> {
+    for entry in existing {
+        if targets_overlap(entry, candidate) {
+            return Some(entry.clone());
+        }
+    }
+    None
+}
+
+fn targets_overlap(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    if a.starts_with(b) {
+        return has_boundary(a, b.len());
+    }
+    if b.starts_with(a) {
+        return has_boundary(b, a.len());
+    }
+    false
+}
+
+fn has_boundary(text: &str, prefix_len: usize) -> bool {
+    if text.len() == prefix_len {
+        return true;
+    }
+    text[prefix_len..]
+        .chars()
+        .next()
+        .map(|ch| matches!(ch, '.' | '['))
+        .unwrap_or(false)
+}
+
 impl TaskKind {
     fn as_str(self) -> &'static str {
         match self {
@@ -1546,6 +2123,7 @@ impl TaskKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn parses_sample_configuration() {
@@ -1650,6 +2228,53 @@ target = "layers.base.bindings[0]"
     }
 
     #[test]
+    fn rejects_overlapping_targets() {
+        let doc = r#"
+[config]
+format_version = "1.0.0"
+
+[[tasks]]
+type = "layer"
+name = "nav"
+bindings = ["&kp A"]
+target = "layers.nav"
+
+[[tasks]]
+type = "override"
+path = "layers.nav.bindings[0]"
+value = "&kp B"
+target = "layers.nav.bindings[0]"
+"#;
+
+        let err = TaskFile::from_toml_str(doc).expect_err("overlapping targets");
+        assert!(matches!(
+            err,
+            TaskConfigError::OverlappingTarget { new, existing }
+                if new == "layers.nav.bindings[0]" && existing == "layers.nav"
+        ));
+    }
+
+    #[test]
+    fn rejects_mismatched_override_target() {
+        let doc = r#"
+[config]
+format_version = "1.0.0"
+
+[[tasks]]
+type = "override"
+path = "layers.base.bindings[0]"
+value = "&kp ESC"
+target = "combos.wrong"
+"#;
+
+        let err = TaskFile::from_toml_str(doc).expect_err("mismatched override target");
+        assert!(matches!(
+            err,
+            TaskConfigError::InvalidField { field, .. } if field == "target"
+        ));
+    }
+
+    #[test]
     fn requires_format_version() {
         let doc = r#"
 [config]
@@ -1744,6 +2369,53 @@ target = "layers.base.bindings[0]"
         assert!(
             snapshot.contains("layers=<1>") || snapshot.contains("layers=< 1 >"),
             "snapshot: {}",
+            snapshot
+        );
+    }
+
+    #[test]
+    fn combo_task_preserves_conditions() {
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "combo-conditions".into(),
+            target: "combos.combo_cond".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: None,
+            action: TaskAction::Combo(ComboTask {
+                name: "combo_cond".into(),
+                key_positions: vec![0, 1],
+                binding: "&kp TAB".into(),
+                timeout_ms: None,
+                layers: Vec::new(),
+                conditions: vec!["layer_state == base".into(), "mods.shift".into()],
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+
+        let combos_root =
+            find_layer_node(&exec.document.document().items, "combos").expect("combos node");
+        let combo_node = find_child_node(combos_root, "combo_cond").expect("combo node");
+        let comments: Vec<_> = combo_node
+            .leading_comments
+            .iter()
+            .map(|comment| comment.text.trim().to_string())
+            .collect();
+        assert!(
+            comments
+                .iter()
+                .any(|text| text.contains("layer_state == base"))
+        );
+        assert!(comments.iter().any(|text| text.contains("mods.shift")));
+
+        let snapshot = combo_snapshot(exec.document.document(), "combo_cond").unwrap();
+        assert!(
+            snapshot.contains("conditions=layer_state == base && mods.shift"),
+            "snapshot missing conditions: {}",
             snapshot
         );
     }
@@ -1861,6 +2533,186 @@ target = "layers.base.bindings[0]"
         );
     }
 
+    #[test]
+    fn script_task_executes_inline_code() {
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "script-inline".into(),
+            target: "layers.base".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: Some("inline script".into()),
+            expected: None,
+            action: TaskAction::Script(ScriptTask {
+                source: ScriptSource::Inline(
+                    r#"
+log("inline start");
+set_binding("base", 0, "&kp ESC");
+"#
+                    .into(),
+                ),
+                args: MetadataMap::new(),
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+        let updated = layer_snapshot(exec.document.document(), "base").expect("layer snapshot");
+        assert!(updated.contains("&kp ESC"));
+        assert!(
+            exec.results[0]
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("inline start")
+        );
+    }
+
+    #[test]
+    fn script_task_loads_file_relative_to_task_dir() {
+        let mut file = default_task_file();
+        file.script_dir = Some(fixtures_dir());
+        file.tasks.push(Task {
+            id: "script-file".into(),
+            target: "layers.base".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: None,
+            action: TaskAction::Script(ScriptTask {
+                source: ScriptSource::File("script_task_file.rhai".into()),
+                args: MetadataMap::new(),
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+        let updated = layer_snapshot(exec.document.document(), "base").expect("layer snapshot");
+        assert!(updated.contains("&kp TAB"));
+    }
+
+    #[test]
+    fn script_task_uses_extended_api() {
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "script-extended".into(),
+            target: "layers.base".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: None,
+            action: TaskAction::Script(ScriptTask {
+                source: ScriptSource::Inline(
+                    r#"
+set_layer_metadata("base", #{ display_name: "Primary", color: [1, 2, 3] });
+set_layer("base", ["&kp ESC", "&kp W"]);
+move_layer("nav", 0);
+upsert_combo_full("combo_new", [0, 1], "&kp ENTER", 50, ["nav"], ["layer_state == nav"]);
+"#
+                    .into(),
+                ),
+                args: MetadataMap::new(),
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+
+        let layer = find_layer_node(&exec.document.document().items, "base").expect("layer");
+        let display = layer
+            .properties
+            .iter()
+            .find(|prop| prop.name == "display_name")
+            .expect("display_name");
+        assert_eq!(display.value.raw, "\"Primary\"");
+
+        assert_eq!(layer_order_snapshot(exec.document.document()), "nav,base");
+
+        let snapshot = combo_snapshot(exec.document.document(), "combo_new").unwrap();
+        assert!(
+            snapshot.contains("timeout-ms=< 50 >") || snapshot.contains("timeout-ms=<50>"),
+            "snapshot: {}",
+            snapshot
+        );
+        assert!(
+            snapshot.contains("conditions=layer_state == nav"),
+            "snapshot: {}",
+            snapshot
+        );
+    }
+
+    #[test]
+    fn conflict_script_overrides_decision() {
+        let mut file = default_task_file();
+        file.config.conflict_script = Some("conflict_override.rhai".into());
+        file.script_dir = Some(fixtures_dir());
+        file.tasks.push(Task {
+            id: "script-conflict".into(),
+            target: "layers.base.bindings[0]".into(),
+            conflict: ConflictPolicy::Script,
+            comment: None,
+            expected: Some("&kp ESC".into()),
+            action: TaskAction::Override(OverrideTask {
+                path: "layers.base.bindings[0]".into(),
+                value: "&kp ESC".into(),
+                from: None,
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Applied);
+        assert!(
+            exec.results[0]
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("override via script")
+        );
+    }
+
+    #[test]
+    fn script_task_enforces_operation_limits() {
+        let mut file = default_task_file();
+        file.tasks.push(Task {
+            id: "script-spin".into(),
+            target: "layers.base".into(),
+            conflict: ConflictPolicy::Prompt,
+            comment: None,
+            expected: None,
+            action: TaskAction::Script(ScriptTask {
+                source: ScriptSource::Inline(
+                    r#"
+                        let counter = 0;
+                        while true {
+                            counter += 1;
+                        }
+                    "#
+                    .into(),
+                ),
+                args: MetadataMap::new(),
+            }),
+        });
+
+        let base_doc = crate::dts::parse_str(sample_dts()).expect("parse dts");
+        let document = KeymapDocument::from_document(base_doc);
+        let exec = apply_tasks(document, &file);
+        assert_eq!(exec.results[0].status, TaskStatus::Error);
+        assert!(
+            exec.results[0]
+                .message
+                .as_deref()
+                .unwrap_or_default()
+                .contains("operations"),
+            "unexpected error: {:?}",
+            exec.results[0].message
+        );
+    }
+
     fn default_task_file() -> TaskFile {
         TaskFile {
             base: BaseSection::default(),
@@ -1871,7 +2723,12 @@ target = "layers.base.bindings[0]"
                 comment: None,
             },
             tasks: Vec::new(),
+            script_dir: None,
         }
+    }
+
+    fn fixtures_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
     }
 
     fn sample_dts() -> &'static str {

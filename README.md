@@ -144,6 +144,7 @@ zmk-layout diff --tasks layout_tasks.toml --base-layout config/keymap.dts
 ```
 
 See the docs for conflict policies, `target` naming guidance, and troubleshooting tips.
+The same document covers the Rhai scripting hooks that power `script` tasks and conflict handlers.
 
 ### Template-based generation
 
