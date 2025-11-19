@@ -102,3 +102,24 @@ fn cli_diff_prints_patch() {
         .success()
         .stdout(predicates::str::contains("--- ").and(predicates::str::contains("+++ updated")));
 }
+
+#[test]
+fn cli_firmware_build_prints_request() {
+    let dir = tempdir().expect("tempdir");
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("firmware")
+        .arg("build")
+        .arg("--manifest")
+        .arg(fixture("firmware_manifest.toml"))
+        .arg("--keyboard")
+        .arg("glove80")
+        .arg("--layout-json")
+        .arg(fixture("demo_layout.json"))
+        .arg("--output-dir")
+        .arg(dir.path().join("out"));
+
+    cmd.assert().success().stdout(
+        predicates::str::contains("keyboard : glove80")
+            .and(predicates::str::contains("targets  : left, right")),
+    );
+}
