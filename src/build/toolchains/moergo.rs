@@ -9,7 +9,7 @@ use crate::{
         manifest::{BuildTarget, ToolchainKind},
         progress::{LogLevel, ProgressReporter},
         request::BuildRequest,
-        toolchain::{resolve_toolchain_config, BuildContext, Toolchain, ToolchainRunResult},
+        toolchain::{BuildContext, Toolchain, ToolchainRunResult, resolve_toolchain_config},
         workspace::WorkspaceHandle,
     },
     dts::DtsDocument,
