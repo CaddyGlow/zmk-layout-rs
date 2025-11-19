@@ -1,5 +1,5 @@
 # based on https://github.com/moergo-sc/glove80-zmk-config
-# docker buildx build -t glove80-zmk-config-nix:latest -f keyboards/glove80/toolchain/Dockerfile keyboards/glove80/toolchain/
+# docker build -t moergo-zmk-config-nix:latest -f ./toolchains/moergo/Dockerfile.nix ./toolchains/moergo/
 FROM nixpkgs/nix:nixos-23.11
 
 ENV PATH=/root/.nix-profile/bin:/usr/bin:/bin

@@ -77,6 +77,15 @@ impl Toolchain for MoergoToolchain {
             "MOERGO_LAYOUT_JSON".into(),
             container_layout.display().to_string(),
         );
+
+        // Set PUID/PGID for entrypoint.sh to handle user mapping
+        #[cfg(unix)]
+        {
+            use nix::unistd::{Gid, Uid};
+            env.insert("PUID".into(), Uid::current().as_raw().to_string());
+            env.insert("PGID".into(), Gid::current().as_raw().to_string());
+        }
+
         for (key, value) in &ctx.request.extra_env {
             env.insert(key.clone(), value.clone());
         }
@@ -89,6 +98,7 @@ impl Toolchain for MoergoToolchain {
             container_path: ctx.workspace.container_root().to_path_buf(),
             mode: VolumeMode::ReadWrite,
         });
+
         invocation.log_handler = Arc::new(ProgressOutputHandler::new(ctx.progress.clone()));
 
         let checkpoint = format!("moergo-{}", target.id);
@@ -155,6 +165,11 @@ fn stage_moergo_inputs(
     fs::copy(keymap_src, &keymap_dest).map_err(BuildError::Io)?;
     let kconfig_dest = config_root.join(format!("{board}.conf"));
     fs::copy(config_src, &kconfig_dest).map_err(BuildError::Io)?;
+
+    // Copy default.nix template to config directory
+    let default_nix = include_str!("../../../toolchains/moergo/default.nix");
+    let default_nix_dest = config_root.join("default.nix");
+    fs::write(&default_nix_dest, default_nix).map_err(BuildError::Io)?;
 
     Ok(MoergoInputPaths {
         keymap: keymap_dest,

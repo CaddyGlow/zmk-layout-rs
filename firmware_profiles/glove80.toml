@@ -2,7 +2,7 @@ version = 1
 
 [toolchains.moergo]
 kind = "moergo"
-image = "glove80-zmk-config-docker:latest"
+image = "moergo-zmk-config-docker:latest"
 repository = "https://github.com/moergo-sc/zmk.git"
 branch = "v25.05"
 

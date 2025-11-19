@@ -2,12 +2,17 @@
   pkgs ? (import <moergo-zmk/nix/pinned-nixpkgs.nix> { }),
   moergo ? (import <moergo-zmk> { }),
   zmk ? moergo.zmk,
+  keymap ? "${./.}/glove80.keymap",
+  kconfig ? "${./.}/glove80.conf",
+  buildId ? "glove80",
 }:
 let
   config = ./.;
-  keymap = "${config}/glove80.keymap";
-  kconfig = "${config}/glove80.conf";
   outputName = "glove80";
+
+  # Convert string paths to Nix paths
+  keymapPath = if builtins.isString keymap then /. + keymap else keymap;
+  kconfigPath = if builtins.isString kconfig then /. + kconfig else kconfig;
 
   customZmk = zmk.overrideAttrs (oldAttrs: {
     installPhase = ''
@@ -37,14 +42,14 @@ let
 
   glove80_left = customZmk.override {
     board = "glove80_lh";
-    keymap = "${keymap}";
-    kconfig = "${kconfig}";
+    keymap = keymapPath;
+    kconfig = kconfigPath;
   };
   left_processed = collect_build_artifact "lh" glove80_left;
   glove80_right = customZmk.override {
     board = "glove80_rh";
-    keymap = "${keymap}";
-    kconfig = "${kconfig}";
+    keymap = keymapPath;
+    kconfig = kconfigPath;
   };
   right_processed = collect_build_artifact "rh" glove80_right;
 

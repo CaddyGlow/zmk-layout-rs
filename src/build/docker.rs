@@ -91,6 +91,10 @@ impl DockerBackend for CliDockerBackend {
         }
         cmd.arg(&invocation.image);
         cmd.args(&invocation.command);
+
+        // Print the docker command for debugging
+        eprintln!("Docker command: {:?}", cmd);
+
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd
             .spawn()

@@ -14,6 +14,12 @@ source "$SCRIPT_DIR/libutils.sh"
 : "${UMASK:=0022}"
 umask "$UMASK"
 
+# Configure git safe.directory for non-root users
+if [ "$(id -u)" != "0" ]; then
+  git config --global --add safe.directory "$ZMK_DIR" 2>/dev/null || true
+  git config --global --add safe.directory /zmk 2>/dev/null || true
+fi
+
 if [ "$(id -u)" = "0" ] && [ -n "$PUID" ] && [ -n "$PGID" ]; then
   # Handle PUID/PGID mapping
   log_info "Using PUID:PGID $PUID:$PGID"

@@ -156,6 +156,29 @@ the adapter can expand the template directly. Provide metadata extras in the JSO
 are populated from the layout data. See `examples/moergo_glove80.j2` for a
 full-featured template mirroring the Python generator output.
 
+## Firmware Build Toolchain
+
+The project includes Docker-based toolchains for building ZMK firmware. The MoErgo toolchain
+(formerly known as glove80-zmk-config) is located in `toolchains/moergo/`.
+
+### Building the Docker Image
+
+Build the MoErgo toolchain image using one of the provided Dockerfiles:
+
+```bash
+# Recommended: Debian-based image (smaller, faster build)
+docker build -t moergo-zmk-config-docker:latest -f ./toolchains/moergo/Dockerfile.debian ./toolchains/moergo/
+
+# Alternative: Pure Nix-based image
+docker build -t moergo-zmk-config-nix:latest -f ./toolchains/moergo/Dockerfile.nix ./toolchains/moergo/
+
+# Alternative: Alpine-based Nix image
+docker build -t moergo-zmk-config-docker:latest -f ./toolchains/moergo/Dockerfile ./toolchains/moergo/
+```
+
+The image name `moergo-zmk-config-docker:latest` is referenced in `firmware_profiles/glove80.toml`
+and is used by the build system to compile firmware for MoErgo keyboards.
+
 ## Development
 
 - Run the full test suite: `cargo test`

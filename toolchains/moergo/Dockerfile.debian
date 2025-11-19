@@ -1,4 +1,5 @@
 # based on https://github.com/moergo-sc/glove80-zmk-config
+# docker build -t moergo-zmk-config-docker:latest -f ./toolchains/moergo/Dockerfile.debian ./toolchains/moergo/
 FROM nixpkgs/nix:nixos-23.11 AS base
 ENV PATH=/root/.nix-profile/bin:/usr/bin:/bin
 SHELL ["/usr/bin/bash", "-c"]

@@ -39,8 +39,8 @@ dest_lh_dir="${ARTIFACTS_DIR}/${BOARD_NAME}_lh-zmk/"
 dest_rh_dir="${ARTIFACTS_DIR}/${BOARD_NAME}_rh-zmk/"
 
 # Create directories for each hand
-mkdir -p dest_lh_dir
-mkdir -p dest_rh_dir
+mkdir -p "$dest_lh_dir"
+mkdir -p "$dest_rh_dir"
 
 # Collect generated artifacts from the build
 # Used in case of failure to collect the
