@@ -1,9 +1,11 @@
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::{cell::RefCell, fs, rc::Rc};
 
 use mlua::Lua;
+use tempfile::tempdir;
 
 use zmk_layout_rs::{
+    adapters::standard::export_standard_str,
+    dts::DtsDocument,
     layout_engine::LayoutEngine, lua_api::api::install_layout_api, providers::KeymapDocument,
 };
 
@@ -106,4 +108,91 @@ fn invalid_index_is_rejected() {
             "expected 1-based index error, got {message}"
         );
     });
+}
+
+#[test]
+fn load_and_save_dtsi_round_trip() {
+    let dir = tempdir().unwrap();
+    let input_path = dir.path().join("input.dts");
+    let output_path = dir.path().join("output.dts");
+    fs::write(
+        &input_path,
+        r#"
+keymap {
+    compatible = "zmk,keymap";
+    default_layer {
+        bindings = < &kp A >;
+    };
+};"#,
+    )
+    .unwrap();
+
+    let engine = Rc::new(RefCell::new(make_engine()));
+    with_lua(Rc::clone(&engine), |lua| {
+        lua.load(format!(
+            r#"
+            layout:load_dtsi("{in_path}")
+            layout:layer("default_layer")
+                :bind(1, "&kp B")
+                :apply()
+            layout:save_dtsi("{out_path}")
+            "#,
+            in_path = input_path.display(),
+            out_path = output_path.display()
+        ))
+        .exec()
+        .unwrap();
+    });
+
+    let saved = fs::read_to_string(&output_path).unwrap();
+    assert!(
+        saved.contains("&kp B"),
+        "expected saved DTS to include updated binding"
+    );
+}
+
+#[test]
+fn load_and_save_json_round_trip() {
+    let dir = tempdir().unwrap();
+    let template_path = dir.path().join("template.dts");
+    let json_path = dir.path().join("layout.json");
+    let output_json = dir.path().join("updated.json");
+
+    let template = r#"
+keymap {
+    compatible = "zmk,keymap";
+    default_layer {
+        bindings = < &kp A >;
+    };
+};"#;
+    fs::write(&template_path, template).unwrap();
+
+    // Export minimal JSON from the template to seed the import.
+    let doc = DtsDocument::parse_str(template).unwrap();
+    let json = export_standard_str(&doc).unwrap();
+    fs::write(&json_path, json).unwrap();
+
+    let engine = Rc::new(RefCell::new(make_engine()));
+    with_lua(Rc::clone(&engine), |lua| {
+        lua.load(format!(
+            r#"
+            layout:load_json("{json_path}", "{template_path}")
+            layout:layer("default_layer")
+                :bind(1, "&kp B")
+                :apply()
+            layout:save_json("{output_json}")
+            "#,
+            json_path = json_path.display(),
+            template_path = template_path.display(),
+            output_json = output_json.display()
+        ))
+        .exec()
+        .unwrap();
+    });
+
+    let saved = fs::read_to_string(&output_json).unwrap();
+    assert!(
+        saved.contains("&kp B"),
+        "expected saved JSON to include updated binding"
+    );
 }
