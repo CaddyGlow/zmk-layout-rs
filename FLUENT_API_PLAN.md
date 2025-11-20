@@ -44,6 +44,7 @@ This creates a more readable, maintainable scripting experience compared to the 
 6. **Lua 1-Based Indexing**: All Lua-facing indices (bindings, key positions) are 1-based; conversions to internal zero-based layouts happen inside Rust
 7. **Immutable Queries**: Query methods return snapshots (copies) that must not be mutated to change state
 8. **Apply Semantics**: Builders auto-apply on first use unless explicitly applied; once applied, objects are immutable—re-acquire a builder to edit again
+9. **Ownership Discipline**: Rust `UserData` wraps staged state with interior mutability carefully (no nested mutable borrows); avoid `Send` unless thread-safe
 
 ---
 
@@ -546,6 +547,18 @@ for _, layer_name in ipairs(layers) do
         :apply()
 end
 ```
+
+---
+
+## Rust Implementation Notes
+
+- **Lifecycle State**: Each builder keeps `Staged` vs `Applied`; mutation methods require `Staged`, `apply()` flips to `Applied`, and further mutation returns a clear Lua error. Re-acquire via `layout:<object>(name)` to get a fresh staged editor seeded from current state.
+- **Auto-Apply Hook**: When a builder is passed into another API (e.g., `layer:bind`), ensure it auto-applies first and reject double-applies with a specific error.
+- **Index Conversion**: Central helpers convert Lua 1-based indices to internal 0-based, performing bounds checks and emitting Lua-facing indices in errors/logs.
+- **Query Snapshots**: Convert internal state to deep copies before returning to Lua; optionally wrap with read-only metatables to error on mutation attempts.
+- **Ownership/Threading**: Use interior mutability (`Rc<RefCell<_>>` or `Arc<Mutex<_>>` as needed) to avoid nested borrow panics in mlua callbacks; do not mark `UserData` as `Send`/`Sync` unless the internals are truly thread-safe.
+- **Validation**: Validate input shapes (dense 1-based arrays, integer indices, correct types) and keep deterministic, Lua-oriented error messages.
+- **Testing**: Unit-test lifecycle (staged→applied→immutable), auto-apply, index conversion, snapshot immutability, and mixed old/new API integration.
 
 ---
 

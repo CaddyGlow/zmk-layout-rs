@@ -11,6 +11,7 @@ pub mod build;
 pub mod dts;
 pub mod layout_engine;
 pub mod macro_support;
+pub mod lua_api;
 pub mod parser;
 pub mod profiles;
 pub mod providers;

@@ -22,6 +22,7 @@ use thiserror::Error;
 use toml::{Value as TomlValue, map::Map as TomlMap};
 
 use crate::{
+    lua_api::api::install_layout_api,
     layout_engine::{LayerSelector, LayoutEngine, LayoutEngineError},
     providers::KeymapDocument,
 };
@@ -1326,6 +1327,8 @@ fn register_script_api(
             Ok(doc_layer_count.borrow().layer_names().len() as LuaInteger)
         })?,
     )?;
+
+    install_layout_api(lua, Rc::clone(&layout), Rc::clone(&logs))?;
 
     Ok(())
 }
