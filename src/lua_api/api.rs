@@ -136,6 +136,14 @@ impl UserData for LayoutApi {
                 .map_err(|err| script_error(format!("failed to export {path}: {err}")))?;
             Ok(())
         });
+
+        methods.add_method("parse_dts", |_, this, source: String| {
+            let doc = DtsDocument::parse_str(&source)
+                .map_err(|err| script_error(format!("failed to parse DTS: {err}")))?;
+            let keymap = KeymapDocument::from_document(doc);
+            *this.layout.borrow_mut() = LayoutEngine::new(keymap);
+            Ok(())
+        });
     }
 }
 

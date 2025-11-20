@@ -152,6 +152,31 @@ keymap {
 }
 
 #[test]
+fn parse_dts_from_string() {
+    let engine = Rc::new(RefCell::new(make_engine()));
+    with_lua(Rc::clone(&engine), |lua| {
+        lua.load(
+            r#"
+            local source = [[
+            keymap {
+                compatible = "zmk,keymap";
+                default_layer {
+                    bindings = < &kp C >;
+                };
+            };
+            ]]
+            layout:parse_dts(source)
+            "#,
+        )
+        .exec()
+        .unwrap();
+    });
+
+    let bindings = engine.borrow().layer_bindings("default_layer").unwrap();
+    assert_eq!(bindings[0], "&kp C");
+}
+
+#[test]
 fn load_and_save_json_round_trip() {
     let dir = tempdir().unwrap();
     let template_path = dir.path().join("template.dts");

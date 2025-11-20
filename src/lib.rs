@@ -8,6 +8,7 @@ pub mod adapters;
 pub mod ast;
 pub mod bindings;
 pub mod build;
+pub mod flash;
 pub mod dts;
 pub mod layout_engine;
 pub mod lua_api;
