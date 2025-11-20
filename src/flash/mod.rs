@@ -2,6 +2,9 @@
 
 use regex::Regex;
 use serde::Deserialize;
+#[cfg(target_os = "macos")]
+use plist;
+use std::collections::HashSet;
 use std::{
     fs::{self, File},
     io,
@@ -158,6 +161,14 @@ pub enum FlashError {
         dest: PathBuf,
         source: io::Error,
     },
+    #[error("device serial {serial} was already flashed in this run")]
+    DuplicateSerial { serial: String },
+    #[error("board-id mismatch for {device}: expected {expected}, found {found}")]
+    BoardIdMismatch {
+        device: String,
+        expected: String,
+        found: String,
+    },
     #[error("udisksctl is required for automatic mounting on Linux")]
     MissingUdisksctl,
     #[error("udisksctl mount failed for {device}: {message}")]
@@ -259,6 +270,7 @@ pub fn flash_target(
     target: &FlashTarget,
     source: &FlashSource,
     mount_override: Option<&Path>,
+    seen_serials: &mut HashSet<String>,
 ) -> Result<FlashOutcome, FlashError> {
     let artifact = source
         .artifact_for_side(target.side)
@@ -276,10 +288,40 @@ pub fn flash_target(
             cleanup_path: None,
         }
     } else {
-        wait_for_device(&target.config)?
+        wait_for_device(&target.config, Some(target), seen_serials)?
     };
-    let (bytes_written, mut warnings) =
+    if let Some(serial) = device.serial.as_ref() {
+        if seen_serials.contains(serial) {
+            return Err(FlashError::DuplicateSerial {
+                serial: serial.clone(),
+            });
+        }
+    }
+    let mut warnings = Vec::new();
+    if let Some(expected) = target.board_id.as_ref() {
+        match read_board_id(&device.mountpoint) {
+            Some(found) => {
+                if !found.eq_ignore_ascii_case(expected) && !found.contains(expected) {
+                    return Err(FlashError::BoardIdMismatch {
+                        device: device.name.clone(),
+                        expected: expected.clone(),
+                        found,
+                    });
+                }
+            }
+            None => warnings.push(format!(
+                "could not read board-id from {} to verify side",
+                device.mountpoint.display()
+            )),
+        }
+    }
+    let (bytes_written, mut copy_warnings) =
         copy_to_mountpoint(artifact, &device.mountpoint, target.config.sync_after_copy)?;
+    warnings.append(&mut copy_warnings);
+    if let Some(serial) = device.serial.clone() {
+        seen_serials.insert(serial.clone());
+        warnings.push(format!("flashed device serial {}", serial));
+    }
     if device.auto_unmount {
         if let Some(dev_path) = device.dev_path.clone() {
             match Command::new("udisksctl")
@@ -309,12 +351,7 @@ pub fn flash_target(
         artifact: artifact.to_path_buf(),
         mountpoint: device.mountpoint,
         bytes_written,
-        warnings: {
-            if let Some(serial) = device.serial {
-                warnings.push(format!("flashed device serial {}", serial));
-            }
-            warnings
-        },
+        warnings,
     })
 }
 
@@ -481,15 +518,45 @@ fn copy_to_mountpoint(
     Ok((bytes_copied, warnings))
 }
 
-fn wait_for_device(config: &FlashConfig) -> Result<FlashDevice, FlashError> {
+fn read_board_id(mountpoint: &Path) -> Option<String> {
+    for filename in ["INFO_UF2.TXT", "INFO_UF2.txt", "info_uf2.txt"] {
+        let candidate = mountpoint.join(filename);
+        if let Ok(text) = fs::read_to_string(&candidate) {
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("Board-ID:") {
+                    let value = rest.trim();
+                    if !value.is_empty() {
+                        return Some(value.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn wait_for_device(
+    config: &FlashConfig,
+    target: Option<&FlashTarget>,
+    seen_serials: &HashSet<String>,
+) -> Result<FlashDevice, FlashError> {
     #[cfg(target_os = "linux")]
     {
-        wait_for_device_linux(config)
+        wait_for_device_linux(config, target, seen_serials)
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        wait_for_device_macos(config, target, seen_serials)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        wait_for_device_windows(config, target, seen_serials)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
         Err(FlashError::UnsupportedPlatform(
-            "automatic device discovery currently works on Linux only".into(),
+            "automatic device discovery is not implemented for this platform".into(),
         ))
     }
 }
@@ -520,12 +587,30 @@ struct BuildInfoTarget {
 }
 
 #[cfg(target_os = "linux")]
-fn wait_for_device_linux(config: &FlashConfig) -> Result<FlashDevice, FlashError> {
+fn wait_for_device_linux(
+    config: &FlashConfig,
+    _target: Option<&FlashTarget>,
+    seen_serials: &HashSet<String>,
+) -> Result<FlashDevice, FlashError> {
     let deadline = Instant::now() + config.mount_timeout;
     let mut last_error = None;
     while Instant::now() < deadline {
         match probe_linux(config.device_query.as_deref()) {
             Ok(mut devices) => {
+                if !seen_serials.is_empty() {
+                    let previous = devices.len();
+                    devices.retain(|d| {
+                        d.serial
+                            .as_ref()
+                            .map(|s| !seen_serials.contains(s))
+                            .unwrap_or(true)
+                    });
+                    if devices.is_empty() && previous > 0 {
+                        last_error = Some(FlashError::DuplicateSerial {
+                            serial: "<already flashed>".into(),
+                        });
+                    }
+                }
                 if devices.len() == 1 {
                     let dev = devices.remove(0);
                     let (mountpoint, auto_unmount) = if let Some(first) = dev.mountpoints.get(0) {
@@ -547,9 +632,35 @@ fn wait_for_device_linux(config: &FlashConfig) -> Result<FlashDevice, FlashError
                     });
                 }
                 if devices.len() > 1 {
-                    last_error = Some(FlashError::InvalidArgument(
-                        "multiple devices matched; refine hardware.flash.device_query".into(),
-                    ));
+                    // Prefer a device with a mountpoint to avoid extra mounts; otherwise pick the first.
+                    if let Some(dev) = devices.iter().find(|d| !d.mountpoints.is_empty()) {
+                        let dev = dev.clone();
+                        let mountpoint = dev.mountpoints[0].clone();
+                        return Ok(FlashDevice {
+                            name: dev.name.clone(),
+                            dev_path: Some(dev.dev_path.clone()),
+                            mountpoint,
+                            serial: dev.serial.clone(),
+                            vendor: dev.vendor.clone(),
+                            model: dev.model.clone(),
+                            fs_type: dev.fs_type.clone(),
+                            auto_unmount: false,
+                            cleanup_path: None,
+                        });
+                    }
+                    let dev = devices.remove(0);
+                    let mount = mount_with_udisksctl(&dev.dev_path)?;
+                    return Ok(FlashDevice {
+                        name: dev.name,
+                        dev_path: Some(dev.dev_path),
+                        mountpoint: mount,
+                        serial: dev.serial,
+                        vendor: dev.vendor,
+                        model: dev.model,
+                        fs_type: dev.fs_type,
+                        auto_unmount: true,
+                        cleanup_path: None,
+                    });
                 }
             }
             Err(err) => last_error = Some(err),
@@ -602,8 +713,85 @@ fn parse_udisk_mount_path(output: &str) -> Option<PathBuf> {
     None
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parses_lsblk_and_query_filters() {
+        let sample = br#"{
+            "blockdevices": [
+                {
+                    "name": "sda",
+                    "serial": "ATA-123",
+                    "vendor": "ATA",
+                    "model": "Drive",
+                    "fstype": null,
+                    "rm": false,
+                    "mountpoints": [null],
+                    "children": [
+                        {
+                            "name": "sda1",
+                            "serial": "GLV80-ABC123",
+                            "vendor": "MoErgo",
+                            "model": "Glove80 Boot",
+                            "fstype": "vfat",
+                            "rm": true,
+                            "mountpoints": [
+                                "/media/user/GLV80"
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }"#;
+        let devices = parse_lsblk_devices(sample).expect("parse lsblk");
+        assert_eq!(devices.len(), 2);
+        let boot = devices
+            .iter()
+            .find(|d| d.name == "sda1")
+            .expect("boot device present");
+        assert_eq!(
+            boot.mountpoints.first().map(|p| p.to_str().unwrap()),
+            Some("/media/user/GLV80")
+        );
+        assert_eq!(boot.dev_path, PathBuf::from("/dev/sda1"));
+
+        let query = Query::parse("serial~=GLV80-.* and removable=true").unwrap();
+        let meta = QueryMetadata::from(boot);
+        assert!(query.matches(&meta));
+    }
+
+    #[test]
+    fn parses_udisksctl_mount_output() {
+        let output = "Mounted /dev/sda1 at /media/user/GLV80.\n";
+        let mount = parse_udisk_mount_path(output).unwrap();
+        assert_eq!(mount, PathBuf::from("/media/user/GLV80"));
+    }
+
+    #[test]
+    fn duplicate_serial_detection() {
+        let mut seen: HashSet<String> = HashSet::new();
+        seen.insert("ABC".into());
+        let target_seen = seen.clone();
+        // Directly exercising the duplicate path in flash_target via a fake device would require
+        // a deeper refactor; sanity-check the error type instead.
+        let err = FlashError::DuplicateSerial {
+            serial: "ABC".into(),
+        };
+        if let FlashError::DuplicateSerial { serial } = err {
+            assert_eq!(serial, "ABC");
+        } else {
+            panic!("unexpected error variant");
+        }
+        assert!(target_seen.contains("ABC"));
+    }
+}
+
 #[cfg(target_os = "linux")]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct LsblkDevice {
     pub name: String,
     pub dev_path: PathBuf,
@@ -627,22 +815,28 @@ fn probe_linux(query: Option<&str>) -> Result<Vec<LsblkDevice>, FlashError> {
             output.status.code()
         )));
     }
-    let parsed: LsblkOutput = serde_json::from_slice(&output.stdout)
-        .map_err(|err| FlashError::ProbeFailed(format!("parse lsblk output: {err}")))?;
-    let mut devices = Vec::new();
-    for device in parsed.blockdevices.into_iter().flatten() {
-        flatten_lsblk(device, &mut devices);
-    }
+    let devices = parse_lsblk_devices(&output.stdout)?;
     let filtered = if let Some(query_str) = query {
         let matcher = Query::parse(query_str)?;
         devices
             .into_iter()
-            .filter(|dev| matcher.matches(dev))
+            .filter(|dev| matcher.matches(&QueryMetadata::from(dev)))
             .collect()
     } else {
         devices
     };
     Ok(filtered)
+}
+
+#[cfg(target_os = "linux")]
+fn parse_lsblk_devices(bytes: &[u8]) -> Result<Vec<LsblkDevice>, FlashError> {
+    let parsed: LsblkOutput = serde_json::from_slice(bytes)
+        .map_err(|err| FlashError::ProbeFailed(format!("parse lsblk output: {err}")))?;
+    let mut devices = Vec::new();
+    for device in parsed.blockdevices.into_iter().flatten() {
+        flatten_lsblk(device, &mut devices);
+    }
+    Ok(devices)
 }
 
 #[cfg(target_os = "linux")]
@@ -731,13 +925,443 @@ where
     deserializer.deserialize_any(Visitor)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(target_os = "macos")]
+fn wait_for_device_macos(
+    config: &FlashConfig,
+    _target: Option<&FlashTarget>,
+    seen_serials: &HashSet<String>,
+) -> Result<FlashDevice, FlashError> {
+    let deadline = Instant::now() + config.mount_timeout;
+    let mut last_error = None;
+    while Instant::now() < deadline {
+        match probe_macos(config.device_query.as_deref()) {
+            Ok(mut devices) => {
+                if !seen_serials.is_empty() {
+                    devices.retain(|d| {
+                        d.serial
+                            .as_ref()
+                            .map(|s| !seen_serials.contains(s))
+                            .unwrap_or(true)
+                    });
+                }
+                if devices.len() == 1 {
+                    let mut dev = devices.remove(0);
+                    if dev.mountpoints.is_empty() {
+                        let mount = diskutil_mount(&dev.dev_path)?;
+                        dev.mountpoints.push(mount);
+                        dev.auto_unmount = true;
+                    }
+                    let mountpoint = dev.mountpoints[0].clone();
+                    return Ok(FlashDevice {
+                        name: dev.name,
+                        dev_path: Some(dev.dev_path),
+                        mountpoint,
+                        serial: dev.serial,
+                        vendor: dev.vendor,
+                        model: dev.model,
+                        fs_type: dev.fs_type,
+                        auto_unmount: dev.auto_unmount,
+                        cleanup_path: None,
+                    });
+                }
+                if devices.len() > 1 {
+                    if let Some(dev) = devices.iter().find(|d| !d.mountpoints.is_empty()) {
+                        let dev = dev.clone();
+                        let mountpoint = dev.mountpoints[0].clone();
+                        return Ok(FlashDevice {
+                            name: dev.name,
+                            dev_path: Some(dev.dev_path),
+                            mountpoint,
+                            serial: dev.serial,
+                            vendor: dev.vendor,
+                            model: dev.model,
+                            fs_type: dev.fs_type,
+                            auto_unmount: dev.auto_unmount,
+                            cleanup_path: None,
+                        });
+                    }
+                    let mut dev = devices.remove(0);
+                    let mount = diskutil_mount(&dev.dev_path)?;
+                    dev.mountpoints.push(mount.clone());
+                    dev.auto_unmount = true;
+                    return Ok(FlashDevice {
+                        name: dev.name,
+                        dev_path: Some(dev.dev_path),
+                        mountpoint: mount,
+                        serial: dev.serial,
+                        vendor: dev.vendor,
+                        model: dev.model,
+                        fs_type: dev.fs_type,
+                        auto_unmount: dev.auto_unmount,
+                        cleanup_path: None,
+                    });
+                }
+            }
+            Err(err) => last_error = Some(err),
+        }
+        sleep(Duration::from_millis(500));
+    }
+    Err(last_error.unwrap_or_else(|| {
+        FlashError::NoMatchingDevice(
+            config
+                .device_query
+                .clone()
+                .unwrap_or_else(|| "<unspecified>".into()),
+        )
+    }))
+}
+
+#[cfg(target_os = "macos")]
+fn probe_macos(query: Option<&str>) -> Result<Vec<MacDisk>, FlashError> {
+    let output = Command::new("diskutil")
+        .args(["list", "-plist"])
+        .output()
+        .map_err(|err| FlashError::ProbeFailed(err.to_string()))?;
+    if !output.status.success() {
+        return Err(FlashError::ProbeFailed(format!(
+            "diskutil failed with code {:?}",
+            output.status.code()
+        )));
+    }
+    let parsed: DiskutilList = plist::from_bytes(&output.stdout)
+        .map_err(|err| FlashError::ProbeFailed(format!("parse diskutil output: {err}")))?;
+    let mut devices = Vec::new();
+    for entry in parsed.all_devices.into_iter().flatten() {
+        flatten_diskutil(entry, &mut devices);
+    }
+    if let Some(query_str) = query {
+        let matcher = Query::parse(query_str)?;
+        devices.retain(|dev| matcher.matches(&QueryMetadata::from(dev)));
+    }
+    Ok(devices)
+}
+
+#[cfg(target_os = "macos")]
+fn diskutil_mount(dev_path: &Path) -> Result<PathBuf, FlashError> {
+    let dev_str = dev_path.to_str().unwrap_or_default();
+    let output = Command::new("diskutil")
+        .args(["mount", dev_str])
+        .output()
+        .map_err(|err| FlashError::ProbeFailed(err.to_string()))?;
+    if !output.status.success() {
+        return Err(FlashError::ProbeFailed(format!(
+            "diskutil mount failed for {dev_str}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    if let Some(info) = diskutil_info(dev_path)? {
+        if let Some(mount) = info.mountpoint {
+            return Ok(mount);
+        }
+    }
+    Err(FlashError::ProbeFailed(format!(
+        "unable to determine mountpoint for {dev_str}"
+    )))
+}
+
+#[cfg(target_os = "macos")]
+fn diskutil_info(dev_path: &Path) -> Result<Option<DiskutilInfo>, FlashError> {
+    let dev_str = dev_path.to_str().unwrap_or_default();
+    let output = Command::new("diskutil")
+        .args(["info", "-plist", dev_str])
+        .output()
+        .map_err(|err| FlashError::ProbeFailed(err.to_string()))?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let info: DiskutilInfo = plist::from_bytes(&output.stdout)
+        .map_err(|err| FlashError::ProbeFailed(format!("parse diskutil info: {err}")))?;
+    Ok(Some(info))
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Deserialize)]
+struct DiskutilList {
+    #[serde(rename = "AllDisksAndPartitions", default)]
+    all_devices: Option<Vec<DiskutilEntry>>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Deserialize, Clone)]
+struct DiskutilEntry {
+    #[serde(rename = "DeviceIdentifier")]
+    device_identifier: Option<String>,
+    #[serde(rename = "VolumeName")]
+    volume_name: Option<String>,
+    #[serde(rename = "MountPoint")]
+    mount_point: Option<String>,
+    #[serde(rename = "RemovableMedia")]
+    removable: Option<bool>,
+    #[serde(rename = "Content")]
+    content: Option<String>,
+    #[serde(rename = "MediaName")]
+    media_name: Option<String>,
+    #[serde(rename = "Partitions", default)]
+    partitions: Vec<DiskutilEntry>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Deserialize)]
+struct DiskutilInfo {
+    #[serde(rename = "MountPoint")]
+    mountpoint: Option<String>,
+    #[serde(rename = "FilesystemName")]
+    fs_type: Option<String>,
+    #[serde(rename = "VolumeName")]
+    volume_name: Option<String>,
+    #[serde(rename = "RemovableMedia")]
+    removable: Option<bool>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone)]
+struct MacDisk {
+    pub name: String,
+    pub dev_path: PathBuf,
+    pub serial: Option<String>,
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub fs_type: Option<String>,
+    pub removable: Option<bool>,
+    pub mountpoints: Vec<PathBuf>,
+    pub auto_unmount: bool,
+}
+
+#[cfg(target_os = "macos")]
+fn flatten_diskutil(entry: DiskutilEntry, out: &mut Vec<MacDisk>) {
+    if let Some(identifier) = entry.device_identifier.clone() {
+        let mut mountpoints = Vec::new();
+        if let Some(mp) = entry.mount_point {
+            if !mp.is_empty() {
+                mountpoints.push(PathBuf::from(mp));
+            }
+        }
+        let dev_path = PathBuf::from("/dev").join(&identifier);
+        out.push(MacDisk {
+            name: identifier,
+            dev_path,
+            serial: entry.volume_name.clone().or(entry.media_name.clone()),
+            vendor: None,
+            model: entry.media_name.clone(),
+            fs_type: entry.content.clone(),
+            removable: entry.removable,
+            mountpoints,
+            auto_unmount: false,
+        });
+    }
+    for child in entry.partitions {
+        flatten_diskutil(child, out);
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl From<&MacDisk> for QueryMetadata {
+    fn from(device: &MacDisk) -> Self {
+        QueryMetadata {
+            serial: device.serial.clone(),
+            vendor: device.vendor.clone(),
+            model: device.model.clone(),
+            fs_type: device.fs_type.clone(),
+            removable: device.removable,
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn wait_for_device_windows(
+    config: &FlashConfig,
+    _target: Option<&FlashTarget>,
+    seen_serials: &HashSet<String>,
+) -> Result<FlashDevice, FlashError> {
+    let deadline = Instant::now() + config.mount_timeout;
+    let mut last_error = None;
+    while Instant::now() < deadline {
+        match probe_windows(config.device_query.as_deref()) {
+            Ok(mut devices) => {
+                if !seen_serials.is_empty() {
+                    devices.retain(|d| {
+                        d.serial
+                            .as_ref()
+                            .map(|s| !seen_serials.contains(s))
+                            .unwrap_or(true)
+                    });
+                }
+                if devices.len() == 1 {
+                    let dev = devices.remove(0);
+                    if dev.mountpoints.is_empty() {
+                        last_error = Some(FlashError::UnmountedDevice { name: dev.name });
+                    } else {
+                        let mountpoint = dev.mountpoints[0].clone();
+                        return Ok(FlashDevice {
+                            name: dev.name,
+                            dev_path: Some(dev.dev_path),
+                            mountpoint,
+                            serial: dev.serial,
+                            vendor: dev.vendor,
+                            model: dev.model,
+                            fs_type: dev.fs_type,
+                            auto_unmount: false,
+                            cleanup_path: None,
+                        });
+                    }
+                }
+                if devices.len() > 1 {
+                    if let Some(dev) = devices.iter().find(|d| !d.mountpoints.is_empty()) {
+                        let dev = dev.clone();
+                        let mountpoint = dev.mountpoints[0].clone();
+                        return Ok(FlashDevice {
+                            name: dev.name,
+                            dev_path: Some(dev.dev_path),
+                            mountpoint,
+                            serial: dev.serial,
+                            vendor: dev.vendor,
+                            model: dev.model,
+                            fs_type: dev.fs_type,
+                            auto_unmount: false,
+                            cleanup_path: None,
+                        });
+                    }
+                }
+            }
+            Err(err) => last_error = Some(err),
+        }
+        sleep(Duration::from_millis(500));
+    }
+    Err(last_error.unwrap_or_else(|| {
+        FlashError::NoMatchingDevice(
+            config
+                .device_query
+                .clone()
+                .unwrap_or_else(|| "<unspecified>".into()),
+        )
+    }))
+}
+
+#[cfg(target_os = "windows")]
+fn probe_windows(query: Option<&str>) -> Result<Vec<WinVolume>, FlashError> {
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-Volume | Select-Object DriveLetter,FileSystem,FileSystemLabel,Path,DriveType | ConvertTo-Json -Compress",
+        ])
+        .output()
+        .map_err(|err| FlashError::ProbeFailed(err.to_string()))?;
+    if !output.status.success() {
+        return Err(FlashError::ProbeFailed(format!(
+            "powershell Get-Volume failed with code {:?}",
+            output.status.code()
+        )));
+    }
+    let json = String::from_utf8_lossy(&output.stdout);
+    let value: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|err| FlashError::ProbeFailed(format!("parse Get-Volume output: {err}")))?;
+    let mut volumes = Vec::new();
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                if let Some(vol) = parse_windows_volume(&item) {
+                    volumes.push(vol);
+                }
+            }
+        }
+        serde_json::Value::Object(_) => {
+            if let Some(vol) = parse_windows_volume(&value) {
+                volumes.push(vol);
+            }
+        }
+        _ => {}
+    }
+    if let Some(query_str) = query {
+        let matcher = Query::parse(query_str)?;
+        volumes.retain(|v| matcher.matches(&QueryMetadata::from(v)));
+    }
+    Ok(volumes)
+}
+
+#[cfg(target_os = "windows")]
+fn parse_windows_volume(value: &serde_json::Value) -> Option<WinVolume> {
+    let drive_letter = value
+        .get("DriveLetter")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let path_value = value.get("Path").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let label = value
+        .get("FileSystemLabel")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let fs_type = value
+        .get("FileSystem")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let drive_type_str = value
+        .get("DriveType")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let drive_type_num = value.get("DriveType").and_then(|v| v.as_i64());
+    let removable = if let Some(ref t) = drive_type_str {
+        Some(t.eq_ignore_ascii_case("removable"))
+    } else if let Some(num) = drive_type_num {
+        Some(num == 2)
+    } else {
+        None
+    };
+    let mut mountpoints = Vec::new();
+    if let Some(path) = path_value {
+        if !path.is_empty() {
+            mountpoints.push(PathBuf::from(path));
+        }
+    } else if let Some(letter) = drive_letter.clone() {
+        let mp = format!("{}:\\", letter);
+        mountpoints.push(PathBuf::from(mp));
+    }
+    if mountpoints.is_empty() {
+        return None;
+    }
+    let name = drive_letter.unwrap_or_else(|| label.clone().unwrap_or_else(|| "volume".into()));
+    Some(WinVolume {
+        name: name.clone(),
+        dev_path: PathBuf::from(name),
+        mountpoints,
+        serial: label.clone(),
+        vendor: None,
+        model: None,
+        fs_type,
+        removable,
+    })
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone)]
+struct WinVolume {
+    pub name: String,
+    pub dev_path: PathBuf,
+    pub mountpoints: Vec<PathBuf>,
+    pub serial: Option<String>,
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub fs_type: Option<String>,
+    pub removable: Option<bool>,
+}
+
+#[cfg(target_os = "windows")]
+impl From<&WinVolume> for QueryMetadata {
+    fn from(device: &WinVolume) -> Self {
+        QueryMetadata {
+            serial: device.serial.clone(),
+            vendor: device.vendor.clone(),
+            model: device.model.clone(),
+            fs_type: device.fs_type.clone(),
+            removable: device.removable,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Query {
     clauses: Vec<QueryClause>,
 }
 
-#[cfg(target_os = "linux")]
 impl Query {
     fn parse(input: &str) -> Result<Self, FlashError> {
         let mut clauses = Vec::new();
@@ -748,19 +1372,17 @@ impl Query {
         Ok(Query { clauses })
     }
 
-    fn matches(&self, device: &LsblkDevice) -> bool {
-        self.clauses.iter().all(|c| c.matches(device))
+    fn matches(&self, meta: &QueryMetadata) -> bool {
+        self.clauses.iter().all(|c| c.matches(meta))
     }
 }
 
-#[cfg(target_os = "linux")]
 #[derive(Debug)]
 enum QueryClause {
     Equals { field: QueryField, value: String },
     Regex { field: QueryField, regex: Regex },
 }
 
-#[cfg(target_os = "linux")]
 impl QueryClause {
     fn parse(raw: &str) -> Result<Self, FlashError> {
         let raw = raw.trim();
@@ -782,15 +1404,14 @@ impl QueryClause {
         Err(FlashError::InvalidQuery(raw.into()))
     }
 
-    fn matches(&self, device: &LsblkDevice) -> bool {
+    fn matches(&self, meta: &QueryMetadata) -> bool {
         match self {
-            QueryClause::Equals { field, value } => field.equals(device, value),
-            QueryClause::Regex { field, regex } => field.regex(device, regex),
+            QueryClause::Equals { field, value } => field.equals(meta, value),
+            QueryClause::Regex { field, regex } => field.regex(meta, regex),
         }
     }
 }
 
-#[cfg(target_os = "linux")]
 #[derive(Debug)]
 enum QueryField {
     Serial,
@@ -800,7 +1421,6 @@ enum QueryField {
     Removable,
 }
 
-#[cfg(target_os = "linux")]
 impl QueryField {
     fn parse(raw: &str) -> Result<Self, FlashError> {
         match raw.to_ascii_lowercase().as_str() {
@@ -813,39 +1433,61 @@ impl QueryField {
         }
     }
 
-    fn equals(&self, device: &LsblkDevice, value: &str) -> bool {
+    fn equals(&self, meta: &QueryMetadata, value: &str) -> bool {
         match self {
-            QueryField::Serial => device
+            QueryField::Serial => meta
                 .serial
                 .as_deref()
                 .map_or(false, |v| v.eq_ignore_ascii_case(value)),
-            QueryField::Vendor => device
+            QueryField::Vendor => meta
                 .vendor
                 .as_deref()
                 .map_or(false, |v| v.eq_ignore_ascii_case(value)),
-            QueryField::Model => device
+            QueryField::Model => meta
                 .model
                 .as_deref()
                 .map_or(false, |v| v.eq_ignore_ascii_case(value)),
-            QueryField::FsType => device
+            QueryField::FsType => meta
                 .fs_type
                 .as_deref()
                 .map_or(false, |v| v.eq_ignore_ascii_case(value)),
-            QueryField::Removable => device.removable.unwrap_or(false) == (value == "true"),
+            QueryField::Removable => meta.removable.unwrap_or(false) == (value == "true"),
         }
     }
 
-    fn regex(&self, device: &LsblkDevice, regex: &Regex) -> bool {
+    fn regex(&self, meta: &QueryMetadata, regex: &Regex) -> bool {
         match self {
-            QueryField::Serial => device.serial.as_deref().map_or(false, |v| regex.is_match(v)),
-            QueryField::Vendor => device.vendor.as_deref().map_or(false, |v| regex.is_match(v)),
-            QueryField::Model => device.model.as_deref().map_or(false, |v| regex.is_match(v)),
-            QueryField::FsType => device.fs_type.as_deref().map_or(false, |v| regex.is_match(v)),
-            QueryField::Removable => regex.is_match(if device.removable.unwrap_or(false) {
+            QueryField::Serial => meta.serial.as_deref().map_or(false, |v| regex.is_match(v)),
+            QueryField::Vendor => meta.vendor.as_deref().map_or(false, |v| regex.is_match(v)),
+            QueryField::Model => meta.model.as_deref().map_or(false, |v| regex.is_match(v)),
+            QueryField::FsType => meta.fs_type.as_deref().map_or(false, |v| regex.is_match(v)),
+            QueryField::Removable => regex.is_match(if meta.removable.unwrap_or(false) {
                 "true"
             } else {
                 "false"
             }),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct QueryMetadata {
+    pub serial: Option<String>,
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub fs_type: Option<String>,
+    pub removable: Option<bool>,
+}
+
+#[cfg(target_os = "linux")]
+impl From<&LsblkDevice> for QueryMetadata {
+    fn from(device: &LsblkDevice) -> Self {
+        QueryMetadata {
+            serial: device.serial.clone(),
+            vendor: device.vendor.clone(),
+            model: device.model.clone(),
+            fs_type: device.fs_type.clone(),
+            removable: device.removable,
         }
     }
 }

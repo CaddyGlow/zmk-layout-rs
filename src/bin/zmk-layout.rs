@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use similar::{ChangeTag, TextDiff};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -478,6 +478,7 @@ fn run_firmware_flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {
         &sides,
     )?;
     let targets = build_flash_targets(&profile.document, &sides);
+    let mut seen_serials: HashSet<String> = HashSet::new();
     if targets.len() > 1 {
         eprintln!(
             "detected split keyboard; flashing {} sides sequentially",
@@ -488,7 +489,7 @@ fn run_firmware_flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {
         if targets.len() > 1 {
             eprintln!("-- prepare the {} half --", target.side);
         }
-        let outcome = flash_target(&target, &source, args.device.as_deref())?;
+        let outcome = flash_target(&target, &source, args.device.as_deref(), &mut seen_serials)?;
         eprintln!(
             "flashed {} using {} ({} bytes)",
             outcome.side,

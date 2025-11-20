@@ -1,5 +1,6 @@
 //! Keyboard profile loader for the TOML schema described in `docs/keyboard_profiles.md`.
 
+use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -8,6 +9,16 @@ use std::{
 };
 use thiserror::Error;
 use toml::Value as TomlValue;
+
+/// Embedded keyboard profiles bundled in the binary.
+#[derive(RustEmbed)]
+#[folder = "keyboard_profiles/"]
+pub struct EmbeddedKeyboardProfiles;
+
+/// Embedded firmware profiles bundled in the binary.
+#[derive(RustEmbed)]
+#[folder = "firmware_profiles/"]
+pub struct EmbeddedFirmwareProfiles;
 
 /// Convenience type used for arbitrary TOML tables we want to retain.
 pub type ProfileProperties = BTreeMap<String, TomlValue>;
