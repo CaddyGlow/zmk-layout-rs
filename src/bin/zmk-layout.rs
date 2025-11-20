@@ -16,7 +16,7 @@ use zmk_layout_rs::{
     dts::DtsDocument,
     flash::{
         FlashConfig, FlashError, FlashSideSelection, build_flash_targets,
-        default_sides, flash_target, resolve_flash_source,
+        default_sides, discover_devices, flash_target, resolve_flash_source,
     },
     profiles::KeyboardProfileDoc,
     providers::KeymapDocument,
@@ -136,6 +136,7 @@ struct ScriptArgs {
 enum FirmwareCommand {
     Build(FirmwareBuildArgs),
     Flash(FirmwareFlashArgs),
+    Devices(FirmwareDevicesArgs),
 }
 
 #[derive(Subcommand)]
@@ -280,6 +281,26 @@ struct FirmwareFlashArgs {
     copy_timeout: Option<u64>,
     #[arg(long, help = "Skip sync after copy, even if requested by the profile")]
     no_sync: bool,
+}
+
+#[derive(Args, Clone)]
+struct FirmwareDevicesArgs {
+    #[arg(long, value_name = "FILE", help = "Firmware manifest (TOML)")]
+    manifest: PathBuf,
+    #[arg(
+        long,
+        value_name = "KEYBOARD",
+        help = "Keyboard id declared in the manifest"
+    )]
+    keyboard: String,
+    #[arg(
+        long,
+        value_name = "QUERY",
+        help = "Override the hardware.flash device_query (default uses profile)"
+    )]
+    query: Option<String>,
+    #[arg(long, help = "Ignore the profile query and list every detected device")]
+    all: bool,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -431,6 +452,7 @@ fn run_firmware(command: FirmwareCommand) -> Result<i32, CliError> {
     match command {
         FirmwareCommand::Build(args) => run_firmware_build(&args),
         FirmwareCommand::Flash(args) => run_firmware_flash(&args),
+        FirmwareCommand::Devices(args) => run_firmware_devices(&args),
     }
 }
 
@@ -503,10 +525,85 @@ fn run_firmware_flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {
     Ok(0)
 }
 
+fn run_firmware_devices(args: &FirmwareDevicesArgs) -> Result<i32, CliError> {
+    let manifest = FirmwareManifest::from_file(&args.manifest)?;
+    let keyboard = manifest
+        .keyboards
+        .get(&args.keyboard)
+        .ok_or_else(|| CliError::UnknownKeyboard(args.keyboard.clone()))?;
+    let profile = keyboard
+        .profile
+        .as_ref()
+        .ok_or_else(|| CliError::MissingKeyboardProfile(args.keyboard.clone()))?;
+    let mut config = profile
+        .document
+        .hardware
+        .flash
+        .first()
+        .map(FlashConfig::from)
+        .unwrap_or_default();
+    if args.all {
+        config.device_query = None;
+    }
+    if let Some(query) = &args.query {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            config.device_query = None;
+        } else {
+            config.device_query = Some(trimmed.to_string());
+        }
+    }
+
+    if let Some(query) = &config.device_query {
+        eprintln!("device query: {query}");
+    } else {
+        eprintln!("device query: <none>");
+    }
+
+    let mut devices = discover_devices(&config)?;
+    if devices.is_empty() {
+        eprintln!("no devices found");
+        return Ok(0);
+    }
+
+    devices.sort_by(|a, b| a.name.cmp(&b.name));
+    for dev in devices {
+        let mountpoints = if dev.mountpoints.is_empty() {
+            "<not mounted>".to_string()
+        } else {
+            dev.mountpoints
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let dev_path = dev
+            .dev_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "-".into());
+        let fs_type = dev.fs_type.as_deref().unwrap_or("-");
+        let serial = dev.serial.as_deref().unwrap_or("-");
+        let vendor = dev.vendor.as_deref().unwrap_or("-");
+        let model = dev.model.as_deref().unwrap_or("-");
+        let removable = dev
+            .removable
+            .map(|r| if r { "removable" } else { "fixed" })
+            .unwrap_or("-");
+        println!(
+            "{}  dev={}  mount={}  fs={}  serial={}  vendor={}  model={}  {}",
+            dev.name, dev_path, mountpoints, fs_type, serial, vendor, model, removable
+        );
+    }
+    Ok(0)
+}
+
 fn run_profile_check(args: &ProfileCheckArgs) -> Result<i32, CliError> {
     let mut requested = args.paths.clone();
+    let mut from_embedded = false;
     if args.all {
         let discovered = discover_profile_paths(&args.profiles_dir)?;
+        from_embedded = !args.profiles_dir.exists();
         requested.extend(discovered);
     }
     if requested.is_empty() {
@@ -520,7 +617,22 @@ fn run_profile_check(args: &ProfileCheckArgs) -> Result<i32, CliError> {
         if !seen.insert(path.clone()) {
             continue;
         }
-        match KeyboardProfileDoc::from_file(&path) {
+
+        // Try to load from file if it exists, otherwise try by name from embedded
+        let result = if path.exists() {
+            KeyboardProfileDoc::from_file(&path)
+        } else if from_embedded {
+            // Extract name from path for embedded loading
+            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                KeyboardProfileDoc::load(name)
+            } else {
+                KeyboardProfileDoc::from_file(&path)
+            }
+        } else {
+            KeyboardProfileDoc::from_file(&path)
+        };
+
+        match result {
             Ok(profile) => {
                 println!(
                     "[OK ] {} :: {} (keyboard `{}`)",
@@ -539,29 +651,37 @@ fn run_profile_check(args: &ProfileCheckArgs) -> Result<i32, CliError> {
 }
 
 fn discover_profile_paths(dir: &Path) -> Result<Vec<PathBuf>, CliError> {
-    let read_dir = fs::read_dir(dir).map_err(|err| {
-        CliError::ProfileCheck(format!("failed to read {}: {}", dir.display(), err))
-    })?;
-    let mut profiles = Vec::new();
-    for entry in read_dir {
-        let entry = entry.map_err(|err| {
-            CliError::ProfileCheck(format!("failed to enumerate {}: {}", dir.display(), err))
+    if dir.exists() {
+        let read_dir = fs::read_dir(dir).map_err(|err| {
+            CliError::ProfileCheck(format!("failed to read {}: {}", dir.display(), err))
         })?;
-        let path = entry.path();
-        if matches!(path.extension().and_then(|ext| ext.to_str()), Some(ext) if ext.eq_ignore_ascii_case("toml"))
-        {
-            profiles.push(path);
+        let mut profiles = Vec::new();
+        for entry in read_dir {
+            let entry = entry.map_err(|err| {
+                CliError::ProfileCheck(format!("failed to enumerate {}: {}", dir.display(), err))
+            })?;
+            let path = entry.path();
+            if matches!(path.extension().and_then(|ext| ext.to_str()), Some(ext) if ext.eq_ignore_ascii_case("toml"))
+            {
+                profiles.push(path);
+            }
+        }
+        if !profiles.is_empty() {
+            profiles.sort();
+            return Ok(profiles);
         }
     }
-    if profiles.is_empty() {
-        Err(CliError::ProfileCheck(format!(
-            "no *.toml profiles found under {}",
+
+    // Fallback to embedded profiles
+    let available = KeyboardProfileDoc::list_available();
+    if available.is_empty() {
+        return Err(CliError::ProfileCheck(format!(
+            "no profiles found in {} or embedded in binary",
             dir.display()
-        )))
-    } else {
-        profiles.sort();
-        Ok(profiles)
+        )));
     }
+
+    Ok(available.into_iter().map(|name| dir.join(format!("{}.toml", name))).collect())
 }
 
 fn run_firmware_build(args: &FirmwareBuildArgs) -> Result<i32, CliError> {

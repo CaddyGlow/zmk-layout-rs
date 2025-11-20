@@ -585,3 +585,23 @@ pub enum ManifestError {
     #[error("embedded resource is not valid UTF-8")]
     InvalidUtf8,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loads_embedded_firmware_manifest() {
+        let manifest = FirmwareManifest::load("glove80").expect("embedded manifest");
+        assert_eq!(manifest.version, 1);
+        assert!(manifest.toolchains.contains_key("moergo"));
+        assert!(manifest.keyboards.contains_key("glove80"));
+    }
+
+    #[test]
+    fn lists_available_manifests() {
+        let manifests = FirmwareManifest::list_available();
+        assert!(!manifests.is_empty(), "should have at least embedded manifests");
+        assert!(manifests.contains(&"glove80".to_string()), "should include glove80");
+    }
+}

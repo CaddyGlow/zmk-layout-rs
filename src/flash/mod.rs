@@ -120,6 +120,19 @@ pub struct FlashDevice {
     pub cleanup_path: Option<PathBuf>,
 }
 
+/// Probe result describing a connected storage device.
+#[derive(Debug, Clone)]
+pub struct FlashDiscovery {
+    pub name: String,
+    pub dev_path: Option<PathBuf>,
+    pub mountpoints: Vec<PathBuf>,
+    pub serial: Option<String>,
+    pub vendor: Option<String>,
+    pub model: Option<String>,
+    pub fs_type: Option<String>,
+    pub removable: Option<bool>,
+}
+
 /// Result of a single flash attempt.
 #[derive(Debug, Clone)]
 pub struct FlashOutcome {
@@ -177,6 +190,31 @@ pub enum FlashError {
     UdisksctlOutput { device: String },
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
+}
+
+/// List the currently connected storage devices that match the flash query.
+pub fn discover_devices(config: &FlashConfig) -> Result<Vec<FlashDiscovery>, FlashError> {
+    #[cfg(target_os = "linux")]
+    {
+        let devices = probe_linux(config.device_query.as_deref())?;
+        return Ok(devices.into_iter().map(FlashDiscovery::from).collect());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let devices = probe_macos(config.device_query.as_deref())?;
+        return Ok(devices.into_iter().map(FlashDiscovery::from).collect());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let devices = probe_windows(config.device_query.as_deref())?;
+        return Ok(devices.into_iter().map(FlashDiscovery::from).collect());
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        Err(FlashError::UnsupportedPlatform(
+            "device discovery only supported on Linux, macOS, and Windows".into(),
+        ))
+    }
 }
 
 /// Create flash targets from a keyboard profile and side selection.
@@ -1167,6 +1205,22 @@ impl From<&MacDisk> for QueryMetadata {
     }
 }
 
+#[cfg(target_os = "macos")]
+impl From<MacDisk> for FlashDiscovery {
+    fn from(device: MacDisk) -> Self {
+        FlashDiscovery {
+            name: device.name,
+            dev_path: Some(device.dev_path),
+            mountpoints: device.mountpoints,
+            serial: device.serial,
+            vendor: device.vendor,
+            model: device.model,
+            fs_type: device.fs_type,
+            removable: device.removable,
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn wait_for_device_windows(
     config: &FlashConfig,
@@ -1357,6 +1411,22 @@ impl From<&WinVolume> for QueryMetadata {
     }
 }
 
+#[cfg(target_os = "windows")]
+impl From<WinVolume> for FlashDiscovery {
+    fn from(device: WinVolume) -> Self {
+        FlashDiscovery {
+            name: device.name,
+            dev_path: Some(device.dev_path),
+            mountpoints: device.mountpoints,
+            serial: device.serial,
+            vendor: device.vendor,
+            model: device.model,
+            fs_type: device.fs_type,
+            removable: device.removable,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Query {
     clauses: Vec<QueryClause>,
@@ -1487,6 +1557,22 @@ impl From<&LsblkDevice> for QueryMetadata {
             vendor: device.vendor.clone(),
             model: device.model.clone(),
             fs_type: device.fs_type.clone(),
+            removable: device.removable,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl From<LsblkDevice> for FlashDiscovery {
+    fn from(device: LsblkDevice) -> Self {
+        FlashDiscovery {
+            name: device.name,
+            dev_path: Some(device.dev_path),
+            mountpoints: device.mountpoints,
+            serial: device.serial,
+            vendor: device.vendor,
+            model: device.model,
+            fs_type: device.fs_type,
             removable: device.removable,
         }
     }
