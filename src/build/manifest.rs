@@ -1,7 +1,7 @@
 //! Manifest and profile definitions for the firmware builder pipeline.
 
 use crate::{
-    profiles::{KeyboardProfileDoc, ProfileError},
+    profiles::{EmbeddedFirmwareProfiles, KeyboardProfileDoc, ProfileError},
     tasks::MetadataMap,
 };
 use serde::Deserialize;
@@ -36,6 +36,56 @@ impl FirmwareManifest {
         })?;
         let raw: RawFirmwareManifest = toml::from_str(&contents).map_err(ManifestError::Parse)?;
         Self::from_raw(raw, path_ref.parent())
+    }
+
+    /// Load a firmware manifest by name, checking filesystem first, then embedded profiles.
+    ///
+    /// This allows external files to override embedded manifests.
+    /// The name should be just the manifest name without path or extension (e.g., "glove80").
+    ///
+    /// Search order:
+    /// 1. `firmware_profiles/{name}.toml` in filesystem
+    /// 2. Embedded manifest `{name}.toml`
+    pub fn load(name: &str) -> Result<Self, ManifestError> {
+        let filename = format!("{}.toml", name);
+        let fs_path = PathBuf::from("firmware_profiles").join(&filename);
+
+        // Try filesystem first (allows override)
+        if fs_path.exists() {
+            return Self::from_file(&fs_path);
+        }
+
+        // Fall back to embedded manifest
+        let embedded = EmbeddedFirmwareProfiles::get(&filename)
+            .ok_or_else(|| ManifestError::NotFound(name.to_string()))?;
+        let contents = std::str::from_utf8(embedded.data.as_ref())
+            .map_err(|_| ManifestError::InvalidUtf8)?;
+        Self::from_toml_str(contents)
+    }
+
+    /// List all available firmware manifests (both embedded and filesystem).
+    pub fn list_available() -> Vec<String> {
+        let mut manifests = std::collections::BTreeSet::new();
+
+        // Add embedded manifests
+        for file in EmbeddedFirmwareProfiles::iter() {
+            if let Some(name) = file.as_ref().strip_suffix(".toml") {
+                manifests.insert(name.to_string());
+            }
+        }
+
+        // Add filesystem manifests (may override embedded)
+        if let Ok(entries) = fs::read_dir("firmware_profiles") {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                    if entry.path().extension().and_then(|s| s.to_str()) == Some("toml") {
+                        manifests.insert(name.to_string());
+                    }
+                }
+            }
+        }
+
+        manifests.into_iter().collect()
     }
 
     fn from_raw(
@@ -330,6 +380,30 @@ fn load_keyboard_profile(
         );
         return Ok(None);
     }
+
+    // Check if this is a profile name (no path separators) - use embedded/filesystem load
+    if !trimmed.contains('/') && !trimmed.contains('\\') && !trimmed.ends_with(".toml") {
+        match KeyboardProfileDoc::load(trimmed) {
+            Ok(document) => {
+                return Ok(Some(KeyboardProfileDocument {
+                    path: PathBuf::from(format!("keyboard_profiles/{}.toml", trimmed)),
+                    document,
+                }));
+            }
+            Err(ProfileError::NotFound(_)) => {
+                // Fall through to path-based loading
+            }
+            Err(err) => {
+                return Err(ManifestError::KeyboardProfileLoad {
+                    keyboard: keyboard.to_string(),
+                    path: PathBuf::from(trimmed),
+                    source: err,
+                });
+            }
+        }
+    }
+
+    // Path-based loading (original behavior)
     let candidates = keyboard_profile_candidates(trimmed, manifest_root);
     let mut last_read_error: Option<(PathBuf, ProfileError)> = None;
     for candidate in candidates {
@@ -506,4 +580,8 @@ pub enum ManifestError {
         #[source]
         source: ProfileError,
     },
+    #[error("firmware manifest `{0}` not found in embedded profiles or filesystem")]
+    NotFound(String),
+    #[error("embedded resource is not valid UTF-8")]
+    InvalidUtf8,
 }

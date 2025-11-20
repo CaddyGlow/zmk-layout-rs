@@ -19,8 +19,8 @@
 
 ### 1) Root-Level Helpers
 - Add `layout:meta(key, value)` and `layout:get_meta(key)` to edit/read global meta nodes.
-- Add `layout:remove_layer(name)`; update effects on layer defines if applicable.
-- Add `layout:move_layer(name, index|before|after)` (1-based).
+- Add `layout:remove_layer(name)`; cascade delete dependents that reference the layer (combos/conditionals/macros/behaviors/inputs) and return deterministic info about what was removed.
+- Add `layout:move_layer(name, index|before|after)` (1-based); reindex all layer references in dependents to keep them consistent.
 
 ### 2) Builders: Complete Apply Paths
 - **LayerBuilder**: support delete via root helpers; ensure metadata writes stay.
@@ -35,6 +35,8 @@
 - String-based: `layout:to_dts_string()`, `layout:to_json_string(template_path)`; `layout:parse_dts(source)`, `layout:parse_json(json, template_path)`.
 - File-based: `layout:load_dtsi(path)`, `layout:save_dtsi(path)`, `layout:load_json(json_path, template_path)`, `layout:save_json(path[, template_path?])`.
 - Template-aware rendering: `layout:render_template(json, template_path)` returning DTS string.
+- Template resolution: default relative to CWD; allow explicit template path override. Future-proof with optional search-path list.
+- Canonicalization: emit deterministic ordering for JSON/DTS (properties, metadata, nodes) to make save→load→save idempotent.
 
 ### 4) Query Expansion
 - **LayerInfo**: include metadata table (read-only), size, index.
@@ -45,13 +47,14 @@
 
 ### 5) Validation & Errors
 - Keep Lua 1-based indices; convert centrally.
-- Deterministic error strings for: invalid type, out-of-range, missing apply, double-apply, missing template, parse failures.
+- Deterministic error codes + messages; Lua APIs return `nil, "ERR_CODE: message"` for runtime errors; throw only on programmer misuse (e.g., double-apply).
+- Error codes: `ERR_INVALID_TYPE`, `ERR_OUT_OF_RANGE`, `ERR_NOT_APPLIED`, `ERR_ALREADY_APPLIED`, `ERR_MISSING_TEMPLATE`, `ERR_PARSE`, `ERR_DEPENDENT_REMOVED`.
 - Read-only snapshots via metatable proxies.
 
 ### 6) Tests
-- Unit tests covering: index conversion, staged→applied, delete, move_layer, metadata, read-only snapshots, serialization helpers.
-- Integration Lua tests: round-trip DTS/JSON with mutations; create/edit/delete combos/behaviors/macros/inputs/conditionals; move layers; validate metadata; template render path.
-- Error-path tests: invalid indices/types, double-apply, missing bindings/keys, missing template.
+- Unit tests covering: index conversion, staged→applied, delete (with dependent cascades), move_layer (with reindexed references), metadata, read-only snapshots, serialization helpers.
+- Integration Lua tests: round-trip DTS/JSON with mutations; create/edit/delete combos/behaviors/macros/inputs/conditionals; move layers; validate metadata; template render path; save→load→save idempotence with canonicalization.
+- Error-path tests: invalid indices/types, double-apply, missing bindings/keys, missing template, dependent removals.
 
 ## File Targets
 - `src/lua_api/api.rs`: new root helpers (meta, delete, move), serialization functions; register new query/list functions.

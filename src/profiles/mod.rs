@@ -53,6 +53,56 @@ impl KeyboardProfileDoc {
         })?;
         Self::from_toml_str(&contents)
     }
+
+    /// Load a keyboard profile by name, checking filesystem first, then embedded profiles.
+    ///
+    /// This allows external files to override embedded profiles.
+    /// The name should be just the profile name without path or extension (e.g., "glove80").
+    ///
+    /// Search order:
+    /// 1. `keyboard_profiles/{name}.toml` in filesystem
+    /// 2. Embedded profile `{name}.toml`
+    pub fn load(name: &str) -> Result<Self, ProfileError> {
+        let filename = format!("{}.toml", name);
+        let fs_path = PathBuf::from("keyboard_profiles").join(&filename);
+
+        // Try filesystem first (allows override)
+        if fs_path.exists() {
+            return Self::from_file(&fs_path);
+        }
+
+        // Fall back to embedded profile
+        let embedded = EmbeddedKeyboardProfiles::get(&filename)
+            .ok_or_else(|| ProfileError::NotFound(name.to_string()))?;
+        let contents = std::str::from_utf8(embedded.data.as_ref())
+            .map_err(|_| ProfileError::Validation("embedded profile is not valid UTF-8".into()))?;
+        Self::from_toml_str(contents)
+    }
+
+    /// List all available keyboard profiles (both embedded and filesystem).
+    pub fn list_available() -> Vec<String> {
+        let mut profiles = std::collections::BTreeSet::new();
+
+        // Add embedded profiles
+        for file in EmbeddedKeyboardProfiles::iter() {
+            if let Some(name) = file.as_ref().strip_suffix(".toml") {
+                profiles.insert(name.to_string());
+            }
+        }
+
+        // Add filesystem profiles (may override embedded)
+        if let Ok(entries) = fs::read_dir("keyboard_profiles") {
+            for entry in entries.flatten() {
+                if let Some(name) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                    if entry.path().extension().and_then(|s| s.to_str()) == Some("toml") {
+                        profiles.insert(name.to_string());
+                    }
+                }
+            }
+        }
+
+        profiles.into_iter().collect()
+    }
 }
 
 /// Document metadata identifying the keyboard.
@@ -245,6 +295,8 @@ pub enum ProfileError {
     MissingField(String),
     #[error("keyboard profile validation failed: {0}")]
     Validation(String),
+    #[error("keyboard profile `{0}` not found in embedded profiles or filesystem")]
+    NotFound(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -906,5 +958,21 @@ template = "layout.dtsi"
             doc.layout.keymap.system_behaviors_dts().is_some(),
             "system behaviors should be exposed"
         );
+    }
+
+    #[test]
+    fn loads_embedded_profile() {
+        // This test will work even if keyboard_profiles/ directory is deleted
+        let doc = KeyboardProfileDoc::load("glove80").expect("embedded profile");
+        assert_eq!(doc.keyboard, "glove80");
+        assert_eq!(doc.metadata.name, "MoErgo Glove80");
+        assert_eq!(doc.hardware.key_count, 80);
+    }
+
+    #[test]
+    fn lists_available_profiles() {
+        let profiles = KeyboardProfileDoc::list_available();
+        assert!(!profiles.is_empty(), "should have at least embedded profiles");
+        assert!(profiles.contains(&"glove80".to_string()), "should include glove80");
     }
 }

@@ -37,7 +37,6 @@
           "rust-src"
           "rustc"
           "rustfmt"
-          "cargo-cross"
         ];
         rustPlatform = pkgs.makeRustPlatform {
           cargo = fenixToolchain;
@@ -109,6 +108,7 @@
           pkgs.cargo-deny
           pkgs.cargo-audit
           pkgs.cargo-ndk
+          pkgs.cargo-cross
           pkgs.pkg-config
           pkgs.protobuf
           pkgs.openssl
