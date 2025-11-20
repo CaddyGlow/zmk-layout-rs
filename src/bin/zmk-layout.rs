@@ -5,6 +5,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 use thiserror::Error;
 use zmk_layout_rs::{
@@ -13,6 +14,10 @@ use zmk_layout_rs::{
         CliDockerBackend, CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
     },
     dts::DtsDocument,
+    flash::{
+        FlashConfig, FlashError, FlashSideSelection, build_flash_targets,
+        default_sides, flash_target, resolve_flash_source,
+    },
     profiles::KeyboardProfileDoc,
     providers::KeymapDocument,
     tasks::{
@@ -130,6 +135,7 @@ struct ScriptArgs {
 #[derive(Subcommand)]
 enum FirmwareCommand {
     Build(FirmwareBuildArgs),
+    Flash(FirmwareFlashArgs),
 }
 
 #[derive(Subcommand)]
@@ -219,6 +225,63 @@ struct FirmwareBuildArgs {
     dry_run: bool,
 }
 
+#[derive(Args, Clone)]
+struct FirmwareFlashArgs {
+    #[arg(long, value_name = "FILE", help = "Firmware manifest (TOML)")]
+    manifest: PathBuf,
+    #[arg(
+        long,
+        value_name = "KEYBOARD",
+        help = "Keyboard id declared in the manifest"
+    )]
+    keyboard: String,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "SIDE",
+        help = "Side to flash (default inferred from keyboard profile)"
+    )]
+    side: Option<FlashSideFlag>,
+    #[arg(long, value_name = "FILE", help = "UF2 file to flash on every side")]
+    firmware: Option<PathBuf>,
+    #[arg(long, value_name = "FILE", help = "UF2 file to flash on the left half")]
+    left: Option<PathBuf>,
+    #[arg(long, value_name = "FILE", help = "UF2 file to flash on the right half")]
+    right: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Build info JSON produced by `zmk-layout firmware build`"
+    )]
+    build_info: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Directory containing UF2 artifacts (auto-picks left/right hints)"
+    )]
+    artifacts: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "PATH",
+        help = "Mounted bootloader volume to write the UF2 into"
+    )]
+    device: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        help = "Override the hardware.flash mount_timeout (seconds)"
+    )]
+    mount_timeout: Option<u64>,
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        help = "Override the hardware.flash copy_timeout (seconds)"
+    )]
+    copy_timeout: Option<u64>,
+    #[arg(long, help = "Skip sync after copy, even if requested by the profile")]
+    no_sync: bool,
+}
+
 #[derive(Copy, Clone, ValueEnum)]
 enum ConflictFlag {
     Prompt,
@@ -234,6 +297,23 @@ impl From<ConflictFlag> for ConflictPolicy {
             ConflictFlag::Override => ConflictPolicy::Override,
             ConflictFlag::Skip => ConflictPolicy::Skip,
             ConflictFlag::Script => ConflictPolicy::Script,
+        }
+    }
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+enum FlashSideFlag {
+    Left,
+    Right,
+    Both,
+}
+
+impl From<FlashSideFlag> for FlashSideSelection {
+    fn from(flag: FlashSideFlag) -> Self {
+        match flag {
+            FlashSideFlag::Left => FlashSideSelection::Left,
+            FlashSideFlag::Right => FlashSideSelection::Right,
+            FlashSideFlag::Both => FlashSideSelection::Both,
         }
     }
 }
@@ -350,6 +430,7 @@ fn run_script(args: &ScriptArgs) -> Result<i32, CliError> {
 fn run_firmware(command: FirmwareCommand) -> Result<i32, CliError> {
     match command {
         FirmwareCommand::Build(args) => run_firmware_build(&args),
+        FirmwareCommand::Flash(args) => run_firmware_flash(&args),
     }
 }
 
@@ -357,6 +438,68 @@ fn run_profiles(command: ProfilesCommand) -> Result<i32, CliError> {
     match command {
         ProfilesCommand::Check(args) => run_profile_check(&args),
     }
+}
+
+fn run_firmware_flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {
+    let manifest = FirmwareManifest::from_file(&args.manifest)?;
+    let keyboard = manifest
+        .keyboards
+        .get(&args.keyboard)
+        .ok_or_else(|| CliError::UnknownKeyboard(args.keyboard.clone()))?;
+    let profile = keyboard
+        .profile
+        .as_ref()
+        .ok_or_else(|| CliError::MissingKeyboardProfile(args.keyboard.clone()))?;
+    let side_flag = args.side.map(Into::into);
+    let sides = default_sides(Some(&profile.document), side_flag);
+    let mut config = profile
+        .document
+        .hardware
+        .flash
+        .first()
+        .map(FlashConfig::from)
+        .unwrap_or_default();
+    if let Some(seconds) = args.mount_timeout {
+        config.mount_timeout = Duration::from_secs(seconds);
+    }
+    if let Some(seconds) = args.copy_timeout {
+        config.copy_timeout = Duration::from_secs(seconds);
+    }
+    if args.no_sync {
+        config.sync_after_copy = false;
+    }
+
+    let source = resolve_flash_source(
+        args.firmware.clone(),
+        args.left.clone(),
+        args.right.clone(),
+        args.build_info.as_deref(),
+        args.artifacts.as_deref(),
+        &sides,
+    )?;
+    let targets = build_flash_targets(&profile.document, &sides);
+    if targets.len() > 1 {
+        eprintln!(
+            "detected split keyboard; flashing {} sides sequentially",
+            targets.len()
+        );
+    }
+    for target in &targets {
+        if targets.len() > 1 {
+            eprintln!("-- prepare the {} half --", target.side);
+        }
+        let outcome = flash_target(&target, &source, args.device.as_deref())?;
+        eprintln!(
+            "flashed {} using {} ({} bytes)",
+            outcome.side,
+            outcome.mountpoint.display(),
+            outcome.bytes_written
+        );
+        for warning in outcome.warnings {
+            eprintln!("note: {warning}");
+        }
+    }
+    Ok(0)
 }
 
 fn run_profile_check(args: &ProfileCheckArgs) -> Result<i32, CliError> {
@@ -800,4 +943,10 @@ enum CliError {
     ScriptExecution(#[from] zmk_layout_rs::tasks::ScriptExecutionError),
     #[error("profile check error: {0}")]
     ProfileCheck(String),
+    #[error("keyboard `{0}` not found in manifest")]
+    UnknownKeyboard(String),
+    #[error("keyboard `{0}` has no metadata.profile reference in the manifest")]
+    MissingKeyboardProfile(String),
+    #[error("flashing failed: {0}")]
+    Flash(#[from] FlashError),
 }
