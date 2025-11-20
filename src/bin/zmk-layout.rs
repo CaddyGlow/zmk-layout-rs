@@ -1,6 +1,11 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use similar::{ChangeTag, TextDiff};
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use thiserror::Error;
 use zmk_layout_rs::{
     build::{
@@ -8,6 +13,7 @@ use zmk_layout_rs::{
         CliDockerBackend, CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
     },
     dts::DtsDocument,
+    profiles::KeyboardProfileDoc,
     providers::KeymapDocument,
     tasks::{
         ConflictPolicy, ExecutionMode, TaskAction, TaskConfigError, TaskEngineOptions,
@@ -30,6 +36,7 @@ fn run_cli() -> Result<(), CliError> {
         Command::Diff(args) => run_diff(&args)?,
         Command::Script(args) => run_script(&args)?,
         Command::Firmware(cmd) => run_firmware(cmd)?,
+        Command::Profiles(cmd) => run_profiles(cmd)?,
     };
     std::process::exit(code);
 }
@@ -49,6 +56,8 @@ enum Command {
     Script(ScriptArgs),
     #[command(subcommand)]
     Firmware(FirmwareCommand),
+    #[command(subcommand)]
+    Profiles(ProfilesCommand),
 }
 
 #[derive(Args, Clone)]
@@ -121,6 +130,30 @@ struct ScriptArgs {
 #[derive(Subcommand)]
 enum FirmwareCommand {
     Build(FirmwareBuildArgs),
+}
+
+#[derive(Subcommand)]
+enum ProfilesCommand {
+    Check(ProfileCheckArgs),
+}
+
+#[derive(Args, Clone)]
+struct ProfileCheckArgs {
+    #[arg(
+        value_name = "FILE",
+        help = "Keyboard profile TOML file",
+        num_args = 0..
+    )]
+    paths: Vec<PathBuf>,
+    #[arg(long, help = "Validate every profile under --profiles-dir")]
+    all: bool,
+    #[arg(
+        long = "profiles-dir",
+        value_name = "DIR",
+        default_value = "keyboard_profiles",
+        help = "Directory scanned when --all is provided"
+    )]
+    profiles_dir: PathBuf,
 }
 
 #[derive(Args, Clone)]
@@ -317,6 +350,73 @@ fn run_script(args: &ScriptArgs) -> Result<i32, CliError> {
 fn run_firmware(command: FirmwareCommand) -> Result<i32, CliError> {
     match command {
         FirmwareCommand::Build(args) => run_firmware_build(&args),
+    }
+}
+
+fn run_profiles(command: ProfilesCommand) -> Result<i32, CliError> {
+    match command {
+        ProfilesCommand::Check(args) => run_profile_check(&args),
+    }
+}
+
+fn run_profile_check(args: &ProfileCheckArgs) -> Result<i32, CliError> {
+    let mut requested = args.paths.clone();
+    if args.all {
+        let discovered = discover_profile_paths(&args.profiles_dir)?;
+        requested.extend(discovered);
+    }
+    if requested.is_empty() {
+        return Err(CliError::ProfileCheck(
+            "provide at least one profile path or use --all".into(),
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    let mut failures = 0;
+    for path in requested {
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        match KeyboardProfileDoc::from_file(&path) {
+            Ok(profile) => {
+                println!(
+                    "[OK ] {} :: {} (keyboard `{}`)",
+                    path.display(),
+                    profile.metadata.name,
+                    profile.keyboard
+                );
+            }
+            Err(err) => {
+                failures += 1;
+                eprintln!("[ERR] {} :: {err}", path.display());
+            }
+        }
+    }
+    if failures == 0 { Ok(0) } else { Ok(2) }
+}
+
+fn discover_profile_paths(dir: &Path) -> Result<Vec<PathBuf>, CliError> {
+    let read_dir = fs::read_dir(dir).map_err(|err| {
+        CliError::ProfileCheck(format!("failed to read {}: {}", dir.display(), err))
+    })?;
+    let mut profiles = Vec::new();
+    for entry in read_dir {
+        let entry = entry.map_err(|err| {
+            CliError::ProfileCheck(format!("failed to enumerate {}: {}", dir.display(), err))
+        })?;
+        let path = entry.path();
+        if matches!(path.extension().and_then(|ext| ext.to_str()), Some(ext) if ext.eq_ignore_ascii_case("toml"))
+        {
+            profiles.push(path);
+        }
+    }
+    if profiles.is_empty() {
+        Err(CliError::ProfileCheck(format!(
+            "no *.toml profiles found under {}",
+            dir.display()
+        )))
+    } else {
+        profiles.sort();
+        Ok(profiles)
     }
 }
 
@@ -698,4 +798,6 @@ enum CliError {
     InvalidEnv(String),
     #[error("script execution error: {0}")]
     ScriptExecution(#[from] zmk_layout_rs::tasks::ScriptExecutionError),
+    #[error("profile check error: {0}")]
+    ProfileCheck(String),
 }

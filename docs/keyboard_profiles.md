@@ -207,3 +207,16 @@ keys = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 This satisfies the required sections while staying concise. Tooling can enrich
 it with defaults (flash method, board identifier, etc.), but every keyboard uses
 the same TOML vocabulary so manifests and CLIs can resolve them consistently.
+
+## Validation
+
+Use the CLI to catch schema mistakes before committing:
+
+```bash
+zmk-layout profiles check keyboard_profiles/glove80.toml \
+    tests/fixtures/profiles/bad_profile.toml
+zmk-layout profiles check --all --profiles-dir tests/fixtures/profiles
+```
+
+Each file prints `[OK ]` on success or `[ERR]` with a descriptive validation
+error if required sections are missing or malformed.

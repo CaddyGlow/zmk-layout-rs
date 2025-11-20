@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 
 use mlua::{Result as LuaResult, UserData, UserDataMethods, Value as LuaValue};
 
-use super::util::{create_read_only_table, script_error, SharedLayout};
+use super::util::{SharedLayout, create_read_only_table, script_error};
 
 #[derive(Clone)]
 pub struct MacroObject {

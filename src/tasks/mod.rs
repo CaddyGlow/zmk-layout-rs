@@ -22,8 +22,8 @@ use thiserror::Error;
 use toml::{Value as TomlValue, map::Map as TomlMap};
 
 use crate::{
-    lua_api::api::install_layout_api,
     layout_engine::{LayerSelector, LayoutEngine, LayoutEngineError},
+    lua_api::api::install_layout_api,
     providers::KeymapDocument,
 };
 
@@ -872,8 +872,8 @@ impl<'a> ScriptEnvironment<'a> {
         let source = self
             .read_script(script_path)
             .map_err(|err| format!("failed to read conflict script `{}`: {}", script_path, err))?;
-        let lua =
-            create_lua_with_limits().map_err(|err| format!("failed to init conflict script: {err}"))?;
+        let lua = create_lua_with_limits()
+            .map_err(|err| format!("failed to init conflict script: {err}"))?;
         lua.load(&source)
             .set_name("conflict")
             .exec()
@@ -930,7 +930,7 @@ fn parse_conflict_resolution(value: LuaValue) -> Result<ConflictResolution, Stri
             return Err(format!(
                 "conflict script must return a table, got {}",
                 other.type_name()
-            ))
+            ));
         }
     };
     let action: String = table
@@ -1099,18 +1099,20 @@ fn register_script_api(
     let globals = lua.globals();
 
     let doc_binding = Rc::clone(&layout);
-    let set_binding = lua.create_function(move |_, (layer, index, binding): (String, LuaInteger, String)| {
-        if index < 0 {
-            return Err(script_error("binding index must be non-negative"));
-        }
-        let mut engine = doc_binding.borrow_mut();
-        let normalized = engine
-            .normalize_binding(&binding)
-            .map_err(|err| script_error(err.to_string()))?;
-        engine
-            .set_binding(&layer, index as usize, &normalized)
-            .map_err(|err| script_error(err.to_string()))
-    })?;
+    let set_binding = lua.create_function(
+        move |_, (layer, index, binding): (String, LuaInteger, String)| {
+            if index < 0 {
+                return Err(script_error("binding index must be non-negative"));
+            }
+            let mut engine = doc_binding.borrow_mut();
+            let normalized = engine
+                .normalize_binding(&binding)
+                .map_err(|err| script_error(err.to_string()))?;
+            engine
+                .set_binding(&layer, index as usize, &normalized)
+                .map_err(|err| script_error(err.to_string()))
+        },
+    )?;
     globals.set("set_binding", set_binding)?;
 
     let doc_layer = Rc::clone(&layout);
@@ -1189,16 +1191,15 @@ fn register_script_api(
     globals.set("upsert_combo_full", upsert_combo_full)?;
 
     let doc_layer_order = Rc::clone(&layout);
-    let move_layer =
-        lua.create_function(move |_, (layer, index): (String, LuaInteger)| {
-            if index < 0 {
-                return Err(script_error("layer index must be non-negative"));
-            }
-            doc_layer_order
-                .borrow_mut()
-                .reorder_layer(&layer, index as usize)
-                .map_err(|err| script_error(err.to_string()))
-        })?;
+    let move_layer = lua.create_function(move |_, (layer, index): (String, LuaInteger)| {
+        if index < 0 {
+            return Err(script_error("layer index must be non-negative"));
+        }
+        doc_layer_order
+            .borrow_mut()
+            .reorder_layer(&layer, index as usize)
+            .map_err(|err| script_error(err.to_string()))
+    })?;
     globals.set("move_layer", move_layer)?;
 
     let log_sink = Rc::clone(&logs);
@@ -1333,11 +1334,7 @@ fn register_script_api(
     Ok(())
 }
 
-fn set_script_globals(
-    lua: &Lua,
-    args: &MetadataMap,
-    globals: ScriptGlobals<'_>,
-) -> LuaResult<()> {
+fn set_script_globals(lua: &Lua, args: &MetadataMap, globals: ScriptGlobals<'_>) -> LuaResult<()> {
     let table = metadata_to_lua_table(lua, args)?;
     let global_table = lua.globals();
     global_table.set("ARGS", table)?;
@@ -1398,7 +1395,7 @@ fn lua_table_to_metadata(table: LuaTable) -> LuaResult<MetadataMap> {
                 return Err(script_error(format!(
                     "metadata keys must be strings, found {}",
                     other.type_name()
-                )))
+                )));
             }
         };
         result.insert(key, lua_value_to_toml(value)?);
@@ -1429,7 +1426,7 @@ fn lua_value_to_toml(value: LuaValue) -> LuaResult<TomlValue> {
                             return Err(script_error(format!(
                                 "metadata keys must be strings, found {}",
                                 other.type_name()
-                            )))
+                            )));
                         }
                     };
                     entries.insert(key, lua_value_to_toml(entry)?);
@@ -1541,7 +1538,6 @@ fn value_to_optional_u32(value: LuaValue) -> LuaResult<Option<u32>> {
 fn script_error(message: impl Into<String>) -> LuaError {
     LuaError::RuntimeError(message.into())
 }
-
 
 fn resolve_script_path(root: Option<&Path>, path: &str) -> PathBuf {
     let candidate = Path::new(path);

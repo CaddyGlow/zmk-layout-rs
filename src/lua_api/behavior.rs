@@ -6,9 +6,7 @@ use toml::Value as TomlValue;
 
 use crate::providers::BehaviorDefinition;
 
-use super::util::{
-    create_read_only_table, lua_table_to_strings, script_error, SharedLayout,
-};
+use super::util::{SharedLayout, create_read_only_table, lua_table_to_strings, script_error};
 
 #[derive(Clone)]
 pub struct BehaviorObject {
@@ -139,7 +137,7 @@ fn lua_value_to_toml(value: LuaValue<'_>) -> LuaResult<TomlValue> {
                             return Err(script_error(format!(
                                 "table keys must be strings, got {}",
                                 other.type_name()
-                            )))
+                            )));
                         }
                     };
                     map.insert(key, lua_value_to_toml(value)?);

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mlua::{Lua, Result as LuaResult, Table as LuaTable, Value as LuaValue, Error as LuaError};
+use mlua::{Error as LuaError, Lua, Result as LuaResult, Table as LuaTable, Value as LuaValue};
 
 use crate::layout_engine::LayoutEngine;
 
@@ -93,7 +93,9 @@ pub fn create_read_only_table<'lua>(
     lua: &'lua Lua,
     table: LuaTable<'lua>,
 ) -> LuaResult<LuaTable<'lua>> {
+    let proxy = lua.create_table()?;
     let meta = lua.create_table()?;
+    meta.set("__index", table)?;
     meta.set(
         "__newindex",
         lua.create_function(|_, _: (LuaValue, LuaValue)| {
@@ -102,6 +104,6 @@ pub fn create_read_only_table<'lua>(
             ))
         })?,
     )?;
-    table.set_metatable(Some(meta));
-    Ok(table)
+    proxy.set_metatable(Some(meta));
+    Ok(proxy)
 }

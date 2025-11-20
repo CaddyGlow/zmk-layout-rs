@@ -1,10 +1,10 @@
-use std::cell::{Cell, RefCell};
 use mlua::{Result as LuaResult, Table as LuaTable, UserData, UserDataMethods, Value as LuaValue};
+use std::cell::{Cell, RefCell};
 
 use crate::layout_engine::LayerSelector;
 
 use super::util::{
-    lua_table_to_strings, lua_table_to_u32, lua_value_to_optional_u32, script_error, SharedLayout,
+    SharedLayout, lua_table_to_strings, lua_table_to_u32, lua_value_to_optional_u32, script_error,
 };
 
 #[derive(Clone)]
@@ -67,15 +67,19 @@ impl ComboObject {
         let normalized = engine
             .normalize_binding(&binding_value)
             .map_err(|err| script_error(err.to_string()))?;
-        let selectors: Vec<LayerSelector> = layers
-            .into_iter()
-            .map(LayerSelector::Name)
-            .collect();
+        let selectors: Vec<LayerSelector> = layers.into_iter().map(LayerSelector::Name).collect();
         let layer_indexes = engine
             .resolve_layer_selectors(&selectors)
             .map_err(|err| script_error(err.to_string()))?;
         engine
-            .upsert_combo(&self.name, &normalized, &keys, timeout, &layer_indexes, &conditions)
+            .upsert_combo(
+                &self.name,
+                &normalized,
+                &keys,
+                timeout,
+                &layer_indexes,
+                &conditions,
+            )
             .map_err(|err| script_error(err.to_string()))?;
         self.applied.set(true);
         Ok(())

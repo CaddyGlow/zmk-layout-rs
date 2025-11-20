@@ -10,8 +10,8 @@ use super::{
     layer::LayerBuilder,
     macro_builder::MacroObject,
     query::{
-        list_behavior_definitions, list_combo_definitions, BehaviorInfoObject, ComboInfoObject,
-        LayerInfoObject,
+        BehaviorInfoObject, ComboInfoObject, LayerInfoObject, list_behavior_definitions,
+        list_combo_definitions,
     },
     util::{SharedLayout, SharedLogs},
 };
@@ -100,11 +100,7 @@ impl UserData for LayoutApi {
     }
 }
 
-pub fn install_layout_api(
-    lua: &Lua,
-    layout: SharedLayout,
-    logs: SharedLogs,
-) -> LuaResult<()> {
+pub fn install_layout_api(lua: &Lua, layout: SharedLayout, logs: SharedLogs) -> LuaResult<()> {
     let api = LayoutApi::new(layout, logs);
     lua.globals().set("layout", api)?;
     Ok(())

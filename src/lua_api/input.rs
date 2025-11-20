@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 
 use mlua::{Result as LuaResult, UserData, UserDataMethods};
 
-use super::util::{script_error, SharedLayout};
+use super::util::{SharedLayout, script_error};
 
 #[derive(Clone)]
 pub struct InputObject {
@@ -66,9 +66,13 @@ impl UserData for InputObject {
             this.resolution.borrow_mut().replace(value);
             Ok(this.clone())
         });
-        methods.add_method("get_type", |_, this, ()| Ok(this.input_type.borrow().clone()));
+        methods.add_method("get_type", |_, this, ()| {
+            Ok(this.input_type.borrow().clone())
+        });
         methods.add_method("get_cw_binding", |_, this, ()| Ok(this.cw.borrow().clone()));
-        methods.add_method("get_ccw_binding", |_, this, ()| Ok(this.ccw.borrow().clone()));
+        methods.add_method("get_ccw_binding", |_, this, ()| {
+            Ok(this.ccw.borrow().clone())
+        });
         methods.add_method("name", |_, this, ()| Ok(this.name.clone()));
         methods.add_method("apply", |_, this, ()| this.apply());
     }

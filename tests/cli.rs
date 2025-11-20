@@ -150,3 +150,39 @@ fn cli_firmware_build_prints_request() {
             .and(predicates::str::contains("targets  : left, right")),
     );
 }
+
+#[test]
+fn cli_profiles_check_validates_profiles() {
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("profiles")
+        .arg("check")
+        .arg("keyboard_profiles/glove80.toml");
+    cmd.assert()
+        .success()
+        .stdout(predicates::str::contains("[OK ]"));
+}
+
+#[test]
+fn cli_profiles_check_reports_errors() {
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("profiles")
+        .arg("check")
+        .arg(fixture("profiles/bad_profile.toml"));
+    cmd.assert().failure().stderr(
+        predicates::str::contains("[ERR]").and(predicates::str::contains("keyboard profile")),
+    );
+}
+
+#[test]
+fn cli_profiles_check_all_scans_directory() {
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("profiles")
+        .arg("check")
+        .arg("--all")
+        .arg("--profiles-dir")
+        .arg(fixture("profiles"));
+    cmd.assert()
+        .failure()
+        .stdout(predicates::str::contains("profiles/good_profile.toml"))
+        .stderr(predicates::str::contains("profiles/bad_profile.toml"));
+}

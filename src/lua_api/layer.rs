@@ -9,9 +9,7 @@ use super::{
     behavior::BehaviorObject,
     combo::ComboObject,
     macro_builder::MacroObject,
-    util::{
-        create_read_only_table, require_positive_index, script_error, SharedLayout,
-    },
+    util::{SharedLayout, create_read_only_table, require_positive_index, script_error},
 };
 
 #[derive(Clone)]
@@ -60,7 +58,9 @@ impl LayerBuilder {
 
     fn apply_internal(&self) -> LuaResult<()> {
         if self.applied.get() {
-            return Err(script_error("layer already applied; re-acquire builder to edit"));
+            return Err(script_error(
+                "layer already applied; re-acquire builder to edit",
+            ));
         }
 
         let mut engine = self.layout.borrow_mut();
@@ -121,16 +121,15 @@ impl LayerBuilder {
 
 impl UserData for LayerBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method(
-            "bind",
-            |lua, this, (index, binding): (i64, LuaValue)| {
-                let normalized_index = require_positive_index(index, "binding")?;
-                let binding_text = this.coerce_binding(lua, binding)?;
-                this.replace_all.borrow_mut().take(); // switch to partial mode
-                this.staged.borrow_mut().insert(normalized_index, binding_text);
-                Ok(this.clone())
-            },
-        );
+        methods.add_method("bind", |lua, this, (index, binding): (i64, LuaValue)| {
+            let normalized_index = require_positive_index(index, "binding")?;
+            let binding_text = this.coerce_binding(lua, binding)?;
+            this.replace_all.borrow_mut().take(); // switch to partial mode
+            this.staged
+                .borrow_mut()
+                .insert(normalized_index, binding_text);
+            Ok(this.clone())
+        });
 
         methods.add_method("bindings", |lua, this, table: LuaTable| {
             let mut result = Vec::new();
@@ -157,7 +156,7 @@ impl UserData for LayerBuilder {
                     return Err(script_error(format!(
                         "unsupported metadata type {}",
                         other.type_name()
-                    )))
+                    )));
                 }
             };
             this.metadata.borrow_mut().insert(key, rendered);

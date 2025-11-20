@@ -1,0 +1,21 @@
+keyboard = "fixture-good"
+version = 1
+
+[metadata]
+name = "Fixture Good"
+vendor = "TestCo"
+
+[hardware]
+key_count = 1
+is_split = false
+
+[firmware]
+default = "stable"
+[firmware.versions.stable]
+repository = "example/repo"
+branch = "main"
+
+[layout]
+template = "templates/planck.dtsi.j2"
+[[layout.formatting.rows]]
+keys = [0]

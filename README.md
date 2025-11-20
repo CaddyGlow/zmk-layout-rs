@@ -147,6 +147,16 @@ fn hydrate_profile_layout() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+Validate profiles directly from the CLI:
+
+```bash
+zmk-layout profiles check keyboard_profiles/glove80.toml
+zmk-layout profiles check --all
+```
+
+The `--all` flag scans every `*.toml` inside `keyboard_profiles/` (override with
+`--profiles-dir DIR`).
+
 ### Customization Tasks & CLI
 
 The crate now ships with a dedicated task runner so you can replay layout tweaks whenever the base

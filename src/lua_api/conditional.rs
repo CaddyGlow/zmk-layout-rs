@@ -51,9 +51,15 @@ impl UserData for ConditionalObject {
             this.else_layer.borrow_mut().replace(layer);
             Ok(this.clone())
         });
-        methods.add_method("get_condition", |_, this, ()| Ok(this.condition.borrow().clone()));
-        methods.add_method("get_then_layer", |_, this, ()| Ok(this.then_layer.borrow().clone()));
-        methods.add_method("get_else_layer", |_, this, ()| Ok(this.else_layer.borrow().clone()));
+        methods.add_method("get_condition", |_, this, ()| {
+            Ok(this.condition.borrow().clone())
+        });
+        methods.add_method("get_then_layer", |_, this, ()| {
+            Ok(this.then_layer.borrow().clone())
+        });
+        methods.add_method("get_else_layer", |_, this, ()| {
+            Ok(this.else_layer.borrow().clone())
+        });
         methods.add_method("name", |_, this, ()| Ok(this.name.clone()));
         methods.add_method("apply", |_, this, ()| this.apply());
     }

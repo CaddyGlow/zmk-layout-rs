@@ -64,7 +64,9 @@ new unified format without breaking existing tooling.
    the final git commit to close out the migration.
 > Status: Completed – removed the legacy `example_profile/` tree, relocated the
 > Glove80 template under `templates/`, refreshed documentation/README snippets,
-> and noted the migration in the changelog.
+> described the migration in the changelog, and added the `zmk-layout profiles
+> check` command (with `--all`/`--profiles-dir`) so CI/users can validate TOML
+> files directly.
 
 ## Risks & Mitigations
 - **Incomplete profiles**: Add a validation command (e.g., `zmk-layout profiles
