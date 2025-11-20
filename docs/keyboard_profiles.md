@@ -128,7 +128,7 @@ Required keys:
 
 ```toml
 [layout]
-template = "config/templates/keymap.dtsi.j2"
+template = "templates/keymap.dtsi.j2"
 
 [layout.formatting]
 key_gap = "  "
@@ -145,6 +145,10 @@ Required:
 - `template` *(string)* – path to the DTS template used for generation.
 - At least one entry under `layout.formatting.rows`. Represent each row as a
   table so we can extend it later (e.g., `[[layout.formatting.rows]] keys = [...]`).
+
+Template paths can be absolute or relative to the workspace root you provide to
+conversion helpers (e.g., `import_standard_file_for_profile`). This keeps the
+profile portable across repos.
 
 Optional:
 - `formatting.key_gap` / `formatting.base_indent`
@@ -195,7 +199,7 @@ repository = "zmkfirmware/zmk"
 branch = "main"
 
 [layout]
-template = "config/templates/planck.dtsi.j2"
+template = "templates/planck.dtsi.j2"
 [[layout.formatting.rows]]
 keys = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 ```

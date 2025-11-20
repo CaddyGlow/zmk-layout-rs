@@ -29,12 +29,44 @@ fn manifest_fixture_loads_profiles() {
     let keyboard = manifest.keyboards.get("glove80").expect("keyboard profile");
     assert_eq!(keyboard.targets.len(), 2);
     assert_eq!(keyboard.default_toolchain, "moergo");
+    let doc = keyboard.profile.as_ref().expect("keyboard profile doc");
+    assert!(
+        doc.path
+            .display()
+            .to_string()
+            .ends_with("keyboard_profiles/glove80.toml"),
+        "expected profile path to reference glove80 profile"
+    );
+    assert_eq!(doc.document.metadata.vendor, "MoErgo");
 
     let target = keyboard.targets.iter().find(|t| t.id == "left").unwrap();
     assert_eq!(target.board, "nice_nano_v2");
     assert_eq!(
         target.cmake_defs.get("CONFIG_ZMK_KEYS_PER_SCAN"),
         Some(&"4".into())
+    );
+}
+
+#[test]
+fn manifest_skips_legacy_yaml_profiles() {
+    let text = r#"
+version = 1
+
+[toolchains.moergo]
+kind = "moergo"
+image = "demo"
+
+[keyboards.demo]
+default_toolchain = "moergo"
+
+[keyboards.demo.metadata]
+profile = "legacy.yaml"
+"#;
+    let manifest = FirmwareManifest::from_toml_str(text).expect("manifest");
+    let keyboard = manifest.keyboards.get("demo").expect("keyboard");
+    assert!(
+        keyboard.profile.is_none(),
+        "yaml profiles should be skipped"
     );
 }
 

@@ -1,6 +1,9 @@
 //! Manifest and profile definitions for the firmware builder pipeline.
 
-use crate::tasks::MetadataMap;
+use crate::{
+    profiles::{KeyboardProfileDoc, ProfileError},
+    tasks::MetadataMap,
+};
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -21,7 +24,7 @@ impl FirmwareManifest {
     /// Load a manifest from raw TOML text.
     pub fn from_toml_str(input: &str) -> Result<Self, ManifestError> {
         let raw: RawFirmwareManifest = toml::from_str(input).map_err(ManifestError::Parse)?;
-        Self::from_raw(raw)
+        Self::from_raw(raw, None)
     }
 
     /// Load a manifest from a file path.
@@ -31,10 +34,14 @@ impl FirmwareManifest {
             path: path_ref.to_path_buf(),
             source,
         })?;
-        Self::from_toml_str(&contents)
+        let raw: RawFirmwareManifest = toml::from_str(&contents).map_err(ManifestError::Parse)?;
+        Self::from_raw(raw, path_ref.parent())
     }
 
-    fn from_raw(raw: RawFirmwareManifest) -> Result<Self, ManifestError> {
+    fn from_raw(
+        raw: RawFirmwareManifest,
+        manifest_root: Option<&Path>,
+    ) -> Result<Self, ManifestError> {
         if raw.toolchains.is_empty() {
             return Err(ManifestError::NoToolchains);
         }
@@ -50,7 +57,7 @@ impl FirmwareManifest {
 
         let mut keyboards = HashMap::with_capacity(raw.keyboards.len());
         for (id, profile) in raw.keyboards {
-            let profile = profile.into_profile(id.clone(), &toolchains)?;
+            let profile = profile.into_profile(id.clone(), &toolchains, manifest_root)?;
             keyboards.insert(id, profile);
         }
 
@@ -129,6 +136,14 @@ pub struct KeyboardProfile {
     pub default_toolchain: String,
     pub targets: Vec<BuildTarget>,
     pub metadata: MetadataMap,
+    pub profile: Option<KeyboardProfileDocument>,
+}
+
+/// Loaded keyboard profile reference parsed from metadata.profile.
+#[derive(Debug, Clone)]
+pub struct KeyboardProfileDocument {
+    pub path: PathBuf,
+    pub document: KeyboardProfileDoc,
 }
 
 /// Target entry representing board/shield pairs.
@@ -254,6 +269,7 @@ impl RawKeyboardProfile {
         self,
         id: String,
         toolchains: &HashMap<String, ToolchainProfile>,
+        manifest_root: Option<&Path>,
     ) -> Result<KeyboardProfile, ManifestError> {
         if !toolchains.contains_key(&self.default_toolchain) {
             return Err(ManifestError::MissingDefaultToolchain(
@@ -275,14 +291,96 @@ impl RawKeyboardProfile {
             let target = raw_target.into_target(&id, &target_id, toolchains)?;
             targets.push(target);
         }
+        let profile = load_keyboard_profile(&id, &self.metadata, manifest_root)?;
 
         Ok(KeyboardProfile {
             id,
             default_toolchain: self.default_toolchain,
             targets,
             metadata: self.metadata,
+            profile,
         })
     }
+}
+
+fn load_keyboard_profile(
+    keyboard: &str,
+    metadata: &MetadataMap,
+    manifest_root: Option<&Path>,
+) -> Result<Option<KeyboardProfileDocument>, ManifestError> {
+    let Some(value) = metadata.get("profile") else {
+        return Ok(None);
+    };
+    let path_value =
+        value
+            .as_str()
+            .ok_or_else(|| ManifestError::InvalidKeyboardProfileReference {
+                keyboard: keyboard.to_string(),
+            })?;
+    let trimmed = path_value.trim();
+    if trimmed.is_empty() {
+        return Err(ManifestError::InvalidKeyboardProfileReference {
+            keyboard: keyboard.to_string(),
+        });
+    }
+    if is_legacy_profile_reference(trimmed) {
+        eprintln!(
+            "warning: keyboard `{}` metadata.profile points to legacy file `{}`; skipping profile hydration",
+            keyboard, trimmed
+        );
+        return Ok(None);
+    }
+    let candidates = keyboard_profile_candidates(trimmed, manifest_root);
+    let mut last_read_error: Option<(PathBuf, ProfileError)> = None;
+    for candidate in candidates {
+        match KeyboardProfileDoc::from_file(&candidate) {
+            Ok(document) => {
+                return Ok(Some(KeyboardProfileDocument {
+                    path: candidate,
+                    document,
+                }));
+            }
+            Err(err @ ProfileError::ReadFile { .. }) => {
+                last_read_error = Some((candidate, err));
+                continue;
+            }
+            Err(err) => {
+                return Err(ManifestError::KeyboardProfileLoad {
+                    keyboard: keyboard.to_string(),
+                    path: candidate,
+                    source: err,
+                });
+            }
+        }
+    }
+    if let Some((path, err)) = last_read_error {
+        return Err(ManifestError::KeyboardProfileLoad {
+            keyboard: keyboard.to_string(),
+            path,
+            source: err,
+        });
+    }
+    Ok(None)
+}
+
+fn keyboard_profile_candidates(path: &str, manifest_root: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let input = PathBuf::from(path);
+    candidates.push(input.clone());
+    if !input.is_absolute() {
+        if let Some(root) = manifest_root {
+            let joined = root.join(&input);
+            if joined != input {
+                candidates.push(joined);
+            }
+        }
+    }
+    candidates
+}
+
+fn is_legacy_profile_reference(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".yaml") || lower.ends_with(".yml")
 }
 
 #[derive(Debug, Deserialize)]
@@ -399,4 +497,13 @@ pub enum ManifestError {
     },
     #[error("keyboard `{keyboard}` has a target with an empty id")]
     MissingTargetId { keyboard: String },
+    #[error("keyboard `{keyboard}` metadata.profile must be a non-empty string")]
+    InvalidKeyboardProfileReference { keyboard: String },
+    #[error("keyboard `{keyboard}` profile `{path}` could not be loaded: {source}")]
+    KeyboardProfileLoad {
+        keyboard: String,
+        path: PathBuf,
+        #[source]
+        source: ProfileError,
+    },
 }

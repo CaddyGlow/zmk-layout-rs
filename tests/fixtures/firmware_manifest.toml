@@ -19,7 +19,11 @@ image = "ghcr.io/moergo/glove80"
 
 [keyboards.glove80]
 default_toolchain = "moergo"
-metadata = { maintainer = "demo", keyboard = "glove80" }
+
+[keyboards.glove80.metadata]
+maintainer = "demo"
+keyboard = "glove80"
+profile = "keyboard_profiles/glove80.toml"
 
 [[keyboards.glove80.targets]]
 id = "left"

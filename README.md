@@ -126,6 +126,27 @@ cargo run --example standard_cli -- import \
   --output keymap.moergo.dts
 ```
 
+### Keyboard profiles
+
+Use the TOML keyboard profiles to hydrate layouts and resolve template metadata:
+
+```rust
+use std::path::PathBuf;
+use zmk_layout_rs::{
+    adapters::import_standard_file_for_profile,
+    profiles::KeyboardProfileDoc,
+};
+
+fn hydrate_profile_layout() -> Result<(), Box<dyn std::error::Error>> {
+    let profile = KeyboardProfileDoc::from_file("keyboard_profiles/glove80.toml")?;
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let hydrated =
+        import_standard_file_for_profile("layout.json", &profile, &repo_root)?;
+    hydrated.write_to_file("glove80.generated.dts")?;
+    Ok(())
+}
+```
+
 ### Customization Tasks & CLI
 
 The crate now ships with a dedicated task runner so you can replay layout tweaks whenever the base

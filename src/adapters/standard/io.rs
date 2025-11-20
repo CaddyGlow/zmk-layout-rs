@@ -1,6 +1,12 @@
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
-use crate::dts::{DtsDocument, DtsError};
+use crate::{
+    dts::{DtsDocument, DtsError},
+    profiles::KeyboardProfileDoc,
+};
 
 use super::{
     AdapterError,
@@ -116,6 +122,16 @@ pub fn import_standard_file_with_template(
     import_standard_str_with_template(&json, &template)
 }
 
+/// Import a standard JSON layout using the template referenced by the keyboard profile.
+pub fn import_standard_file_for_profile(
+    json_path: impl AsRef<Path>,
+    profile: &KeyboardProfileDoc,
+    profile_root: impl AsRef<Path>,
+) -> Result<DtsDocument, AdapterError> {
+    let template_path = resolve_profile_template_path(&profile.layout.template, profile_root);
+    import_standard_file_with_template(json_path, template_path)
+}
+
 /// Render a template-based DTS string directly from the standard JSON layout.
 /// The returned string preserves the template's whitespace instead of going through serialization.
 pub fn render_standard_template(json: &str, template_source: &str) -> Result<String, AdapterError> {
@@ -123,4 +139,24 @@ pub fn render_standard_template(json: &str, template_source: &str) -> Result<Str
     let rendered = render_layout_with_template(&layout, template_source)?;
     DtsDocument::parse_str(&rendered).map_err(DtsError::from)?;
     Ok(rendered)
+}
+
+/// Render the profile's template directly from the JSON payload.
+pub fn render_standard_template_for_profile(
+    json: &str,
+    profile: &KeyboardProfileDoc,
+    profile_root: impl AsRef<Path>,
+) -> Result<String, AdapterError> {
+    let template_path = resolve_profile_template_path(&profile.layout.template, profile_root);
+    let source = fs::read_to_string(&template_path)?;
+    render_standard_template(json, &source)
+}
+
+fn resolve_profile_template_path(template: &str, profile_root: impl AsRef<Path>) -> PathBuf {
+    let path = PathBuf::from(template);
+    if path.is_absolute() {
+        path
+    } else {
+        profile_root.as_ref().join(path)
+    }
 }

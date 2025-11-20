@@ -144,7 +144,9 @@ fn cli_firmware_build_prints_request() {
         .arg("--dry-run");
 
     cmd.assert().success().stdout(
-        predicates::str::contains("keyboard : glove80")
+        predicates::str::contains("keyboard : glove80 (MoErgo Glove80)")
+            .and(predicates::str::contains("vendor   : MoErgo"))
+            .and(predicates::str::contains("firmware : v25.05"))
             .and(predicates::str::contains("targets  : left, right")),
     );
 }

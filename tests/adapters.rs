@@ -1,13 +1,16 @@
 use std::{error::Error, fs, path::PathBuf};
 
 use serde_json::{Value, json};
-use zmk_layout_rs::adapters::{
-    AdapterLayout, export_standard_file, export_standard_str, export_standard_str_with_template,
-    import_standard_file, import_standard_str, import_standard_str_with_template,
-    render_standard_template,
-};
 use zmk_layout_rs::dts::DtsDocument;
 use zmk_layout_rs::providers::KeymapProvider;
+use zmk_layout_rs::{
+    adapters::{
+        AdapterLayout, export_standard_file, export_standard_str,
+        export_standard_str_with_template, import_standard_file, import_standard_file_for_profile,
+        import_standard_str, import_standard_str_with_template, render_standard_template,
+    },
+    profiles::KeyboardProfileDoc,
+};
 
 fn fixture(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -98,6 +101,43 @@ fn adapter_round_trips_standard_json() -> Result<(), Box<dyn Error>> {
     assert!(json.contains("Adapter Fixture"));
     let parsed = AdapterLayout::from_standard_json(&json)?;
     assert_eq!(parsed, layout);
+    Ok(())
+}
+
+#[test]
+fn adapter_imports_layout_using_profile_template() -> Result<(), Box<dyn Error>> {
+    let profile_text = r#"
+keyboard = "demo"
+version = 1
+
+[metadata]
+name = "Demo Keyboard"
+vendor = "Acme"
+
+[hardware]
+key_count = 1
+is_split = false
+
+[firmware]
+default = "dev"
+[firmware.versions.dev]
+repository = "acme/demo"
+branch = "main"
+
+[layout]
+template = "tests/fixtures/sample_keymap.dtsi"
+[[layout.formatting.rows]]
+keys = [0]
+"#;
+    let profile = KeyboardProfileDoc::from_toml_str(profile_text).expect("profile doc");
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let json_path = manifest_dir.join("tests/fixtures/demo_layout.json");
+    let document = import_standard_file_for_profile(&json_path, &profile, &manifest_dir)?;
+    let rendered = document.to_string()?;
+    assert!(
+        rendered.contains("&kp"),
+        "import should populate bindings from JSON"
+    );
     Ok(())
 }
 

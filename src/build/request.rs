@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Arc};
 use serde_json::Value as JsonValue;
 use thiserror::Error;
 
-use crate::dts::DtsDocument;
+use crate::{dts::DtsDocument, profiles::KeyboardProfileDoc};
 
 use super::{
     error::BuildError,
@@ -71,6 +71,11 @@ impl fmt::Debug for BuildRequest {
 impl BuildRequest {
     pub fn keyboard_profile(&self) -> Option<&KeyboardProfile> {
         self.manifest.keyboards.get(&self.keyboard_id)
+    }
+
+    pub fn keyboard_profile_doc(&self) -> Option<&KeyboardProfileDoc> {
+        self.keyboard_profile()
+            .and_then(|profile| profile.profile.as_ref().map(|doc| &doc.document))
     }
 }
 

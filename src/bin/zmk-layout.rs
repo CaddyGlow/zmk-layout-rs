@@ -432,7 +432,13 @@ fn print_firmware_request(request: &BuildRequest) {
         (None, Some(profile)) => format!("{} (default)", profile.default_toolchain),
         (None, None) => "<unknown>".into(),
     };
-    println!("keyboard : {}", request.keyboard_id);
+    if let Some(doc) = request.keyboard_profile_doc() {
+        println!("keyboard : {} ({})", request.keyboard_id, doc.metadata.name);
+        println!("vendor   : {}", doc.metadata.vendor);
+        println!("firmware : {}", doc.firmware.default);
+    } else {
+        println!("keyboard : {}", request.keyboard_id);
+    }
     println!("toolchain: {toolchain}");
     println!("targets  : {}", format_targets(request));
     println!("layout   : {}", describe_layout(&request.layout));

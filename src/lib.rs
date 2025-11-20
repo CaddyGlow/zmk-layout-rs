@@ -12,6 +12,7 @@ pub mod dts;
 pub mod layout_engine;
 pub mod macro_support;
 pub mod parser;
+pub mod profiles;
 pub mod providers;
 pub mod serialization;
 pub mod tasks;
