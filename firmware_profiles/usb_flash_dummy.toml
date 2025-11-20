@@ -1,0 +1,20 @@
+version = 1
+
+[toolchains.zmk]
+kind = "zmk_config"
+image = "zmkfirmware/zmk-build-arm:stable"
+repository = "https://github.com/zmkfirmware/zmk"
+branch = "main"
+[toolchains.zmk.env]
+ZMK_CONFIG = "/workspace/config"
+
+[keyboards.usb_flash_dummy]
+default_toolchain = "zmk"
+
+[keyboards.usb_flash_dummy.metadata]
+profile = "usb_flash_dummy"
+
+[[keyboards.usb_flash_dummy.targets]]
+id = "dummy"
+board = "usb_flash_dummy"
+comment = "Stub target used for dummy flash testing"

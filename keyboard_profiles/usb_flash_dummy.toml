@@ -1,0 +1,41 @@
+keyboard = "usb_flash_dummy"
+version = 1
+
+[metadata]
+name = "USB Flash Dummy Target"
+vendor = "Kingston"
+description = "Kingston DataTraveler thumb-drive used as a dummy UF2 flash target"
+
+[hardware]
+key_count = 1
+is_split = false
+controllers = ["usb-mass-storage"]
+
+[[hardware.boards]]
+id = "usb_flash_dummy"
+
+[[hardware.flash]]
+method = "usb"
+device_query = "vendor=Kingston and model~=DataTraveler.* and serial=E0D55EA57411F71098340435 and removable=true"
+mount_timeout = 120
+copy_timeout = 60
+sync_after_copy = true
+
+[firmware]
+default = "dummy"
+
+[firmware.versions.dummy]
+version = "dummy"
+description = "Placeholder firmware entry for dummy flash testing"
+repository = "example/dummy"
+branch = "main"
+
+[layout]
+template = "templates/dummy_flash.dtsi.j2"
+
+[layout.formatting]
+key_gap = "  "
+base_indent = ""
+
+[[layout.formatting.rows]]
+keys = [0]
