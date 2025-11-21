@@ -463,7 +463,7 @@ fn run_profiles(command: ProfilesCommand) -> Result<i32, CliError> {
 }
 
 fn run_firmware_flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {
-    let manifest = FirmwareManifest::from_file(&args.manifest)?;
+    let manifest = load_manifest_flexible(&args.manifest)?;
     let keyboard = manifest
         .keyboards
         .get(&args.keyboard)
@@ -525,8 +525,27 @@ fn run_firmware_flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {
     Ok(0)
 }
 
+fn load_manifest_flexible(path: &PathBuf) -> Result<FirmwareManifest, CliError> {
+    // Try loading as a direct path first
+    match FirmwareManifest::from_file(path) {
+        Ok(manifest) => Ok(manifest),
+        Err(_) => {
+            // If path doesn't exist and looks like a name (no separators, no .toml extension),
+            // try loading from embedded profiles
+            let path_str = path.to_string_lossy();
+            if !path_str.contains('/') && !path_str.contains('\\') && !path_str.ends_with(".toml") {
+                if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                    return FirmwareManifest::load(name).map_err(Into::into);
+                }
+            }
+            // Fall back to original error
+            FirmwareManifest::from_file(path).map_err(Into::into)
+        }
+    }
+}
+
 fn run_firmware_devices(args: &FirmwareDevicesArgs) -> Result<i32, CliError> {
-    let manifest = FirmwareManifest::from_file(&args.manifest)?;
+    let manifest = load_manifest_flexible(&args.manifest)?;
     let keyboard = manifest
         .keyboards
         .get(&args.keyboard)
@@ -685,7 +704,7 @@ fn discover_profile_paths(dir: &Path) -> Result<Vec<PathBuf>, CliError> {
 }
 
 fn run_firmware_build(args: &FirmwareBuildArgs) -> Result<i32, CliError> {
-    let manifest = FirmwareManifest::from_file(&args.manifest)?;
+    let manifest = load_manifest_flexible(&args.manifest)?;
     let builder = FirmwareBuilder::new(manifest, Box::new(CliDockerBackend::new()));
     let request = build_firmware_request(&builder, args)?;
     print_firmware_request(&request);

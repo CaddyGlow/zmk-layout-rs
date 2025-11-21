@@ -1,0 +1,74 @@
+name: Build
+
+on:
+  push:
+    branches: [main, dev/v0.1]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - name: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: android-aarch64
+            os: ubuntu-latest
+            target: aarch64-linux-android
+            android: true
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.target }}
+
+      - name: Set up Android NDK
+        if: ${{ matrix.android }}
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+      - name: Build (non-Android)
+        if: ${{ !matrix.android }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Build (Android)
+        if: ${{ matrix.android }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
+        env:
+          # Force Cargo/cc to use the NDK toolchain when cross-compiling to Android
+          CC_aarch64_linux_android: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang
+          CARGO_TARGET_AARCH64_LINUX_ANDROID_AR: ${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar
+          PKG_CONFIG_ALLOW_CROSS: 1
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zmk-layout-${{ matrix.name }}
+          path: |
+            target/${{ matrix.target }}/release/zmk-layout*

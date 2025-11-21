@@ -62,6 +62,26 @@ Or use a path for custom profiles:
 profile = "../my-profiles/custom.toml"  # Explicit path
 ```
 
+### 5. CLI Convenience
+
+The CLI now accepts both full paths and profile names for the `--manifest` argument:
+
+```bash
+# Using just the name (loads from embedded or filesystem)
+zmk-layout firmware build --manifest glove80 --keyboard glove80 ...
+zmk-layout firmware flash --manifest glove80 --keyboard glove80 ...
+zmk-layout firmware devices --manifest glove80 --keyboard glove80 ...
+
+# Using full path (original behavior)
+zmk-layout firmware build --manifest firmware_profiles/glove80.toml --keyboard glove80 ...
+zmk-layout firmware flash --manifest firmware_profiles/glove80.toml --keyboard glove80 ...
+```
+
+The CLI automatically detects whether you provided a path or a name:
+- If the path exists, it loads from that exact file
+- If the path doesn't exist and looks like a name (no `/` or `.toml`), it tries loading from embedded profiles
+- This maintains backward compatibility while providing convenience
+
 ## Search Order
 
 When using `load()` methods:
