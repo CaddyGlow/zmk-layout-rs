@@ -213,7 +213,7 @@ the same TOML vocabulary so manifests and CLIs can resolve them consistently.
 Use the CLI to catch schema mistakes before committing:
 
 ```bash
-zmk-layout profiles check keyboard_profiles/glove80.toml \
+zmk-layout profiles check profiles/keyboards/glove80.toml \
     tests/fixtures/profiles/bad_profile.toml
 zmk-layout profiles check --all --profiles-dir tests/fixtures/profiles
 ```

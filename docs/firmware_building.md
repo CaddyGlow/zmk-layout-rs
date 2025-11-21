@@ -6,7 +6,7 @@ files) by describing toolchains/keyboards in a manifest and invoking the
 
 ## Manifest Overview
 
-Manifests live under `firmware_profiles/*.toml` and follow this structure:
+Manifests live under `profiles/firmwares/*.toml` and follow this structure:
 
 ```toml
 version = 1
@@ -41,13 +41,13 @@ cmake_defs = { CONFIG_ZMK_SPLIT_ROLE = "\"left\"" }
   `[keyboards.<id>.targets.toolchain_overrides.<toolchain>]` to tweak images,
   branches, or extra environment variables for that toolchain only.
 
-See `firmware_profiles/glove80.toml` for a complete, real-world manifest.
+See `profiles/firmwares/glove80.toml` for a complete, real-world manifest.
 
 ## CLI Usage
 
 ```
 zmk-layout firmware build \
-  --manifest firmware_profiles/glove80.toml \
+  --manifest profiles/firmwares/glove80.toml \
   --keyboard glove80 \
   --toolchain zmk \
   --target left \

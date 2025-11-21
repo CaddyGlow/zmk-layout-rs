@@ -1,0 +1,413 @@
+keyboard = "glove80"
+version = 1
+
+[metadata]
+name = "MoErgo Glove80"
+vendor = "MoErgo"
+description = "MoErgo Glove80 split ergonomic keyboard"
+
+[hardware]
+key_count = 80
+is_split = true
+
+[[hardware.boards]]
+id = "glove80_lh"
+role = "left"
+
+[[hardware.boards]]
+id = "glove80_rh"
+role = "right"
+
+[[hardware.flash]]
+method = "usb"
+device_query = "serial~=GLV80-.* and removable=true"
+mount_timeout = 120
+copy_timeout = 60
+sync_after_copy = true
+
+[hardware.build_defaults]
+board = ["glove80_lh", "glove80_rh"]
+shield = []
+
+[firmware]
+default = "v25.05"
+
+[firmware.versions."v25.05"]
+version = "v25.05"
+description = "Stable MoErgo firmware v25.05"
+repository = "moergo-sc/zmk"
+branch = "v25.05"
+
+[firmware.versions."v25.08-beta.1"]
+version = "v25.08-beta.1"
+description = "Beta MoErgo firmware v25.08-beta.1"
+repository = "moergo-sc/zmk"
+branch = "v25.08-beta.1"
+
+[firmware.versions."v25.04-beta.1"]
+version = "v25.04-beta.1"
+description = "Beta MoErgo firmware v25.04-beta.1"
+repository = "moergo-sc/zmk"
+branch = "v25.04-beta.1"
+
+[firmware.versions."v25.01"]
+version = "v25.01"
+description = "Stable MoErgo firmware v25.01"
+repository = "moergo-sc/zmk"
+branch = "v25.01"
+
+[firmware.versions.pr36]
+version = "pr36.per-key-rgb"
+description = "PR36 with per-key RGB support"
+repository = "moergo-sc/zmk"
+branch = "pull/36/head"
+[firmware.versions."pr36".kconfig]
+CONFIG_EXPERIMENTAL_RGB_LAYER = false
+
+[firmware.versions.pr38]
+version = "pr38.per-key-rgb"
+description = "PR38 with per-key RGB support"
+repository = "moergo-sc/zmk"
+branch = "pull/38/head"
+[firmware.versions."pr38".kconfig]
+CONFIG_EXPERIMENTAL_RGB_LAYER = false
+
+[firmware.versions."darknao-v25.04"]
+version = "darknao.v25.04.per-key-rgb"
+description = "Darknao version of v25.04 with per-key RGB support"
+repository = "darknao/zmk"
+branch = "rgb-layer-25.04"
+[firmware.versions."darknao-v25.04".kconfig]
+CONFIG_EXPERIMENTAL_RGB_LAYER = false
+
+[layout]
+template = "templates/glove80/keymap.dtsi.j2"
+
+[layout.formatting]
+key_gap = "  "
+base_indent = ""
+
+[[layout.formatting.rows]]
+keys = [-1, 0, 1, 2, 3, 4, -1, -1, -1, -1, -1, -1, -1, -1, 5, 6, 7, 8, 9, -1]
+
+[[layout.formatting.rows]]
+keys = [10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, 16, 17, 18, 19, 20, 21]
+
+[[layout.formatting.rows]]
+keys = [22, 23, 24, 25, 26, 27, -1, -1, -1, -1, -1, -1, 28, 29, 30, 31, 32, 33]
+
+[[layout.formatting.rows]]
+keys = [34, 35, 36, 37, 38, 39, -1, -1, -1, -1, -1, -1, 40, 41, 42, 43, 44, 45]
+
+[[layout.formatting.rows]]
+keys = [46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+
+[[layout.formatting.rows]]
+keys = [64, 65, 66, 67, 68, -1, 69, 70, 71, 72, 73, 74, -1, 75, 76, 77, 78, 79]
+
+[layout.keymap]
+header_includes = []
+system_behaviors_dts = """
+/ {
+    behaviors {
+        // For the "layer" key, it'd nice to be able to use it as either a shift or a toggle.
+        // Configure it as a tap dance, so the first tap (or hold) is a &mo and the second tap is a &to
+        lower: lower {
+            compatible = "zmk,behavior-tap-dance";
+            label = "LAYER_TAP_DANCE";
+            #binding-cells = <0>;
+            tapping-term-ms = <200>;
+            bindings = <&mo LAYER_Lower>, <&to LAYER_Lower>;
+        };
+    };
+};
+
+/ {
+    macros {
+        rgb_ug_status_macro: rgb_ug_status_macro {
+            label = "RGB_UG_STATUS";
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings
+                = <&rgb_ug RGB_STATUS>;
+        };
+    };
+};
+
+
+/ {
+#ifdef BT_DISC_CMD
+    behaviors {
+        bt_0: bt_0 {
+            compatible = "zmk,behavior-tap-dance";
+            label = "BT_0";
+            #binding-cells = <0>;
+            tapping-term-ms = <200>;
+            bindings = <&bt_select_0>, <&bt BT_DISC 0>;
+        };
+        bt_1: bt_1 {
+            compatible = "zmk,behavior-tap-dance";
+            label = "BT_1";
+            #binding-cells = <0>;
+            tapping-term-ms = <200>;
+            bindings = <&bt_select_1>, <&bt BT_DISC 1>;
+        };
+        bt_2: bt_2 {
+            compatible = "zmk,behavior-tap-dance";
+            label = "BT_2";
+            #binding-cells = <0>;
+            tapping-term-ms = <200>;
+            bindings = <&bt_select_2>, <&bt BT_DISC 2>;
+        };
+        bt_3: bt_3 {
+            compatible = "zmk,behavior-tap-dance";
+            label = "BT_3";
+            #binding-cells = <0>;
+            tapping-term-ms = <200>;
+            bindings = <&bt_select_3>, <&bt BT_DISC 3>;
+        };
+    };
+    macros {
+        bt_select_0: bt_select_0 {
+            label = "BT_SELECT_0";
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings
+                = <&out OUT_BLE>,
+                  <&bt BT_SEL 0>;
+        };
+        bt_select_1: bt_select_1 {
+            label = "BT_SELECT_1";
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings
+                = <&out OUT_BLE>,
+                  <&bt BT_SEL 1>;
+        };
+        bt_select_2: bt_select_2 {
+            label = "BT_SELECT_2";
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings
+                = <&out OUT_BLE>,
+                  <&bt BT_SEL 2>;
+        };
+        bt_select_3: bt_select_3 {
+            label = "BT_SELECT_3";
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings
+                = <&out OUT_BLE>,
+                  <&bt BT_SEL 3>;
+        };
+    };
+#else
+    macros {
+        bt_0: bt_0 {
+            label = "BT_0";
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings
+                = <&out OUT_BLE>,
+                  <&bt BT_SEL 0>;
+        };
+        bt_1: bt_1 {
+            label = "BT_1";
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings
+                = <&out OUT_BLE>,
+                  <&bt BT_SEL 1>;
+        };
+        bt_2: bt_2 {
+            label = "BT_2";
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings
+                = <&out OUT_BLE>,
+                  <&bt BT_SEL 2>;
+        };
+        bt_3: bt_3 {
+            label = "BT_3";
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings
+                = <&out OUT_BLE>,
+                  <&bt BT_SEL 3>;
+        };
+    };
+#endif
+};
+
+/ {
+    behaviors {
+        magic: magic {
+            compatible = "zmk,behavior-hold-tap";
+            label = "MAGIC_HOLD_TAP";
+            #binding-cells = <2>;
+            flavor = "tap-preferred";
+            tapping-term-ms = <200>;
+            bindings = <&mo>, <&rgb_ug_status_macro>;
+        };
+    };
+};
+"""
+key_position_header = """
+#define POS_LH_T1 52
+#define POS_LH_T2 53
+#define POS_LH_T3 54
+#define POS_LH_T4 69
+#define POS_LH_T5 70
+#define POS_LH_T6 71
+#define POS_LH_C1R2 15
+#define POS_LH_C1R3 27
+#define POS_LH_C1R4 39
+#define POS_LH_C1R5 51
+#define POS_LH_C2R1 4
+#define POS_LH_C2R2 14
+#define POS_LH_C2R3 26
+#define POS_LH_C2R4 38
+#define POS_LH_C2R5 50
+#define POS_LH_C2R6 68
+#define POS_LH_C3R1 3
+#define POS_LH_C3R2 13
+#define POS_LH_C3R3 25
+#define POS_LH_C3R4 37
+#define POS_LH_C3R5 49
+#define POS_LH_C3R6 67
+#define POS_LH_C4R1 2
+#define POS_LH_C4R2 12
+#define POS_LH_C4R3 24
+#define POS_LH_C4R4 36
+#define POS_LH_C4R5 48
+#define POS_LH_C4R6 66
+#define POS_LH_C5R1 1
+#define POS_LH_C5R2 11
+#define POS_LH_C5R3 23
+#define POS_LH_C5R4 35
+#define POS_LH_C5R5 47
+#define POS_LH_C5R6 65
+#define POS_LH_C6R1 0
+#define POS_LH_C6R2 10
+#define POS_LH_C6R3 22
+#define POS_LH_C6R4 34
+#define POS_LH_C6R5 46
+#define POS_LH_C6R6 64
+#define POS_RH_T1 57
+#define POS_RH_T2 56
+#define POS_RH_T3 55
+#define POS_RH_T4 74
+#define POS_RH_T5 73
+#define POS_RH_T6 72
+#define POS_RH_C1R2 16
+#define POS_RH_C1R3 28
+#define POS_RH_C1R4 40
+#define POS_RH_C1R5 58
+#define POS_RH_C2R1 5
+#define POS_RH_C2R2 17
+#define POS_RH_C2R3 29
+#define POS_RH_C2R4 41
+#define POS_RH_C2R5 59
+#define POS_RH_C2R6 75
+#define POS_RH_C3R1 6
+#define POS_RH_C3R2 18
+#define POS_RH_C3R3 30
+#define POS_RH_C3R4 42
+#define POS_RH_C3R5 60
+#define POS_RH_C3R6 76
+#define POS_RH_C4R1 7
+#define POS_RH_C4R2 19
+#define POS_RH_C4R3 31
+#define POS_RH_C4R4 43
+#define POS_RH_C4R5 61
+#define POS_RH_C4R6 77
+#define POS_RH_C5R1 8
+#define POS_RH_C5R2 20
+#define POS_RH_C5R3 32
+#define POS_RH_C5R4 44
+#define POS_RH_C5R5 62
+#define POS_RH_C5R6 78
+#define POS_RH_C6R1 9
+#define POS_RH_C6R2 21
+#define POS_RH_C6R3 33
+#define POS_RH_C6R4 45
+#define POS_RH_C6R5 63
+#define POS_RH_C6R6 79
+"""
+
+[[behaviors]]
+id = "custom"
+code = "Custom"
+name = "Custom Behavior"
+description = "Specify the key behavior by text input, to be used in conjunction with Custom Defined Behaviors."
+url = "https://www.moergo.com/files/layout-editor-user-guide.pdf"
+origin = "moergo"
+expected_params = 1
+is_macro_control_behavior = false
+params = ["text_command"]
+
+[[behaviors]]
+id = "magic"
+code = "&magic"
+name = "Magic Key"
+description = "Tap to show the indicators. Hold to momentarily change to the Magic Layer."
+url = "https://www.moergo.com/files/layout-editor-user-guide.pdf"
+origin = "moergo"
+expected_params = 0
+is_macro_control_behavior = false
+params = []
+
+[[behaviors]]
+id = "lower"
+code = "&lower"
+name = "Lower Layer Key"
+description = "Hold to momentarily change to the Lower Layer. Double-tap to persistently change to the Lower Layer."
+url = "https://www.moergo.com/files/layout-editor-user-guide.pdf"
+origin = "moergo"
+expected_params = 0
+is_macro_control_behavior = false
+params = []
+
+[[behaviors]]
+id = "bt_0"
+code = "&bt_0"
+name = "Bluetooth Profile 0"
+description = "Single quick tap to select the BT profile 0. Double tap to disconnect BT profile 0."
+url = "https://www.moergo.com/files/layout-editor-user-guide.pdf"
+origin = "moergo"
+expected_params = 0
+is_macro_control_behavior = false
+params = []
+
+[[behaviors]]
+id = "bt_1"
+code = "&bt_1"
+name = "Bluetooth Profile 1"
+description = "Single quick tap to select the BT profile 1. Double tap to disconnect BT profile 1."
+url = "https://www.moergo.com/files/layout-editor-user-guide.pdf"
+origin = "moergo"
+expected_params = 0
+is_macro_control_behavior = false
+params = []
+
+[[behaviors]]
+id = "bt_2"
+code = "&bt_2"
+name = "Bluetooth Profile 2"
+description = "Single quick tap to select the BT profile 2. Double tap to disconnect BT profile 2."
+url = "https://www.moergo.com/files/layout-editor-user-guide.pdf"
+origin = "moergo"
+expected_params = 0
+is_macro_control_behavior = false
+params = []
+
+[[behaviors]]
+id = "bt_3"
+code = "&bt_3"
+name = "Bluetooth Profile 3"
+description = "Single quick tap to select the BT profile 3. Double tap to disconnect BT profile 3."
+url = "https://www.moergo.com/files/layout-editor-user-guide.pdf"
+origin = "moergo"
+expected_params = 0
+is_macro_control_behavior = false
+params = []
