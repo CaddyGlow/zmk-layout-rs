@@ -4,9 +4,10 @@
 use plist;
 use regex::Regex;
 use serde::Deserialize;
+#[cfg(target_os = "macos")]
+use std::ffi::OsStr;
 use std::{
     collections::HashSet,
-    ffi::OsStr,
     fs::{self, File},
     io,
     path::{Path, PathBuf},
@@ -1596,22 +1597,79 @@ fn wait_for_device_windows(
 
 #[cfg(target_os = "windows")]
 fn probe_windows(query: Option<&str>) -> Result<Vec<WinVolume>, FlashError> {
+    flash_debug("probing windows volumes via powershell Get-Volume");
+    // Try to enrich volume data with disk metadata so vendor/model/serial queries can work.
+    let ps_script = r#"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+function Get-UsbLogicalDisks {
+    $results = @()
+    $usbDisks = Get-CimInstance Win32_DiskDrive | Where-Object { $_.InterfaceType -eq 'USB' }
+    foreach ($disk in $usbDisks) {
+        $pnp = $disk.PNPDeviceID
+        $vendor = if ($pnp -match 'VEN_([^&]+)') { $matches[1] } else { $disk.Manufacturer }
+        $vid = if ($pnp -match 'VID_([0-9A-Fa-f]+)') { $matches[1] } else { $null }
+        $pid = if ($pnp -match 'PID_([0-9A-Fa-f]+)') { $matches[1] } else { $null }
+        $pnpSerial = $null
+        if ($pnp -match '\\\\([^\\&]+)$') { $pnpSerial = $matches[1] }
+        elseif ($pnp -match 'REV_\\([^\\&]+)') { $pnpSerial = $matches[1] }
+        $serial = if ($pnpSerial) { $pnpSerial } elseif ($disk.SerialNumber) { $disk.SerialNumber } else { $null }
+        $partitions = Get-CimInstance -Query \"ASSOCIATORS OF {Win32_DiskDrive.DeviceID='$($disk.DeviceID)'} WHERE AssocClass=Win32_DiskDriveToDiskPartition\"
+        foreach ($partition in $partitions) {
+            $logicalDisks = Get-CimInstance -Query \"ASSOCIATORS OF {Win32_DiskPartition.DeviceID='$($partition.DeviceID)'} WHERE AssocClass=Win32_LogicalDiskToPartition\"
+            foreach ($ld in $logicalDisks) {
+                if (-not $ld.DeviceID) { continue }
+                $path = \"$($ld.DeviceID)\\\"
+                $mounts = @($path)
+                $results += [PSCustomObject]@{
+                    DriveLetter=$ld.DeviceID
+                    Path=$path
+                    Mountpoints=$mounts
+                    FileSystem=$ld.FileSystem
+                    FileSystemLabel=$ld.VolumeName
+                    DriveType=$ld.DriveType
+                    FriendlyName=$disk.Caption
+                    Model=$disk.Model
+                    Manufacturer=$vendor
+                    DiskSerial=$disk.SerialNumber
+                    WmiSerial=$null
+                    PnpSerial=$pnpSerial
+                    SerialNumber=$serial
+                    UniqueId=$disk.Signature
+                    PartitionGuid=$partition.Guid
+                    PnpDeviceId=$pnp
+                    Vid=$vid
+                    Pid=$pid
+                    Removable=($disk.MediaType -eq 'Removable Media')
+                }
+            }
+        }
+    }
+    return $results
+}
+
+Get-UsbLogicalDisks | ConvertTo-Json -Compress"#;
     let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            "Get-Volume | Select-Object DriveLetter,FileSystem,FileSystemLabel,Path,DriveType | ConvertTo-Json -Compress",
-        ])
+        .args(["-NoProfile", "-Command", ps_script])
         .output()
         .map_err(|err| FlashError::ProbeFailed(err.to_string()))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    flash_debug(format!(
+        "powershell Get-Volume exit_code={:?} stdout_len={} stderr_len={}",
+        output.status.code(),
+        stdout.as_ref().len(),
+        stderr.as_ref().len()
+    ));
+    if !stderr.trim().is_empty() {
+        flash_debug(format!("powershell Get-Volume stderr: {}", stderr.trim()));
+    }
     if !output.status.success() {
         return Err(FlashError::ProbeFailed(format!(
             "powershell Get-Volume failed with code {:?}",
             output.status.code()
         )));
     }
-    let json = String::from_utf8_lossy(&output.stdout);
-    let value: serde_json::Value = serde_json::from_str(&json)
+    flash_debug(format!("powershell Get-Volume stdout: {}", stdout.trim()));
+    let value: serde_json::Value = serde_json::from_str(stdout.as_ref())
         .map_err(|err| FlashError::ProbeFailed(format!("parse Get-Volume output: {err}")))?;
     let mut volumes = Vec::new();
     match value {
@@ -1629,15 +1687,47 @@ fn probe_windows(query: Option<&str>) -> Result<Vec<WinVolume>, FlashError> {
         }
         _ => {}
     }
+    log_windows_volumes("after parse", &volumes);
     if let Some(query_str) = query {
         let matcher = Query::parse(query_str)?;
+        let before = volumes.len();
         volumes.retain(|v| matcher.matches(&QueryMetadata::from(v)));
+        flash_debug(format!(
+            "windows volume query `{}` retained {} of {} devices",
+            query_str,
+            volumes.len(),
+            before
+        ));
+        log_windows_volumes("after filter", &volumes);
     }
     Ok(volumes)
 }
 
 #[cfg(target_os = "windows")]
 fn parse_windows_volume(value: &serde_json::Value) -> Option<WinVolume> {
+    let clean = |s: Option<String>| {
+        s.map(|mut v| {
+            v = v.trim().trim_end_matches('.').to_string();
+            if let Some(idx) = v.rfind('&') {
+                if v[idx + 1..].chars().all(|c| c == '0') {
+                    v.truncate(idx);
+                }
+            }
+            v
+        })
+        .and_then(|v| {
+            let lower = v.to_ascii_lowercase();
+            if v.is_empty()
+                || lower == "0"
+                || lower == "0000000000000000"
+                || lower == "0000_0000_0000_0000_00000000"
+            {
+                None
+            } else {
+                Some(v)
+            }
+        })
+    };
     let drive_letter = value
         .get("DriveLetter")
         .and_then(|v| v.as_str())
@@ -1659,6 +1749,63 @@ fn parse_windows_volume(value: &serde_json::Value) -> Option<WinVolume> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let drive_type_num = value.get("DriveType").and_then(|v| v.as_i64());
+    let friendly_name = value
+        .get("FriendlyName")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let model = value
+        .get("Model")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .or_else(|| friendly_name.clone());
+    let manufacturer = value
+        .get("Manufacturer")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let disk_serial = value
+        .get("DiskSerial")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let wmi_serial = value
+        .get("WmiSerial")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let serial_number = value
+        .get("SerialNumber")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let unique_id = value
+        .get("UniqueId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let partition_guid = value
+        .get("PartitionGuid")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let pnp_device_id = value
+        .get("PnpDeviceId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let pnp_serial = value
+        .get("PnpSerial")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let vid = value
+        .get("Vid")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let pid = value
+        .get("Pid")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string());
+    let serial = clean(pnp_serial.clone())
+        .or_else(|| clean(serial_number.clone()))
+        .or_else(|| clean(disk_serial.clone()))
+        .or_else(|| clean(wmi_serial.clone()))
+        .or_else(|| clean(pnp_device_id.clone()))
+        .or_else(|| clean(unique_id.clone()))
+        .or_else(|| clean(partition_guid.clone()))
+        .or_else(|| clean(label.clone()));
     let removable = if let Some(ref t) = drive_type_str {
         Some(t.eq_ignore_ascii_case("removable"))
     } else if let Some(num) = drive_type_num {
@@ -1667,7 +1814,7 @@ fn parse_windows_volume(value: &serde_json::Value) -> Option<WinVolume> {
         None
     };
     let mut mountpoints = Vec::new();
-    if let Some(path) = path_value {
+    if let Some(path) = path_value.as_ref() {
         if !path.is_empty() {
             mountpoints.push(PathBuf::from(path));
         }
@@ -1678,14 +1825,40 @@ fn parse_windows_volume(value: &serde_json::Value) -> Option<WinVolume> {
     if mountpoints.is_empty() {
         return None;
     }
-    let name = drive_letter.unwrap_or_else(|| label.clone().unwrap_or_else(|| "volume".into()));
+    let name = drive_letter
+        .clone()
+        .unwrap_or_else(|| label.clone().unwrap_or_else(|| "volume".into()));
+    let vendor = manufacturer.as_ref().map(String::from).or_else(|| {
+        model
+            .as_ref()
+            .and_then(|m| m.split_whitespace().next())
+            .map(|v| v.to_string())
+    });
+    let dev_path = path_value
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(name.clone()));
+    flash_debug(format!(
+        "windows volume raw_serials disk={:?} wmi={:?} pnp_serial={:?} serial_number={:?} unique_id={:?} partition_guid={:?} pnp_id={:?} vid={:?} pid={:?} chosen={:?}",
+        disk_serial,
+        wmi_serial,
+        pnp_serial,
+        serial_number,
+        unique_id,
+        partition_guid,
+        pnp_device_id,
+        vid,
+        pid,
+        serial
+    ));
     Some(WinVolume {
         name: name.clone(),
-        dev_path: PathBuf::from(name),
+        dev_path,
         mountpoints,
-        serial: label.clone(),
-        vendor: None,
-        model: None,
+        serial,
+        vendor,
+        model,
         fs_type,
         removable,
     })
@@ -1734,6 +1907,24 @@ impl From<WinVolume> for FlashDiscovery {
             vendor_id: None,
             product_id: None,
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn log_windows_volumes(label: &str, volumes: &[WinVolume]) {
+    flash_debug(format!("windows volumes {label}: {} found", volumes.len()));
+    for volume in volumes {
+        flash_debug(format!(
+            "  name={} dev_path={} vendor={} model={} serial={} mountpoints={:?} fs_type={:?} removable={:?}",
+            volume.name,
+            volume.dev_path.display(),
+            volume.vendor.as_deref().unwrap_or("-"),
+            volume.model.as_deref().unwrap_or("-"),
+            volume.serial.as_deref().unwrap_or("-"),
+            volume.mountpoints,
+            volume.fs_type.clone(),
+            volume.removable
+        ));
     }
 }
 

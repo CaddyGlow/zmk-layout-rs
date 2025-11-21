@@ -10,7 +10,14 @@ use std::{
 use thiserror::Error;
 use zmk_layout_rs::{
     adapters::{
+<<<<<<< Updated upstream
         AdapterError, TemplateParseMode, export_standard_file,
+||||||| Stash base
+        AdapterError, TemplateParseMode, export_standard_file, export_standard_str_with_template_mode,
+        import_standard_str_with_template, render_standard_template, template_contains_placeholders,
+=======
+        AdapterError, TemplateParseMode, export_standard_str,
+>>>>>>> Stashed changes
         export_standard_str_with_template_mode, import_standard_str_with_template,
         render_standard_template, template_contains_placeholders,
     },
@@ -18,7 +25,7 @@ use zmk_layout_rs::{
         BuildError, BuildReport, BuildRequest, BuildRequestBuilder, BuildRequestError,
         CliDockerBackend, CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
     },
-    dts::{DtsDocument, DtsError},
+    dts::DtsDocument,
     flash::{
         FlashConfig, FlashError, FlashSideSelection, build_flash_targets, default_sides,
         discover_devices, flash_target, resolve_flash_source,
@@ -561,8 +568,15 @@ fn run_layer_export(args: &LayerExportArgs) -> Result<i32, CliError> {
             source,
         })?;
     } else {
-        let document = DtsDocument::parse_str(&source).map_err(DtsError::from)?;
-        export_standard_file(&document, &args.json)?;
+        let document = DtsDocument::parse_str(&source).map_err(|source| CliError::ParseLayout {
+            path: args.dts.clone(),
+            source,
+        })?;
+        let contents = export_standard_str(&document)?;
+        fs::write(&args.json, contents).map_err(|source| CliError::WriteFile {
+            path: args.json.clone(),
+            source,
+        })?;
     }
 
     eprintln!("exported layout to {}", args.json.display());
@@ -588,7 +602,11 @@ fn run_layer_import(args: &LayerImportArgs) -> Result<i32, CliError> {
         })?;
     } else {
         let imported = import_standard_str_with_template(&json_text, &template_source)?;
-        imported.write_to_file(&args.output)?;
+        let rendered = imported.to_string().map_err(CliError::Serialize)?;
+        fs::write(&args.output, rendered).map_err(|source| CliError::WriteFile {
+            path: args.output.clone(),
+            source,
+        })?;
     }
 
     eprintln!("imported layout to {}", args.output.display());
@@ -1227,6 +1245,4 @@ enum CliError {
     Flash(#[from] FlashError),
     #[error("adapter error: {0}")]
     Adapter(#[from] AdapterError),
-    #[error("DTS parsing error: {0}")]
-    DtsParse(#[from] DtsError),
 }
