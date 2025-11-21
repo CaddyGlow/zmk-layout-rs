@@ -179,6 +179,9 @@ impl LayoutBundle {
                 .template_vars
                 .insert("locale".into(), Value::String(locale));
         }
+        for (name, value) in config_parameters_to_defines(&payload.config_parameters) {
+            symbols.defines.insert(name, value);
+        }
 
         let target = BundleTarget {
             id: DEFAULT_MOERGO_TARGET_ID.to_string(),
@@ -191,7 +194,7 @@ impl LayoutBundle {
             }),
             template: Some(DEFAULT_MOERGO_TEMPLATE.to_string()),
             overlays: overlays.default_overlay_names(),
-            defines: vec![],
+            defines: symbols.defines.keys().cloned().collect(),
             includes: vec![],
             output: Some(BundleOutput {
                 format: "dtsi".to_string(),
@@ -1025,5 +1028,66 @@ fn non_empty(value: String) -> Option<String> {
         None
     } else {
         Some(value)
+    }
+}
+
+fn config_parameters_to_defines(params: &Option<Value>) -> BTreeMap<String, Value> {
+    let mut defines = BTreeMap::new();
+    let Some(params) = params else {
+        return defines;
+    };
+    match params {
+        Value::Array(entries) => {
+            for entry in entries {
+                if let Some((name, value)) = parse_config_param_entry(entry) {
+                    defines.insert(name, value);
+                }
+            }
+        }
+        Value::Object(map) => {
+            for (name, value) in map {
+                let trimmed = name.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                defines.insert(trimmed.to_string(), value.clone());
+            }
+        }
+        Value::String(name) => {
+            let trimmed = name.trim();
+            if !trimmed.is_empty() {
+                defines.insert(trimmed.to_string(), Value::Bool(true));
+            }
+        }
+        _ => {}
+    }
+    defines
+}
+
+fn parse_config_param_entry(entry: &Value) -> Option<(String, Value)> {
+    match entry {
+        Value::Object(obj) => {
+            let name = obj
+                .get("paramName")
+                .or_else(|| obj.get("name"))
+                .or_else(|| obj.get("key"))
+                .and_then(|val| val.as_str())
+                .map(|text| text.trim().to_string())
+                .filter(|text| !text.is_empty())?;
+            let value = obj
+                .get("value")
+                .cloned()
+                .unwrap_or_else(|| Value::Bool(true));
+            Some((name, value))
+        }
+        Value::String(name) => {
+            let trimmed = name.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some((trimmed.to_string(), Value::Bool(true)))
+            }
+        }
+        _ => None,
     }
 }

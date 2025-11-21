@@ -54,6 +54,34 @@ fn moergo_bundle_exports() {
 }
 
 #[test]
+fn moergo_config_parameters_become_defines() {
+    let json = fs::read_to_string("examples/test.json").expect("fixture present");
+    let bundle = LayoutBundle::from_moergo_str(&json).expect("import");
+
+    assert_eq!(
+        bundle.symbols.defines.get("HID_POINTING"),
+        Some(&Value::String("y".into()))
+    );
+    assert_eq!(
+        bundle.symbols.defines.get("HID_POINTING_SMOOTH_SCROLLING"),
+        Some(&Value::String("y".into()))
+    );
+
+    let target = bundle.targets.first().expect("target present");
+    assert!(
+        target.defines.contains(&"HID_POINTING".into())
+            && target
+                .defines
+                .contains(&"HID_POINTING_SMOOTH_SCROLLING".into())
+    );
+    assert_eq!(
+        target.defines.len(),
+        bundle.symbols.defines.len(),
+        "all defines should be attached to the default target"
+    );
+}
+
+#[test]
 fn renders_target_scoped_overlays_and_defines() {
     let mut template = NamedTempFile::new().expect("temp template");
     writeln!(
