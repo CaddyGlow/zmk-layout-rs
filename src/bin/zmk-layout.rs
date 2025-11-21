@@ -10,21 +10,7 @@ use std::{
 use thiserror::Error;
 use zmk_layout_rs::{
     adapters::{
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-        AdapterError, TemplateParseMode, export_standard_file,
-||||||| Stash base
-        AdapterError, TemplateParseMode, export_standard_file, export_standard_str_with_template_mode,
-        import_standard_str_with_template, render_standard_template, template_contains_placeholders,
-=======
-        AdapterError, TemplateParseMode, export_standard_str,
->>>>>>> Stashed changes
-||||||| Stash base
-        AdapterError, TemplateParseMode, export_standard_file, export_standard_str_with_template_mode,
-        import_standard_str_with_template, render_standard_template, template_contains_placeholders,
-=======
-        AdapterError, TemplateParseMode, export_standard_str,
->>>>>>> Stashed changes
+        AdapterError, TemplateParseMode, export_standard_file, export_standard_str,
         export_standard_str_with_template_mode, import_standard_str_with_template,
         render_standard_template, template_contains_placeholders,
     },

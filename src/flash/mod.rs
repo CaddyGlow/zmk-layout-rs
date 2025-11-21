@@ -1599,54 +1599,54 @@ fn wait_for_device_windows(
 fn probe_windows(query: Option<&str>) -> Result<Vec<WinVolume>, FlashError> {
     flash_debug("probing windows volumes via powershell Get-Volume");
     // Try to enrich volume data with disk metadata so vendor/model/serial queries can work.
-    let ps_script = r#"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-function Get-UsbLogicalDisks {
-    $results = @()
-    $usbDisks = Get-CimInstance Win32_DiskDrive | Where-Object { $_.InterfaceType -eq 'USB' }
-    foreach ($disk in $usbDisks) {
-        $pnp = $disk.PNPDeviceID
-        $vendor = if ($pnp -match 'VEN_([^&]+)') { $matches[1] } else { $disk.Manufacturer }
-        $vid = if ($pnp -match 'VID_([0-9A-Fa-f]+)') { $matches[1] } else { $null }
-        $pid = if ($pnp -match 'PID_([0-9A-Fa-f]+)') { $matches[1] } else { $null }
-        $pnpSerial = $null
-        if ($pnp -match '\\\\([^\\&]+)$') { $pnpSerial = $matches[1] }
-        elseif ($pnp -match 'REV_\\([^\\&]+)') { $pnpSerial = $matches[1] }
-        $serial = if ($pnpSerial) { $pnpSerial } elseif ($disk.SerialNumber) { $disk.SerialNumber } else { $null }
-        $partitions = Get-CimInstance -Query \"ASSOCIATORS OF {Win32_DiskDrive.DeviceID='$($disk.DeviceID)'} WHERE AssocClass=Win32_DiskDriveToDiskPartition\"
-        foreach ($partition in $partitions) {
-            $logicalDisks = Get-CimInstance -Query \"ASSOCIATORS OF {Win32_DiskPartition.DeviceID='$($partition.DeviceID)'} WHERE AssocClass=Win32_LogicalDiskToPartition\"
-            foreach ($ld in $logicalDisks) {
-                if (-not $ld.DeviceID) { continue }
-                $path = \"$($ld.DeviceID)\\\"
-                $mounts = @($path)
-                $results += [PSCustomObject]@{
-                    DriveLetter=$ld.DeviceID
-                    Path=$path
-                    Mountpoints=$mounts
-                    FileSystem=$ld.FileSystem
-                    FileSystemLabel=$ld.VolumeName
-                    DriveType=$ld.DriveType
-                    FriendlyName=$disk.Caption
-                    Model=$disk.Model
-                    Manufacturer=$vendor
-                    DiskSerial=$disk.SerialNumber
-                    WmiSerial=$null
-                    PnpSerial=$pnpSerial
-                    SerialNumber=$serial
-                    UniqueId=$disk.Signature
-                    PartitionGuid=$partition.Guid
-                    PnpDeviceId=$pnp
-                    Vid=$vid
-                    Pid=$pid
-                    Removable=($disk.MediaType -eq 'Removable Media')
-                }
-            }
-        }
+    // Use the provided minimal USB script to align with other platforms.
+    let ps_script = r#"$ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+$results = @()
+
+Get-CimInstance Win32_DiskDrive | Where-Object InterfaceType -eq 'USB' | ForEach-Object {
+    $disk = $_
+
+    # Extract vendor, serial from disk's PNPDeviceID
+    $vendor = if ($disk.PNPDeviceID -match 'VEN_([^&]+)') { $matches[1] } else { $disk.Manufacturer }
+    $serial = if ($disk.PNPDeviceID -match 'REV_\\([^\\&]+)') { $matches[1] } else { 'Unknown' }
+
+    # Find the parent USB device using the serial number
+    $usbDevice = Get-CimInstance Win32_USBHub | Where-Object {
+        $_.DeviceID -like "*$serial*"
+    } | Select-Object -First 1
+
+    # Extract VID and PID from USB device
+    if ($usbDevice) {
+        $vendorId = if ($usbDevice.DeviceID -match 'VID_([0-9A-F]+)') { $matches[1] } else { 'Unknown' }
+        $productId = if ($usbDevice.DeviceID -match 'PID_([0-9A-F]+)') { $matches[1] } else { 'Unknown' }
+    } else {
+        $vendorId = 'Unknown'
+        $productId = 'Unknown'
     }
-    return $results
+
+    # Get mount points
+    $partitions = Get-CimInstance -Query "ASSOCIATORS OF {Win32_DiskDrive.DeviceID='$($disk.DeviceID)'} WHERE AssocClass=Win32_DiskDriveToDiskPartition"
+    $mountpoints = @()
+    foreach ($partition in $partitions) {
+        $logicalDisks = Get-CimInstance -Query "ASSOCIATORS OF {Win32_DiskPartition.DeviceID='$($partition.DeviceID)'} WHERE AssocClass=Win32_LogicalDiskToPartition"
+        $mountpoints += $logicalDisks | ForEach-Object { $_.DeviceID }
+    }
+
+    $results += [PSCustomObject]@{
+        Name        = $disk.Caption
+        Model       = $disk.Model
+        Vendor      = $vendor
+        VID         = $vendorId
+        PID         = $productId
+        Serial      = $serial
+        Mountpoints = $mountpoints
+        Removable   = $disk.MediaType -eq 'Removable Media'
+    }
 }
 
-Get-UsbLogicalDisks | ConvertTo-Json -Compress"#;
+if (-not $results -or $results.Count -eq 0) { '[]' } else { $results | ConvertTo-Json -Compress }"#;
     let output = Command::new("powershell")
         .args(["-NoProfile", "-Command", ps_script])
         .output()
@@ -1706,160 +1706,84 @@ Get-UsbLogicalDisks | ConvertTo-Json -Compress"#;
 #[cfg(target_os = "windows")]
 fn parse_windows_volume(value: &serde_json::Value) -> Option<WinVolume> {
     let clean = |s: Option<String>| {
-        s.map(|mut v| {
-            v = v.trim().trim_end_matches('.').to_string();
-            if let Some(idx) = v.rfind('&') {
-                if v[idx + 1..].chars().all(|c| c == '0') {
-                    v.truncate(idx);
-                }
-            }
-            v
-        })
-        .and_then(|v| {
-            let lower = v.to_ascii_lowercase();
-            if v.is_empty()
-                || lower == "0"
-                || lower == "0000000000000000"
-                || lower == "0000_0000_0000_0000_00000000"
-            {
-                None
-            } else {
-                Some(v)
-            }
-        })
+        s.map(|v| v.trim().trim_end_matches('.').to_string())
+            .filter(|v| {
+                let lower = v.to_ascii_lowercase();
+                !v.is_empty() && v != "0" && lower != "unknown"
+            })
     };
-    let drive_letter = value
-        .get("DriveLetter")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let path_value = value
-        .get("Path")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let label = value
-        .get("FileSystemLabel")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let fs_type = value
-        .get("FileSystem")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let drive_type_str = value
-        .get("DriveType")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let drive_type_num = value.get("DriveType").and_then(|v| v.as_i64());
-    let friendly_name = value
-        .get("FriendlyName")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let model = value
-        .get("Model")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .or_else(|| friendly_name.clone());
-    let manufacturer = value
-        .get("Manufacturer")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let disk_serial = value
-        .get("DiskSerial")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let wmi_serial = value
-        .get("WmiSerial")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let serial_number = value
-        .get("SerialNumber")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let unique_id = value
-        .get("UniqueId")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let partition_guid = value
-        .get("PartitionGuid")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let pnp_device_id = value
-        .get("PnpDeviceId")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let pnp_serial = value
-        .get("PnpSerial")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let vid = value
-        .get("Vid")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let pid = value
-        .get("Pid")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string());
-    let serial = clean(pnp_serial.clone())
-        .or_else(|| clean(serial_number.clone()))
-        .or_else(|| clean(disk_serial.clone()))
-        .or_else(|| clean(wmi_serial.clone()))
-        .or_else(|| clean(pnp_device_id.clone()))
-        .or_else(|| clean(unique_id.clone()))
-        .or_else(|| clean(partition_guid.clone()))
-        .or_else(|| clean(label.clone()));
-    let removable = if let Some(ref t) = drive_type_str {
-        Some(t.eq_ignore_ascii_case("removable"))
-    } else if let Some(num) = drive_type_num {
-        Some(num == 2)
-    } else {
-        None
-    };
+
+    let name = clean(
+        value
+            .get("Name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+    )
+    .unwrap_or_else(|| "volume".into());
+    let model = clean(
+        value
+            .get("Model")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+    );
+    let vendor = clean(
+        value
+            .get("Vendor")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+    );
+    let serial = clean(
+        value
+            .get("Serial")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+    );
+    let removable = value
+        .get("Removable")
+        .and_then(|v| v.as_bool())
+        .or_else(|| {
+            value
+                .get("Removable")
+                .and_then(|v| v.as_str())
+                .map(|s| s.eq_ignore_ascii_case("true"))
+        });
+
     let mut mountpoints = Vec::new();
-    if let Some(path) = path_value.as_ref() {
-        if !path.is_empty() {
-            mountpoints.push(PathBuf::from(path));
+    if let Some(mps) = value.get("Mountpoints").and_then(|v| v.as_array()) {
+        for mp in mps {
+            if let Some(s) = mp.as_str() {
+                let trimmed = s.trim().trim_end_matches('\\');
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let path = if trimmed.ends_with(':') {
+                    format!(r"{}\\", trimmed)
+                } else {
+                    format!(r"{}:\\", trimmed)
+                };
+                mountpoints.push(PathBuf::from(path));
+            }
         }
-    } else if let Some(letter) = drive_letter.clone() {
-        let mp = format!("{}:\\", letter);
-        mountpoints.push(PathBuf::from(mp));
     }
     if mountpoints.is_empty() {
         return None;
     }
-    let name = drive_letter
-        .clone()
-        .unwrap_or_else(|| label.clone().unwrap_or_else(|| "volume".into()));
-    let vendor = manufacturer.as_ref().map(String::from).or_else(|| {
-        model
-            .as_ref()
-            .and_then(|m| m.split_whitespace().next())
-            .map(|v| v.to_string())
-    });
-    let dev_path = path_value
-        .as_ref()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
+    let dev_path = mountpoints
+        .get(0)
+        .cloned()
         .unwrap_or_else(|| PathBuf::from(name.clone()));
     flash_debug(format!(
-        "windows volume raw_serials disk={:?} wmi={:?} pnp_serial={:?} serial_number={:?} unique_id={:?} partition_guid={:?} pnp_id={:?} vid={:?} pid={:?} chosen={:?}",
-        disk_serial,
-        wmi_serial,
-        pnp_serial,
-        serial_number,
-        unique_id,
-        partition_guid,
-        pnp_device_id,
-        vid,
-        pid,
-        serial
+        "windows volume parsed name={} model={:?} vendor={:?} serial={:?} mountpoints={:?} removable={:?}",
+        name, model, vendor, serial, mountpoints, removable
     ));
     Some(WinVolume {
-        name: name.clone(),
+        name,
         dev_path,
         mountpoints,
         serial,
         vendor,
         model,
-        fs_type,
+        fs_type: None,
         removable,
     })
 }
