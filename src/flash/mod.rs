@@ -1,18 +1,18 @@
 //! USB mass-storage flashing helpers (UF2-style) for keyboards such as the Glove80.
 
-use regex::Regex;
-use serde::Deserialize;
 #[cfg(target_os = "macos")]
 use plist;
+use regex::Regex;
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::{
     fs::{self, File},
     io,
     path::{Path, PathBuf},
-    process::Command,
-    thread::sleep,
-    time::{Duration, Instant},
+    time::Duration,
 };
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+use std::{process::Command, thread::sleep, time::Instant};
 use thiserror::Error;
 
 use crate::profiles::{HardwareFlash, KeyboardProfileDoc};
@@ -158,10 +158,7 @@ pub enum FlashError {
     #[error("invalid device query `{0}`")]
     InvalidQuery(String),
     #[error("failed to read build-info {path}: {source}")]
-    BuildInfoRead {
-        path: PathBuf,
-        source: io::Error,
-    },
+    BuildInfoRead { path: PathBuf, source: io::Error },
     #[error("failed to parse build-info {path}: {source}")]
     BuildInfoParse {
         path: PathBuf,
@@ -170,10 +167,7 @@ pub enum FlashError {
     #[error("no UF2 artifacts found in {0}")]
     NoArtifactsFound(PathBuf),
     #[error("failed to copy firmware to {dest}: {source}")]
-    Copy {
-        dest: PathBuf,
-        source: io::Error,
-    },
+    Copy { dest: PathBuf, source: io::Error },
     #[error("device serial {serial} was already flashed in this run")]
     DuplicateSerial { serial: String },
     #[error("board-id mismatch for {device}: expected {expected}, found {found}")]
@@ -194,27 +188,7 @@ pub enum FlashError {
 
 /// List the currently connected storage devices that match the flash query.
 pub fn discover_devices(config: &FlashConfig) -> Result<Vec<FlashDiscovery>, FlashError> {
-    #[cfg(target_os = "linux")]
-    {
-        let devices = probe_linux(config.device_query.as_deref())?;
-        return Ok(devices.into_iter().map(FlashDiscovery::from).collect());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let devices = probe_macos(config.device_query.as_deref())?;
-        return Ok(devices.into_iter().map(FlashDiscovery::from).collect());
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let devices = probe_windows(config.device_query.as_deref())?;
-        return Ok(devices.into_iter().map(FlashDiscovery::from).collect());
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    {
-        Err(FlashError::UnsupportedPlatform(
-            "device discovery only supported on Linux, macOS, and Windows".into(),
-        ))
-    }
+    platform::discover_devices(config)
 }
 
 /// Create flash targets from a keyboard profile and side selection.
@@ -241,7 +215,12 @@ fn board_id_for_side(profile: &KeyboardProfileDoc, side: FlashSide) -> Option<St
         .hardware
         .boards
         .iter()
-        .find(|board| board.role.as_deref().map_or(false, |r| r.eq_ignore_ascii_case(role)))
+        .find(|board| {
+            board
+                .role
+                .as_deref()
+                .map_or(false, |r| r.eq_ignore_ascii_case(role))
+        })
         .map(|board| board.id.clone())
 }
 
@@ -394,7 +373,10 @@ pub fn flash_target(
 }
 
 /// Determine default sides based on side flag and hardware split-ness.
-pub fn default_sides(profile: Option<&KeyboardProfileDoc>, side_flag: Option<FlashSideSelection>) -> Vec<FlashSide> {
+pub fn default_sides(
+    profile: Option<&KeyboardProfileDoc>,
+    side_flag: Option<FlashSideSelection>,
+) -> Vec<FlashSide> {
     if let Some(flag) = side_flag {
         return match flag {
             FlashSideSelection::Left => vec![FlashSide::Left],
@@ -475,9 +457,7 @@ fn flash_source_from_directory(
     required_sides: &[FlashSide],
 ) -> Result<FlashSource, FlashError> {
     let mut uf2_files = Vec::new();
-    for entry in
-        fs::read_dir(dir).map_err(|_| FlashError::NoArtifactsFound(dir.to_path_buf()))?
-    {
+    for entry in fs::read_dir(dir).map_err(|_| FlashError::NoArtifactsFound(dir.to_path_buf()))? {
         let entry = match entry {
             Ok(value) => value,
             Err(_) => continue,
@@ -486,7 +466,11 @@ fn flash_source_from_directory(
         if !path.is_file() {
             continue;
         }
-        if path.extension().and_then(|ext| ext.to_str()).map_or(false, |ext| ext.eq_ignore_ascii_case("uf2")) {
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map_or(false, |ext| ext.eq_ignore_ascii_case("uf2"))
+        {
             uf2_files.push(path);
         }
     }
@@ -579,20 +563,86 @@ fn wait_for_device(
     target: Option<&FlashTarget>,
     seen_serials: &HashSet<String>,
 ) -> Result<FlashDevice, FlashError> {
-    #[cfg(target_os = "linux")]
-    {
+    platform::wait_for_device(config, target, seen_serials)
+}
+
+#[cfg(target_os = "linux")]
+mod platform {
+    use super::*;
+
+    pub(super) fn discover_devices(
+        config: &FlashConfig,
+    ) -> Result<Vec<FlashDiscovery>, FlashError> {
+        let devices = probe_linux(config.device_query.as_deref())?;
+        Ok(devices.into_iter().map(FlashDiscovery::from).collect())
+    }
+
+    pub(super) fn wait_for_device(
+        config: &FlashConfig,
+        target: Option<&FlashTarget>,
+        seen_serials: &HashSet<String>,
+    ) -> Result<FlashDevice, FlashError> {
         wait_for_device_linux(config, target, seen_serials)
     }
-    #[cfg(target_os = "macos")]
-    {
+}
+
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::*;
+
+    pub(super) fn discover_devices(
+        config: &FlashConfig,
+    ) -> Result<Vec<FlashDiscovery>, FlashError> {
+        let devices = probe_macos(config.device_query.as_deref())?;
+        Ok(devices.into_iter().map(FlashDiscovery::from).collect())
+    }
+
+    pub(super) fn wait_for_device(
+        config: &FlashConfig,
+        target: Option<&FlashTarget>,
+        seen_serials: &HashSet<String>,
+    ) -> Result<FlashDevice, FlashError> {
         wait_for_device_macos(config, target, seen_serials)
     }
-    #[cfg(target_os = "windows")]
-    {
+}
+
+#[cfg(target_os = "windows")]
+mod platform {
+    use super::*;
+
+    pub(super) fn discover_devices(
+        config: &FlashConfig,
+    ) -> Result<Vec<FlashDiscovery>, FlashError> {
+        let devices = probe_windows(config.device_query.as_deref())?;
+        Ok(devices.into_iter().map(FlashDiscovery::from).collect())
+    }
+
+    pub(super) fn wait_for_device(
+        config: &FlashConfig,
+        target: Option<&FlashTarget>,
+        seen_serials: &HashSet<String>,
+    ) -> Result<FlashDevice, FlashError> {
         wait_for_device_windows(config, target, seen_serials)
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-    {
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+mod platform {
+    use super::*;
+
+    pub(super) fn discover_devices(
+        _config: &FlashConfig,
+    ) -> Result<Vec<FlashDiscovery>, FlashError> {
+        Err(FlashError::UnsupportedPlatform(
+            "device discovery only supported on Linux, macOS, and Windows".into(),
+        ))
+    }
+
+    pub(super) fn wait_for_device(
+        _config: &FlashConfig,
+        _target: Option<&FlashTarget>,
+        _seen_serials: &HashSet<String>,
+    ) -> Result<FlashDevice, FlashError> {
         Err(FlashError::UnsupportedPlatform(
             "automatic device discovery is not implemented for this platform".into(),
         ))
@@ -600,8 +650,10 @@ fn wait_for_device(
 }
 
 fn load_build_info(path: &Path) -> Result<BuildInfo, FlashError> {
-    let data =
-        fs::read(path).map_err(|source| FlashError::BuildInfoRead { path: path.to_path_buf(), source })?;
+    let data = fs::read(path).map_err(|source| FlashError::BuildInfoRead {
+        path: path.to_path_buf(),
+        source,
+    })?;
     serde_json::from_slice(&data).map_err(|source| FlashError::BuildInfoParse {
         path: path.to_path_buf(),
         source,
@@ -1339,7 +1391,10 @@ fn parse_windows_volume(value: &serde_json::Value) -> Option<WinVolume> {
         .get("DriveLetter")
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string());
-    let path_value = value.get("Path").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let path_value = value
+        .get("Path")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let label = value
         .get("FileSystemLabel")
         .and_then(|v| v.as_str())
@@ -1461,7 +1516,8 @@ impl QueryClause {
         }
         if let Some((field, value)) = raw.split_once("~=") {
             let field = QueryField::parse(field.trim())?;
-            let regex = Regex::new(value.trim()).map_err(|_| FlashError::InvalidQuery(raw.into()))?;
+            let regex =
+                Regex::new(value.trim()).map_err(|_| FlashError::InvalidQuery(raw.into()))?;
             return Ok(QueryClause::Regex { field, regex });
         }
         if let Some((field, value)) = raw.split_once('=') {

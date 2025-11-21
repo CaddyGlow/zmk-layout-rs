@@ -15,8 +15,8 @@ use zmk_layout_rs::{
     },
     dts::DtsDocument,
     flash::{
-        FlashConfig, FlashError, FlashSideSelection, build_flash_targets,
-        default_sides, discover_devices, flash_target, resolve_flash_source,
+        FlashConfig, FlashError, FlashSideSelection, build_flash_targets, default_sides,
+        discover_devices, flash_target, resolve_flash_source,
     },
     profiles::KeyboardProfileDoc,
     providers::KeymapDocument,
@@ -247,7 +247,11 @@ struct FirmwareFlashArgs {
     firmware: Option<PathBuf>,
     #[arg(long, value_name = "FILE", help = "UF2 file to flash on the left half")]
     left: Option<PathBuf>,
-    #[arg(long, value_name = "FILE", help = "UF2 file to flash on the right half")]
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "UF2 file to flash on the right half"
+    )]
     right: Option<PathBuf>,
     #[arg(
         long,
@@ -700,7 +704,10 @@ fn discover_profile_paths(dir: &Path) -> Result<Vec<PathBuf>, CliError> {
         )));
     }
 
-    Ok(available.into_iter().map(|name| dir.join(format!("{}.toml", name))).collect())
+    Ok(available
+        .into_iter()
+        .map(|name| dir.join(format!("{}.toml", name)))
+        .collect())
 }
 
 fn run_firmware_build(args: &FirmwareBuildArgs) -> Result<i32, CliError> {

@@ -58,8 +58,8 @@ impl FirmwareManifest {
         // Fall back to embedded manifest
         let embedded = EmbeddedFirmwareProfiles::get(&filename)
             .ok_or_else(|| ManifestError::NotFound(name.to_string()))?;
-        let contents = std::str::from_utf8(embedded.data.as_ref())
-            .map_err(|_| ManifestError::InvalidUtf8)?;
+        let contents =
+            std::str::from_utf8(embedded.data.as_ref()).map_err(|_| ManifestError::InvalidUtf8)?;
         Self::from_toml_str(contents)
     }
 
@@ -601,7 +601,13 @@ mod tests {
     #[test]
     fn lists_available_manifests() {
         let manifests = FirmwareManifest::list_available();
-        assert!(!manifests.is_empty(), "should have at least embedded manifests");
-        assert!(manifests.contains(&"glove80".to_string()), "should include glove80");
+        assert!(
+            !manifests.is_empty(),
+            "should have at least embedded manifests"
+        );
+        assert!(
+            manifests.contains(&"glove80".to_string()),
+            "should include glove80"
+        );
     }
 }

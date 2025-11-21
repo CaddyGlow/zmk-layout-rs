@@ -4,9 +4,8 @@ use mlua::Lua;
 use tempfile::tempdir;
 
 use zmk_layout_rs::{
-    adapters::standard::export_standard_str,
-    dts::DtsDocument,
-    layout_engine::LayoutEngine, lua_api::api::install_layout_api, providers::KeymapDocument,
+    adapters::standard::export_standard_str, dts::DtsDocument, layout_engine::LayoutEngine,
+    lua_api::api::install_layout_api, providers::KeymapDocument,
 };
 
 fn make_engine() -> LayoutEngine {

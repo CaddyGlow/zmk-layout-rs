@@ -115,13 +115,16 @@ impl UserData for LayoutApi {
             Ok(())
         });
 
-        methods.add_method("load_json", |_, this, (json_path, template_path): (String, String)| {
-            let doc = import_standard_file_with_template(&json_path, &template_path)
-                .map_err(|err| script_error(format!("failed to import {json_path}: {err}")))?;
-            let keymap = KeymapDocument::from_document(doc);
-            *this.layout.borrow_mut() = LayoutEngine::new(keymap);
-            Ok(())
-        });
+        methods.add_method(
+            "load_json",
+            |_, this, (json_path, template_path): (String, String)| {
+                let doc = import_standard_file_with_template(&json_path, &template_path)
+                    .map_err(|err| script_error(format!("failed to import {json_path}: {err}")))?;
+                let keymap = KeymapDocument::from_document(doc);
+                *this.layout.borrow_mut() = LayoutEngine::new(keymap);
+                Ok(())
+            },
+        );
 
         methods.add_method("save_dtsi", |_, this, path: String| {
             let document = this.layout.borrow().document().document().clone();

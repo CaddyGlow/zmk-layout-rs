@@ -972,7 +972,13 @@ template = "layout.dtsi"
     #[test]
     fn lists_available_profiles() {
         let profiles = KeyboardProfileDoc::list_available();
-        assert!(!profiles.is_empty(), "should have at least embedded profiles");
-        assert!(profiles.contains(&"glove80".to_string()), "should include glove80");
+        assert!(
+            !profiles.is_empty(),
+            "should have at least embedded profiles"
+        );
+        assert!(
+            profiles.contains(&"glove80".to_string()),
+            "should include glove80"
+        );
     }
 }
