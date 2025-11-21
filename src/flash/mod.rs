@@ -1141,7 +1141,7 @@ fn diskutil_mount(dev_path: &Path) -> Result<PathBuf, FlashError> {
     }
     if let Some(info) = diskutil_info(dev_path)? {
         if let Some(mount) = info.mountpoint {
-            return Ok(mount);
+            return Ok(PathBuf::from(mount));
         }
     }
     Err(FlashError::ProbeFailed(format!(
