@@ -27,6 +27,7 @@ use zmk_layout_rs::{
 };
 
 fn main() {
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("")).try_init();
     if let Err(err) = run_cli() {
         eprintln!("error: {err}");
         std::process::exit(1);

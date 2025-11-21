@@ -4,8 +4,9 @@
 use plist;
 use regex::Regex;
 use serde::Deserialize;
-use std::collections::HashSet;
 use std::{
+    collections::HashSet,
+    ffi::OsStr,
     fs::{self, File},
     io,
     path::{Path, PathBuf},
@@ -96,6 +97,10 @@ impl From<&HardwareFlash> for FlashConfig {
         }
         config
     }
+}
+
+fn flash_debug(message: impl AsRef<str>) {
+    log::debug!("{}", message.as_ref());
 }
 
 /// Target with side + board metadata.
@@ -292,6 +297,14 @@ pub fn flash_target(
     let artifact = source
         .artifact_for_side(target.side)
         .ok_or(FlashError::MissingArtifact(target.side))?;
+    flash_debug(format!(
+        "flash_target side={} artifact={} mount_override={}",
+        target.side,
+        artifact.display(),
+        mount_override
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<auto>".into())
+    ));
     let device = if let Some(path) = mount_override {
         FlashDevice {
             name: path.display().to_string(),
@@ -307,6 +320,17 @@ pub fn flash_target(
     } else {
         wait_for_device(&target.config, Some(target), seen_serials)?
     };
+    flash_debug(format!(
+        "using device name={} dev_path={} mountpoint={} serial={}",
+        device.name,
+        device
+            .dev_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "-".into()),
+        device.mountpoint.display(),
+        device.serial.as_deref().unwrap_or("-")
+    ));
     if let Some(serial) = device.serial.as_ref() {
         if seen_serials.contains(serial) {
             return Err(FlashError::DuplicateSerial {
@@ -334,6 +358,12 @@ pub fn flash_target(
     }
     let (bytes_written, mut copy_warnings) =
         copy_to_mountpoint(artifact, &device.mountpoint, target.config.sync_after_copy)?;
+    flash_debug(format!(
+        "copy finished side={} bytes={} mountpoint={}",
+        target.side,
+        bytes_written,
+        device.mountpoint.display()
+    ));
     warnings.append(&mut copy_warnings);
     if let Some(serial) = device.serial.clone() {
         seen_serials.insert(serial.clone());
@@ -521,6 +551,12 @@ fn copy_to_mountpoint(
         dest: dest.clone(),
         source,
     })?;
+    flash_debug(format!(
+        "copied artifact {} to {} ({} bytes)",
+        artifact.display(),
+        dest.display(),
+        bytes_copied
+    ));
     let mut warnings = Vec::new();
     if sync_after_copy {
         if let Err(err) = File::open(&dest).and_then(|file| file.sync_all()) {
@@ -589,6 +625,8 @@ mod platform {
 #[cfg(target_os = "macos")]
 mod platform {
     use super::*;
+    use serde_json::Value;
+    use std::collections::HashMap;
 
     pub(super) fn discover_devices(
         config: &FlashConfig,
@@ -603,6 +641,77 @@ mod platform {
         seen_serials: &HashSet<String>,
     ) -> Result<FlashDevice, FlashError> {
         wait_for_device_macos(config, target, seen_serials)
+    }
+
+    #[derive(Debug, Clone, Default)]
+    pub(super) struct UsbDeviceInfo {
+        pub(super) vendor: Option<String>,
+        pub(super) product: Option<String>,
+        pub(super) serial: Option<String>,
+        pub(super) removable: Option<bool>,
+    }
+
+    pub(super) fn usb_device_metadata() -> Option<HashMap<String, UsbDeviceInfo>> {
+        let output = Command::new("system_profiler")
+            .args(["-json", "SPUSBDataType"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let json: Value = serde_json::from_slice(&output.stdout).ok()?;
+        let mut map = HashMap::new();
+        if let Some(items) = json.get("SPUSBDataType").and_then(|v| v.as_array()) {
+            for item in items {
+                walk_usb_items(item, &mut map);
+            }
+        }
+        Some(map)
+    }
+
+    fn walk_usb_items(value: &Value, map: &mut HashMap<String, UsbDeviceInfo>) {
+        let vendor = value
+            .get("manufacturer")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        let product = value
+            .get("_name")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        let serial = value
+            .get("serial_num")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        if let Some(media) = value.get("Media").and_then(|v| v.as_array()) {
+            for item in media {
+                let removable = item
+                    .get("removable_media")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.eq_ignore_ascii_case("yes") || s.eq_ignore_ascii_case("true"));
+                if let Some(bsd) = item.get("bsd_name").and_then(|v| v.as_str()) {
+                    map.insert(
+                        bsd.to_string(),
+                        UsbDeviceInfo {
+                            vendor: vendor.clone(),
+                            product: product.clone(),
+                            serial: serial.clone(),
+                            removable,
+                        },
+                    );
+                }
+            }
+        }
+        if let Some(children) = value.get("_items").and_then(|v| v.as_array()) {
+            for child in children {
+                walk_usb_items(child, map);
+            }
+        }
     }
 }
 
@@ -684,9 +793,17 @@ fn wait_for_device_linux(
 ) -> Result<FlashDevice, FlashError> {
     let deadline = Instant::now() + config.mount_timeout;
     let mut last_error = None;
+    let mut attempts = 0;
     while Instant::now() < deadline {
         match probe_linux(config.device_query.as_deref()) {
             Ok(mut devices) => {
+                attempts += 1;
+                flash_debug(format!(
+                    "probe attempt {} found {} linux devices (query={})",
+                    attempts,
+                    devices.len(),
+                    config.device_query.as_deref().unwrap_or("<none>")
+                ));
                 if !seen_serials.is_empty() {
                     let previous = devices.len();
                     devices.retain(|d| {
@@ -854,6 +971,7 @@ mod tests {
         assert!(query.matches(&meta));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn parses_udisksctl_mount_output() {
         let output = "Mounted /dev/sda1 at /media/user/GLV80.\n";
@@ -1023,9 +1141,17 @@ fn wait_for_device_macos(
 ) -> Result<FlashDevice, FlashError> {
     let deadline = Instant::now() + config.mount_timeout;
     let mut last_error = None;
+    let mut attempts = 0;
     while Instant::now() < deadline {
         match probe_macos(config.device_query.as_deref()) {
             Ok(mut devices) => {
+                attempts += 1;
+                flash_debug(format!(
+                    "probe attempt {} found {} macOS devices (query={})",
+                    attempts,
+                    devices.len(),
+                    config.device_query.as_deref().unwrap_or("<none>")
+                ));
                 if !seen_serials.is_empty() {
                     devices.retain(|d| {
                         d.serial
@@ -1119,11 +1245,65 @@ fn probe_macos(query: Option<&str>) -> Result<Vec<MacDisk>, FlashError> {
     for entry in parsed.all_devices.into_iter().flatten() {
         flatten_diskutil(entry, &mut devices);
     }
+    log_macos_devices("before filter", &devices);
+    if devices
+        .iter()
+        .any(|d| d.vendor.is_none() || d.serial.is_none())
+    {
+        enrich_from_usb_metadata(&mut devices);
+        log_macos_devices("after usb enrichment", &devices);
+    }
     if let Some(query_str) = query {
         let matcher = Query::parse(query_str)?;
         devices.retain(|dev| matcher.matches(&QueryMetadata::from(dev)));
+        log_macos_devices("after filter", &devices);
     }
     Ok(devices)
+}
+
+#[cfg(target_os = "macos")]
+fn enrich_from_usb_metadata(devices: &mut [MacDisk]) {
+    if let Some(usb_info) = platform::usb_device_metadata() {
+        for dev in devices {
+            if let Some(name) = dev.dev_path.file_name().and_then(OsStr::to_str) {
+                if let Some(info) = usb_info.get(name) {
+                    if dev.vendor.is_none() {
+                        dev.vendor = info.vendor.clone();
+                    }
+                    if dev.model.is_none() {
+                        dev.model = info.product.clone();
+                    }
+                    if dev
+                        .serial
+                        .as_deref()
+                        .map_or(true, |s| s.eq_ignore_ascii_case("no name"))
+                    {
+                        dev.serial = info.serial.clone();
+                    }
+                    if dev.removable.is_none() {
+                        dev.removable = info.removable;
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn log_macos_devices(label: &str, devices: &[MacDisk]) {
+    flash_debug(format!("macOS devices {label}: {} found", devices.len()));
+    for dev in devices {
+        flash_debug(format!(
+            "  name={} model={} vendor={} serial={} mountpoints={:?} removable={:?} fs_type={:?}",
+            dev.name,
+            dev.model.as_deref().unwrap_or("-"),
+            dev.vendor.as_deref().unwrap_or("-"),
+            dev.serial.as_deref().unwrap_or("-"),
+            dev.mountpoints,
+            dev.removable,
+            dev.fs_type
+        ));
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1141,7 +1321,8 @@ fn diskutil_mount(dev_path: &Path) -> Result<PathBuf, FlashError> {
     }
     if let Some(info) = diskutil_info(dev_path)? {
         if let Some(mount) = info.mountpoint {
-            return Ok(PathBuf::from(mount));
+            // diskutil returns mountpoints as Strings; convert to PathBuf for callers
+            return Ok(mount.into());
         }
     }
     Err(FlashError::ProbeFailed(format!(
@@ -1281,9 +1462,17 @@ fn wait_for_device_windows(
 ) -> Result<FlashDevice, FlashError> {
     let deadline = Instant::now() + config.mount_timeout;
     let mut last_error = None;
+    let mut attempts = 0;
     while Instant::now() < deadline {
         match probe_windows(config.device_query.as_deref()) {
             Ok(mut devices) => {
+                attempts += 1;
+                flash_debug(format!(
+                    "probe attempt {} found {} windows devices (query={})",
+                    attempts,
+                    devices.len(),
+                    config.device_query.as_deref().unwrap_or("<none>")
+                ));
                 if !seen_serials.is_empty() {
                     devices.retain(|d| {
                         d.serial
