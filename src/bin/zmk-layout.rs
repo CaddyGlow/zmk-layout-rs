@@ -50,6 +50,7 @@ fn run_cli() -> Result<(), CliError> {
         Command::Firmware(cmd) => run_firmware(cmd)?,
         Command::Profiles(cmd) => run_profiles(cmd)?,
         Command::Layer(cmd) => run_layer(cmd)?,
+        Command::Bundle(cmd) => run_bundle(cmd)?,
     };
     std::process::exit(code);
 }
@@ -73,6 +74,8 @@ enum Command {
     Profiles(ProfilesCommand),
     #[command(subcommand)]
     Layer(LayerCommand),
+    #[command(subcommand)]
+    Bundle(BundleCommand),
 }
 
 #[derive(Args, Clone)]
@@ -158,6 +161,54 @@ enum ProfilesCommand {
 enum LayerCommand {
     Export(LayerExportArgs),
     Import(LayerImportArgs),
+}
+
+#[derive(Subcommand)]
+enum BundleCommand {
+    Import(BundleImportArgs),
+    Export(BundleExportArgs),
+    Render(BundleRenderArgs),
+}
+
+#[derive(Args, Clone)]
+struct BundleImportArgs {
+    #[arg(value_enum, long, default_value_t = BundleFormat::Moergo, help = "Source layout format")]
+    format: BundleFormat,
+    #[arg(long, value_name = "FILE", help = "Input layout file")]
+    input: PathBuf,
+    #[arg(long, value_name = "FILE", help = "Destination bundle JSON")]
+    output: PathBuf,
+}
+
+#[derive(Args, Clone)]
+struct BundleExportArgs {
+    #[arg(value_enum, long, default_value_t = BundleFormat::Moergo, help = "Export layout format")]
+    format: BundleFormat,
+    #[arg(long, value_name = "FILE", help = "Layout bundle JSON")]
+    bundle: PathBuf,
+    #[arg(long, value_name = "FILE", help = "Destination file to write")]
+    output: PathBuf,
+}
+
+#[derive(Args, Clone)]
+struct BundleRenderArgs {
+    #[arg(long, value_name = "FILE", help = "Layout bundle JSON")]
+    bundle: PathBuf,
+    #[arg(long, value_name = "TARGET", help = "Target id inside the bundle")]
+    target: String,
+    #[arg(long, value_name = "FILE", help = "Override template path")]
+    template: Option<PathBuf>,
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Write rendered DTS to this file; prints to stdout when omitted"
+    )]
+    output: Option<PathBuf>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum BundleFormat {
+    Moergo,
 }
 
 #[derive(Args, Clone)]
@@ -539,6 +590,14 @@ fn run_layer(command: LayerCommand) -> Result<i32, CliError> {
     }
 }
 
+fn run_bundle(command: BundleCommand) -> Result<i32, CliError> {
+    match command {
+        BundleCommand::Import(args) => run_bundle_import(&args),
+        BundleCommand::Export(args) => run_bundle_export(&args),
+        BundleCommand::Render(args) => run_bundle_render(&args),
+    }
+}
+
 fn run_layer_export(args: &LayerExportArgs) -> Result<i32, CliError> {
     let source = fs::read_to_string(&args.dts).map_err(|source| CliError::ReadFile {
         path: args.dts.clone(),
@@ -603,6 +662,47 @@ fn run_layer_import(args: &LayerImportArgs) -> Result<i32, CliError> {
     }
 
     eprintln!("imported layout to {}", args.output.display());
+    Ok(0)
+}
+
+fn run_bundle_import(args: &BundleImportArgs) -> Result<i32, CliError> {
+    match args.format {
+        BundleFormat::Moergo => {
+            let bundle = LayoutBundle::from_moergo_file(&args.input)?;
+            bundle.write_json(&args.output)?;
+        }
+    }
+    eprintln!("imported bundle to {}", args.output.display());
+    Ok(0)
+}
+
+fn run_bundle_export(args: &BundleExportArgs) -> Result<i32, CliError> {
+    let bundle = LayoutBundle::from_json_file(&args.bundle)?;
+    match args.format {
+        BundleFormat::Moergo => {
+            let json = bundle.to_moergo_json()?;
+            fs::write(&args.output, json).map_err(|source| CliError::WriteFile {
+                path: args.output.clone(),
+                source,
+            })?;
+        }
+    }
+    eprintln!("exported bundle to {}", args.output.display());
+    Ok(0)
+}
+
+fn run_bundle_render(args: &BundleRenderArgs) -> Result<i32, CliError> {
+    let bundle = LayoutBundle::from_json_file(&args.bundle)?;
+    let rendered = bundle.render_target(&args.target, args.template.as_deref())?;
+    if let Some(path) = &args.output {
+        fs::write(path, &rendered).map_err(|source| CliError::WriteFile {
+            path: path.clone(),
+            source,
+        })?;
+        eprintln!("rendered target {} to {}", args.target, path.display());
+    } else {
+        println!("{rendered}");
+    }
     Ok(0)
 }
 
@@ -1238,4 +1338,6 @@ enum CliError {
     Flash(#[from] FlashError),
     #[error("adapter error: {0}")]
     Adapter(#[from] AdapterError),
+    #[error("bundle error: {0}")]
+    Bundle(#[from] zmk_layout_rs::adapters::bundle::BundleError),
 }

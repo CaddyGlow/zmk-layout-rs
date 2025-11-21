@@ -17,7 +17,7 @@ use super::{
 };
 
 /// Adapter-friendly view of the parsed layout.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdapterLayout {
     pub layers: Vec<LayerSpec>,
     pub combos: Vec<ComboSpec>,
@@ -159,7 +159,7 @@ impl AdapterLayout {
         Ok(payload.into())
     }
 
-    fn ensure_property_orders(&mut self) {
+    pub fn ensure_property_orders(&mut self) {
         self.ensure_behavior_property_orders();
         self.ensure_combo_property_orders();
         self.ensure_macro_property_orders();

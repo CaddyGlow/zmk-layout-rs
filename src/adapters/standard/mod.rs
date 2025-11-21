@@ -15,6 +15,7 @@ pub use io::{
     render_standard_template_for_profile,
 };
 pub use layout::AdapterLayout;
+pub use render::render_layout_with_template;
 pub use template::{TemplateError, TemplateParseMode, template_contains_placeholders};
 pub use types::{
     BehaviorSpec, ComboSpec, InputListenerNodeSpec, InputListenerSpec, InputProcessorSpec,

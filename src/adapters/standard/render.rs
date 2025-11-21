@@ -12,7 +12,7 @@ use super::{
     },
 };
 
-pub(crate) fn render_layout_with_template(
+pub fn render_layout_with_template(
     layout: &AdapterLayout,
     template: &str,
 ) -> Result<String, TemplateError> {
@@ -42,6 +42,9 @@ fn build_template_replacements(layout: &AdapterLayout) -> BTreeMap<String, Strin
         .unwrap_or_default();
     insert_placeholder(&mut map, "includes", includes.clone());
     insert_placeholder(&mut map, "resolved_includes", includes);
+
+    let defines = metadata_text(extras, "defines").unwrap_or_default();
+    insert_placeholder(&mut map, "defines", defines);
 
     let layer_defines = render_layer_defines(&layout.layers);
     insert_placeholder(&mut map, "layer_names_defines", layer_defines.clone());
