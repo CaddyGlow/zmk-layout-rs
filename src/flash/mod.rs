@@ -378,26 +378,50 @@ pub fn flash_target(
         warnings.push(format!("flashed device serial {}", serial));
     }
     if device.auto_unmount {
-        if let Some(dev_path) = device.dev_path.clone() {
-            match Command::new("udisksctl")
-                .args(["unmount", "-b", dev_path.to_str().unwrap_or_default()])
-                .output()
-            {
-                Ok(output) if output.status.success() => {
-                    if let Some(path) = device.cleanup_path {
-                        let _ = fs::remove_dir_all(path);
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(dev_path) = device.dev_path.clone() {
+                match Command::new("udisksctl")
+                    .args(["unmount", "-b", dev_path.to_str().unwrap_or_default()])
+                    .output()
+                {
+                    Ok(output) if output.status.success() => {
+                        if let Some(path) = device.cleanup_path {
+                            let _ = fs::remove_dir_all(path);
+                        }
                     }
+                    Ok(output) => warnings.push(format!(
+                        "failed to unmount {}: {}",
+                        device.mountpoint.display(),
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )),
+                    Err(err) => warnings.push(format!(
+                        "failed to unmount {}: {}",
+                        device.mountpoint.display(),
+                        err
+                    )),
                 }
-                Ok(output) => warnings.push(format!(
-                    "failed to unmount {}: {}",
-                    device.mountpoint.display(),
-                    String::from_utf8_lossy(&output.stderr).trim()
-                )),
-                Err(err) => warnings.push(format!(
-                    "failed to unmount {}: {}",
-                    device.mountpoint.display(),
-                    err
-                )),
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            if let Some(dev_path) = device.dev_path.clone() {
+                match Command::new("diskutil")
+                    .args(["unmountDisk", dev_path.to_str().unwrap_or_default()])
+                    .output()
+                {
+                    Ok(output) if output.status.success() => {}
+                    Ok(output) => warnings.push(format!(
+                        "failed to unmount {}: {}",
+                        device.mountpoint.display(),
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )),
+                    Err(err) => warnings.push(format!(
+                        "failed to unmount {}: {}",
+                        device.mountpoint.display(),
+                        err
+                    )),
+                }
             }
         }
     }

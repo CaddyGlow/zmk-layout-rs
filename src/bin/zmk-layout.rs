@@ -10,8 +10,9 @@ use std::{
 use thiserror::Error;
 use zmk_layout_rs::{
     adapters::{
-        AdapterError, TemplateParseMode, export_standard_str, export_standard_str_with_template_mode,
-        import_standard_str_with_template, render_standard_template, template_contains_placeholders,
+        AdapterError, TemplateParseMode, export_standard_str,
+        export_standard_str_with_template_mode, import_standard_str_with_template,
+        render_standard_template, template_contains_placeholders,
     },
     build::{
         BuildError, BuildReport, BuildRequest, BuildRequestBuilder, BuildRequestError,
