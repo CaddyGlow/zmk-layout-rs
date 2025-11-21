@@ -11,10 +11,11 @@ use std::{
     fs::{self, File},
     io,
     path::{Path, PathBuf},
+    process::Command,
     time::Duration,
 };
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-use std::{process::Command, thread::sleep, time::Instant};
+use std::{thread::sleep, time::Instant};
 use thiserror::Error;
 
 use crate::profiles::{HardwareFlash, KeyboardProfileDoc};
@@ -859,8 +860,8 @@ fn wait_for_device_linux(
                         fs_type: dev.fs_type,
                         auto_unmount,
                         cleanup_path: None,
-                        vendor_id: None,
-                        product_id: None,
+                        vendor_id: dev.vendor_id,
+                        product_id: dev.product_id,
                     });
                 }
                 if devices.len() > 1 {
@@ -878,8 +879,8 @@ fn wait_for_device_linux(
                             fs_type: dev.fs_type.clone(),
                             auto_unmount: false,
                             cleanup_path: None,
-                            vendor_id: None,
-                            product_id: None,
+                            vendor_id: dev.vendor_id,
+                            product_id: dev.product_id,
                         });
                     }
                     let dev = devices.remove(0);
@@ -894,8 +895,8 @@ fn wait_for_device_linux(
                         fs_type: dev.fs_type,
                         auto_unmount: true,
                         cleanup_path: None,
-                        vendor_id: None,
-                        product_id: None,
+                        vendor_id: dev.vendor_id,
+                        product_id: dev.product_id,
                     });
                 }
             }
@@ -1034,6 +1035,8 @@ struct LsblkDevice {
     pub dev_path: PathBuf,
     pub serial: Option<String>,
     pub vendor: Option<String>,
+    pub vendor_id: Option<String>,
+    pub product_id: Option<String>,
     pub model: Option<String>,
     pub fs_type: Option<String>,
     pub removable: Option<bool>,
@@ -1091,6 +1094,8 @@ fn flatten_lsblk(device: RawLsblkDevice, out: &mut Vec<LsblkDevice>) {
         dev_path,
         serial: device.serial,
         vendor: device.vendor,
+        vendor_id: device.vendor_id,
+        product_id: device.product_id,
         model: device.model,
         fs_type: device.fs_type,
         removable: device.rm,
@@ -1117,6 +1122,10 @@ struct RawLsblkDevice {
     serial: Option<String>,
     #[serde(default)]
     vendor: Option<String>,
+    #[serde(default)]
+    vendor_id: Option<String>,
+    #[serde(default)]
+    product_id: Option<String>,
     #[serde(default)]
     model: Option<String>,
     #[serde(default, rename = "fstype")]
@@ -2003,9 +2012,9 @@ impl From<&LsblkDevice> for QueryMetadata {
         QueryMetadata {
             serial: device.serial.clone(),
             vendor: device.vendor.clone(),
-            vendor_id: None,
+            vendor_id: device.vendor_id.clone(),
             model: device.model.clone(),
-            product_id: None,
+            product_id: device.product_id.clone(),
             fs_type: device.fs_type.clone(),
             removable: device.removable,
         }
