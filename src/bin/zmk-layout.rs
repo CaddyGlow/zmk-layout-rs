@@ -10,8 +10,9 @@ use std::{
 use thiserror::Error;
 use zmk_layout_rs::{
     adapters::{
-        AdapterError, TemplateParseMode, export_standard_file, export_standard_str_with_template_mode,
-        import_standard_str_with_template, render_standard_template, template_contains_placeholders,
+        AdapterError, TemplateParseMode, export_standard_file,
+        export_standard_str_with_template_mode, import_standard_str_with_template,
+        render_standard_template, template_contains_placeholders,
     },
     build::{
         BuildError, BuildReport, BuildRequest, BuildRequestBuilder, BuildRequestError,
@@ -31,7 +32,8 @@ use zmk_layout_rs::{
 };
 
 fn main() {
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("")).try_init();
+    let _ =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("")).try_init();
     if let Err(err) = run_cli() {
         eprintln!("error: {err}");
         std::process::exit(1);
@@ -544,10 +546,11 @@ fn run_layer_export(args: &LayerExportArgs) -> Result<i32, CliError> {
     })?;
 
     if let Some(template_path) = &args.template {
-        let template_source = fs::read_to_string(template_path).map_err(|source| CliError::ReadFile {
-            path: template_path.clone(),
-            source,
-        })?;
+        let template_source =
+            fs::read_to_string(template_path).map_err(|source| CliError::ReadFile {
+                path: template_path.clone(),
+                source,
+            })?;
         let contents = export_standard_str_with_template_mode(
             &source,
             &template_source,
@@ -571,10 +574,11 @@ fn run_layer_import(args: &LayerImportArgs) -> Result<i32, CliError> {
         path: args.json.clone(),
         source,
     })?;
-    let template_source = fs::read_to_string(&args.template).map_err(|source| CliError::ReadFile {
-        path: args.template.clone(),
-        source,
-    })?;
+    let template_source =
+        fs::read_to_string(&args.template).map_err(|source| CliError::ReadFile {
+            path: args.template.clone(),
+            source,
+        })?;
 
     if template_contains_placeholders(&template_source) {
         let rendered = render_standard_template(&json_text, &template_source)?;

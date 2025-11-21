@@ -123,6 +123,8 @@ pub struct FlashDevice {
     pub fs_type: Option<String>,
     pub auto_unmount: bool,
     pub cleanup_path: Option<PathBuf>,
+    pub vendor_id: Option<String>,
+    pub product_id: Option<String>,
 }
 
 /// Probe result describing a connected storage device.
@@ -136,6 +138,8 @@ pub struct FlashDiscovery {
     pub model: Option<String>,
     pub fs_type: Option<String>,
     pub removable: Option<bool>,
+    pub vendor_id: Option<String>,
+    pub product_id: Option<String>,
 }
 
 /// Result of a single flash attempt.
@@ -316,6 +320,8 @@ pub fn flash_target(
             fs_type: None,
             auto_unmount: false,
             cleanup_path: None,
+            vendor_id: None,
+            product_id: None,
         }
     } else {
         wait_for_device(&target.config, Some(target), seen_serials)?
@@ -649,6 +655,8 @@ mod platform {
         pub(super) product: Option<String>,
         pub(super) serial: Option<String>,
         pub(super) removable: Option<bool>,
+        pub(super) vendor_id: Option<String>,
+        pub(super) product_id: Option<String>,
     }
 
     pub(super) fn usb_device_metadata() -> Option<HashMap<String, UsbDeviceInfo>> {
@@ -682,6 +690,18 @@ mod platform {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(String::from);
+        let vendor_id = value
+            .get("vendor_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
+        let product_id = value
+            .get("product_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from);
         let serial = value
             .get("serial_num")
             .and_then(|v| v.as_str())
@@ -702,6 +722,8 @@ mod platform {
                             product: product.clone(),
                             serial: serial.clone(),
                             removable,
+                            vendor_id: vendor_id.clone(),
+                            product_id: product_id.clone(),
                         },
                     );
                 }
@@ -836,6 +858,8 @@ fn wait_for_device_linux(
                         fs_type: dev.fs_type,
                         auto_unmount,
                         cleanup_path: None,
+                        vendor_id: None,
+                        product_id: None,
                     });
                 }
                 if devices.len() > 1 {
@@ -853,6 +877,8 @@ fn wait_for_device_linux(
                             fs_type: dev.fs_type.clone(),
                             auto_unmount: false,
                             cleanup_path: None,
+                            vendor_id: None,
+                            product_id: None,
                         });
                     }
                     let dev = devices.remove(0);
@@ -867,6 +893,8 @@ fn wait_for_device_linux(
                         fs_type: dev.fs_type,
                         auto_unmount: true,
                         cleanup_path: None,
+                        vendor_id: None,
+                        product_id: None,
                     });
                 }
             }
@@ -1178,6 +1206,8 @@ fn wait_for_device_macos(
                         fs_type: dev.fs_type,
                         auto_unmount: dev.auto_unmount,
                         cleanup_path: None,
+                        vendor_id: dev.vendor_id,
+                        product_id: dev.product_id,
                     });
                 }
                 if devices.len() > 1 {
@@ -1194,6 +1224,8 @@ fn wait_for_device_macos(
                             fs_type: dev.fs_type,
                             auto_unmount: dev.auto_unmount,
                             cleanup_path: None,
+                            vendor_id: dev.vendor_id,
+                            product_id: dev.product_id,
                         });
                     }
                     let mut dev = devices.remove(0);
@@ -1210,6 +1242,8 @@ fn wait_for_device_macos(
                         fs_type: dev.fs_type,
                         auto_unmount: dev.auto_unmount,
                         cleanup_path: None,
+                        vendor_id: dev.vendor_id,
+                        product_id: dev.product_id,
                     });
                 }
             }
@@ -1283,6 +1317,20 @@ fn enrich_from_usb_metadata(devices: &mut [MacDisk]) {
                     if dev.removable.is_none() {
                         dev.removable = info.removable;
                     }
+                    if dev.vendor_id.is_none() {
+                        dev.vendor_id = info.vendor_id.clone();
+                    }
+                    if dev.product_id.is_none() {
+                        dev.product_id = info.product_id.clone();
+                    }
+                    if dev.serial.is_none() && info.vendor_id.is_some() && info.product_id.is_some()
+                    {
+                        dev.serial = Some(format!(
+                            "{}:{}",
+                            info.vendor_id.as_deref().unwrap_or(""),
+                            info.product_id.as_deref().unwrap_or("")
+                        ));
+                    }
                 }
             }
         }
@@ -1294,11 +1342,13 @@ fn log_macos_devices(label: &str, devices: &[MacDisk]) {
     flash_debug(format!("macOS devices {label}: {} found", devices.len()));
     for dev in devices {
         flash_debug(format!(
-            "  name={} model={} vendor={} serial={} mountpoints={:?} removable={:?} fs_type={:?}",
+            "  name={} model={} vendor={} serial={} vid={} pid={} mountpoints={:?} removable={:?} fs_type={:?}",
             dev.name,
             dev.model.as_deref().unwrap_or("-"),
             dev.vendor.as_deref().unwrap_or("-"),
             dev.serial.as_deref().unwrap_or("-"),
+            dev.vendor_id.as_deref().unwrap_or("-"),
+            dev.product_id.as_deref().unwrap_or("-"),
             dev.mountpoints,
             dev.removable,
             dev.fs_type
@@ -1392,6 +1442,8 @@ struct MacDisk {
     pub serial: Option<String>,
     pub vendor: Option<String>,
     pub model: Option<String>,
+    pub vendor_id: Option<String>,
+    pub product_id: Option<String>,
     pub fs_type: Option<String>,
     pub removable: Option<bool>,
     pub mountpoints: Vec<PathBuf>,
@@ -1414,6 +1466,8 @@ fn flatten_diskutil(entry: DiskutilEntry, out: &mut Vec<MacDisk>) {
             serial: entry.volume_name.clone().or(entry.media_name.clone()),
             vendor: None,
             model: entry.media_name.clone(),
+            vendor_id: None,
+            product_id: None,
             fs_type: entry.content.clone(),
             removable: entry.removable,
             mountpoints,
@@ -1431,7 +1485,9 @@ impl From<&MacDisk> for QueryMetadata {
         QueryMetadata {
             serial: device.serial.clone(),
             vendor: device.vendor.clone(),
+            vendor_id: device.vendor_id.clone(),
             model: device.model.clone(),
+            product_id: device.product_id.clone(),
             fs_type: device.fs_type.clone(),
             removable: device.removable,
         }
@@ -1450,6 +1506,8 @@ impl From<MacDisk> for FlashDiscovery {
             model: device.model,
             fs_type: device.fs_type,
             removable: device.removable,
+            vendor_id: None,
+            product_id: None,
         }
     }
 }
@@ -1497,6 +1555,8 @@ fn wait_for_device_windows(
                             fs_type: dev.fs_type,
                             auto_unmount: false,
                             cleanup_path: None,
+                            vendor_id: None,
+                            product_id: None,
                         });
                     }
                 }
@@ -1514,6 +1574,8 @@ fn wait_for_device_windows(
                             fs_type: dev.fs_type,
                             auto_unmount: false,
                             cleanup_path: None,
+                            vendor_id: None,
+                            product_id: None,
                         });
                     }
                 }
@@ -1648,7 +1710,9 @@ impl From<&WinVolume> for QueryMetadata {
         QueryMetadata {
             serial: device.serial.clone(),
             vendor: device.vendor.clone(),
+            vendor_id: None,
             model: device.model.clone(),
+            product_id: None,
             fs_type: device.fs_type.clone(),
             removable: device.removable,
         }
@@ -1667,6 +1731,8 @@ impl From<WinVolume> for FlashDiscovery {
             model: device.model,
             fs_type: device.fs_type,
             removable: device.removable,
+            vendor_id: None,
+            product_id: None,
         }
     }
 }
@@ -1731,7 +1797,9 @@ impl QueryClause {
 enum QueryField {
     Serial,
     Vendor,
+    VendorId,
     Model,
+    ProductId,
     FsType,
     Removable,
 }
@@ -1741,7 +1809,9 @@ impl QueryField {
         match raw.to_ascii_lowercase().as_str() {
             "serial" => Ok(QueryField::Serial),
             "vendor" => Ok(QueryField::Vendor),
+            "vendor_id" | "vid" => Ok(QueryField::VendorId),
             "model" => Ok(QueryField::Model),
+            "product_id" | "pid" => Ok(QueryField::ProductId),
             "fstype" | "fs_type" => Ok(QueryField::FsType),
             "removable" | "rm" => Ok(QueryField::Removable),
             _ => Err(FlashError::InvalidQuery(raw.into())),
@@ -1758,8 +1828,16 @@ impl QueryField {
                 .vendor
                 .as_deref()
                 .map_or(false, |v| v.eq_ignore_ascii_case(value)),
+            QueryField::VendorId => meta
+                .vendor_id
+                .as_deref()
+                .map_or(false, |v| v.eq_ignore_ascii_case(value)),
             QueryField::Model => meta
                 .model
+                .as_deref()
+                .map_or(false, |v| v.eq_ignore_ascii_case(value)),
+            QueryField::ProductId => meta
+                .product_id
                 .as_deref()
                 .map_or(false, |v| v.eq_ignore_ascii_case(value)),
             QueryField::FsType => meta
@@ -1774,7 +1852,15 @@ impl QueryField {
         match self {
             QueryField::Serial => meta.serial.as_deref().map_or(false, |v| regex.is_match(v)),
             QueryField::Vendor => meta.vendor.as_deref().map_or(false, |v| regex.is_match(v)),
+            QueryField::VendorId => meta
+                .vendor_id
+                .as_deref()
+                .map_or(false, |v| regex.is_match(v)),
             QueryField::Model => meta.model.as_deref().map_or(false, |v| regex.is_match(v)),
+            QueryField::ProductId => meta
+                .product_id
+                .as_deref()
+                .map_or(false, |v| regex.is_match(v)),
             QueryField::FsType => meta.fs_type.as_deref().map_or(false, |v| regex.is_match(v)),
             QueryField::Removable => regex.is_match(if meta.removable.unwrap_or(false) {
                 "true"
@@ -1789,7 +1875,9 @@ impl QueryField {
 struct QueryMetadata {
     pub serial: Option<String>,
     pub vendor: Option<String>,
+    pub vendor_id: Option<String>,
     pub model: Option<String>,
+    pub product_id: Option<String>,
     pub fs_type: Option<String>,
     pub removable: Option<bool>,
 }
@@ -1800,7 +1888,9 @@ impl From<&LsblkDevice> for QueryMetadata {
         QueryMetadata {
             serial: device.serial.clone(),
             vendor: device.vendor.clone(),
+            vendor_id: None,
             model: device.model.clone(),
+            product_id: None,
             fs_type: device.fs_type.clone(),
             removable: device.removable,
         }
@@ -1819,6 +1909,8 @@ impl From<LsblkDevice> for FlashDiscovery {
             model: device.model,
             fs_type: device.fs_type,
             removable: device.removable,
+            vendor_id: device.vendor_id,
+            product_id: device.product_id,
         }
     }
 }
