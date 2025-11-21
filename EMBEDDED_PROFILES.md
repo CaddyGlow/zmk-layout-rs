@@ -1,11 +1,11 @@
 # Embedded Profiles
 
-The `keyboard_profiles/` and `firmware_profiles/` directories are now embedded in the binary at compile time using `rust-embed`. This allows the binary to work without needing the profile directories present at runtime.
+The `profiles/keyboards/` and `profiles/firmwares/` directories are now embedded in the binary at compile time using `rust-embed`. This allows the binary to work without needing the profile directories present at runtime.
 
 ## Features
 
 ### 1. Embedded at Compile Time
-- All `.toml` files in `keyboard_profiles/` and `firmware_profiles/` are embedded in the binary
+- All `.toml` files in `profiles/keyboards/` and `profiles/firmwares/` are embedded in the binary
 - The binary works standalone without requiring these directories at runtime
 - Smaller deployment footprint - just distribute the binary
 
@@ -25,7 +25,7 @@ use zmk_layout_rs::profiles::KeyboardProfileDoc;
 let profile = KeyboardProfileDoc::load("glove80")?;
 
 // Load from specific file path (original behavior)
-let profile = KeyboardProfileDoc::from_file("keyboard_profiles/glove80.toml")?;
+let profile = KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml")?;
 
 // List all available profiles (both embedded and filesystem)
 let profiles = KeyboardProfileDoc::list_available();
@@ -40,7 +40,7 @@ use zmk_layout_rs::build::FirmwareManifest;
 let manifest = FirmwareManifest::load("glove80")?;
 
 // Load from specific file path (original behavior)
-let manifest = FirmwareManifest::from_file("firmware_profiles/glove80.toml")?;
+let manifest = FirmwareManifest::from_file("profiles/firmwares/glove80.toml")?;
 
 // List all available manifests (both embedded and filesystem)
 let manifests = FirmwareManifest::list_available();
@@ -73,8 +73,8 @@ zmk-layout firmware flash --manifest glove80 --keyboard glove80 ...
 zmk-layout firmware devices --manifest glove80 --keyboard glove80 ...
 
 # Using full path (original behavior)
-zmk-layout firmware build --manifest firmware_profiles/glove80.toml --keyboard glove80 ...
-zmk-layout firmware flash --manifest firmware_profiles/glove80.toml --keyboard glove80 ...
+zmk-layout firmware build --manifest profiles/firmwares/glove80.toml --keyboard glove80 ...
+zmk-layout firmware flash --manifest profiles/firmwares/glove80.toml --keyboard glove80 ...
 ```
 
 The CLI automatically detects whether you provided a path or a name:
@@ -86,7 +86,7 @@ The CLI automatically detects whether you provided a path or a name:
 
 When using `load()` methods:
 
-1. `{keyboard|firmware}_profiles/{name}.toml` in filesystem (if exists)
+1. `profiles/{keyboards|firmwares}/{name}.toml` in filesystem (if exists)
 2. Embedded `{name}.toml` from compile-time embedded resources
 3. Return `NotFound` error if neither exists
 

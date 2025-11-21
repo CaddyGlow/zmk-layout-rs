@@ -138,7 +138,7 @@ use zmk_layout_rs::{
 };
 
 fn hydrate_profile_layout() -> Result<(), Box<dyn std::error::Error>> {
-    let profile = KeyboardProfileDoc::from_file("keyboard_profiles/glove80.toml")?;
+    let profile = KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml")?;
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let hydrated =
         import_standard_file_for_profile("layout.json", &profile, &repo_root)?;
@@ -150,11 +150,11 @@ fn hydrate_profile_layout() -> Result<(), Box<dyn std::error::Error>> {
 Validate profiles directly from the CLI:
 
 ```bash
-zmk-layout profiles check keyboard_profiles/glove80.toml
+zmk-layout profiles check profiles/keyboards/glove80.toml
 zmk-layout profiles check --all
 ```
 
-The `--all` flag scans every `*.toml` inside `keyboard_profiles/` (override with
+The `--all` flag scans every `*.toml` inside `profiles/keyboards/` (override with
 `--profiles-dir DIR`).
 
 ### Customization Tasks & CLI
@@ -227,7 +227,7 @@ point at these profiles to understand what they are building. See
 
 ```bash
 zmk-layout firmware build \
-  --manifest firmware_profiles/glove80.toml \
+  --manifest profiles/firmwares/glove80.toml \
   --keyboard glove80 \
   --toolchain zmk \
   --target left \
@@ -261,7 +261,7 @@ docker build -t moergo-zmk-config-nix:latest -f ./toolchains/moergo/Dockerfile.n
 docker build -t moergo-zmk-config-docker:latest -f ./toolchains/moergo/Dockerfile ./toolchains/moergo/
 ```
 
-The image name `moergo-zmk-config-docker:latest` is referenced in `firmware_profiles/glove80.toml`
+The image name `moergo-zmk-config-docker:latest` is referenced in `profiles/firmwares/glove80.toml`
 and is used by the build system to compile firmware for MoErgo keyboards.
 
 ## Development

@@ -34,7 +34,7 @@ fn manifest_fixture_loads_profiles() {
         doc.path
             .display()
             .to_string()
-            .ends_with("keyboard_profiles/glove80.toml"),
+            .ends_with("profiles/keyboards/glove80.toml"),
         "expected profile path to reference glove80 profile"
     );
     assert_eq!(doc.document.metadata.vendor, "MoErgo");

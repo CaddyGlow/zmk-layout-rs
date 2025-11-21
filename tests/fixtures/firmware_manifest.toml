@@ -23,7 +23,7 @@ default_toolchain = "moergo"
 [keyboards.glove80.metadata]
 maintainer = "demo"
 keyboard = "glove80"
-profile = "keyboard_profiles/glove80.toml"
+profile = "profiles/keyboards/glove80.toml"
 
 [[keyboards.glove80.targets]]
 id = "left"

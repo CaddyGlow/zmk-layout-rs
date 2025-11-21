@@ -341,7 +341,7 @@ pub fn load_json(&mut self, path: String, profile_name: Option<String>) -> LuaRe
     // Determine profile_root path
     let profile_root = profile.as_ref().map(|p| {
         // Get profile root from manifest or use default
-        Path::new("firmware_profiles")
+        Path::new("profiles/firmwares")
     });
 
     // Call import with profile
@@ -482,7 +482,7 @@ let document = import_standard_file(
     "layout.json",
     &base_document,
     Some(&profile),
-    Some(Path::new("firmware_profiles")),
+    Some(Path::new("profiles/firmwares")),
 )?;
 ```
 

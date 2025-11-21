@@ -158,7 +158,7 @@ fn cli_profiles_check_validates_profiles() {
     let mut cmd = cargo_bin_cmd!("zmk-layout");
     cmd.arg("profiles")
         .arg("check")
-        .arg("keyboard_profiles/glove80.toml");
+        .arg("profiles/keyboards/glove80.toml");
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("[OK ]"));

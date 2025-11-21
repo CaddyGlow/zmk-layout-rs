@@ -2,7 +2,7 @@ use zmk_layout_rs::{build::FirmwareManifest, profiles::KeyboardProfileDoc};
 
 #[test]
 fn can_load_embedded_keyboard_profile() {
-    // This works even when keyboard_profiles/ directory doesn't exist
+    // This works even when profiles/keyboards/ directory doesn't exist
     // because profiles are embedded in the binary
     let profile = KeyboardProfileDoc::load("glove80").expect("load embedded profile");
     assert_eq!(profile.keyboard, "glove80");
@@ -12,7 +12,7 @@ fn can_load_embedded_keyboard_profile() {
 
 #[test]
 fn can_load_embedded_firmware_manifest() {
-    // This works even when firmware_profiles/ directory doesn't exist
+    // This works even when profiles/firmwares/ directory doesn't exist
     // because manifests are embedded in the binary
     let manifest = FirmwareManifest::load("glove80").expect("load embedded manifest");
     assert_eq!(manifest.version, 1);
@@ -27,8 +27,8 @@ fn filesystem_overrides_embedded() {
     let embedded = KeyboardProfileDoc::load("glove80").expect("load profile");
 
     // Filesystem version (if exists) should also load
-    if std::path::Path::new("keyboard_profiles/glove80.toml").exists() {
-        let from_file = KeyboardProfileDoc::from_file("keyboard_profiles/glove80.toml")
+    if std::path::Path::new("profiles/keyboards/glove80.toml").exists() {
+        let from_file = KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml")
             .expect("load from filesystem");
         assert_eq!(embedded.keyboard, from_file.keyboard);
     }

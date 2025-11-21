@@ -224,7 +224,7 @@ struct ProfileCheckArgs {
     #[arg(
         long = "profiles-dir",
         value_name = "DIR",
-        default_value = "keyboard_profiles",
+        default_value = "profiles/keyboards",
         help = "Directory scanned when --all is provided"
     )]
     profiles_dir: PathBuf,

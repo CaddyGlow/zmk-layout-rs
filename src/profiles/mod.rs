@@ -12,12 +12,12 @@ use toml::Value as TomlValue;
 
 /// Embedded keyboard profiles bundled in the binary.
 #[derive(RustEmbed)]
-#[folder = "keyboard_profiles/"]
+#[folder = "profiles/keyboards/"]
 pub struct EmbeddedKeyboardProfiles;
 
 /// Embedded firmware profiles bundled in the binary.
 #[derive(RustEmbed)]
-#[folder = "firmware_profiles/"]
+#[folder = "profiles/firmwares/"]
 pub struct EmbeddedFirmwareProfiles;
 
 /// Convenience type used for arbitrary TOML tables we want to retain.
@@ -60,11 +60,11 @@ impl KeyboardProfileDoc {
     /// The name should be just the profile name without path or extension (e.g., "glove80").
     ///
     /// Search order:
-    /// 1. `keyboard_profiles/{name}.toml` in filesystem
+    /// 1. `profiles/keyboards/{name}.toml` in filesystem
     /// 2. Embedded profile `{name}.toml`
     pub fn load(name: &str) -> Result<Self, ProfileError> {
         let filename = format!("{}.toml", name);
-        let fs_path = PathBuf::from("keyboard_profiles").join(&filename);
+        let fs_path = PathBuf::from("profiles/keyboards").join(&filename);
 
         // Try filesystem first (allows override)
         if fs_path.exists() {
@@ -91,7 +91,7 @@ impl KeyboardProfileDoc {
         }
 
         // Add filesystem profiles (may override embedded)
-        if let Ok(entries) = fs::read_dir("keyboard_profiles") {
+        if let Ok(entries) = fs::read_dir("profiles/keyboards") {
             for entry in entries.flatten() {
                 if let Some(name) = entry.path().file_stem().and_then(|s| s.to_str()) {
                     if entry.path().extension().and_then(|s| s.to_str()) == Some("toml") {
@@ -837,7 +837,8 @@ mod tests {
 
     #[test]
     fn parses_glove80_profile() {
-        let doc = KeyboardProfileDoc::from_file("keyboard_profiles/glove80.toml").expect("profile");
+        let doc =
+            KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml").expect("profile");
         assert_eq!(doc.keyboard, "glove80");
         assert_eq!(doc.version, 1);
         assert_eq!(doc.metadata.name, "MoErgo Glove80");
@@ -914,7 +915,8 @@ template = "layout.dtsi"
 
     #[test]
     fn preserves_extra_tables() {
-        let doc = KeyboardProfileDoc::from_file("keyboard_profiles/glove80.toml").expect("profile");
+        let doc =
+            KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml").expect("profile");
         assert!(doc.hardware.build_defaults.extras.contains_key("board"));
         assert!(
             doc.layout
@@ -926,7 +928,8 @@ template = "layout.dtsi"
 
     #[test]
     fn formatting_rows_render_ascii() {
-        let doc = KeyboardProfileDoc::from_file("keyboard_profiles/glove80.toml").expect("profile");
+        let doc =
+            KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml").expect("profile");
         let ascii: Vec<String> = doc
             .layout
             .formatting
@@ -947,7 +950,8 @@ template = "layout.dtsi"
 
     #[test]
     fn key_position_header_is_exposed() {
-        let doc = KeyboardProfileDoc::from_file("keyboard_profiles/glove80.toml").expect("profile");
+        let doc =
+            KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml").expect("profile");
         let header = doc
             .layout
             .keymap
@@ -962,7 +966,7 @@ template = "layout.dtsi"
 
     #[test]
     fn loads_embedded_profile() {
-        // This test will work even if keyboard_profiles/ directory is deleted
+        // This test will work even if profiles/keyboards/ directory is deleted
         let doc = KeyboardProfileDoc::load("glove80").expect("embedded profile");
         assert_eq!(doc.keyboard, "glove80");
         assert_eq!(doc.metadata.name, "MoErgo Glove80");

@@ -44,11 +44,11 @@ impl FirmwareManifest {
     /// The name should be just the manifest name without path or extension (e.g., "glove80").
     ///
     /// Search order:
-    /// 1. `firmware_profiles/{name}.toml` in filesystem
+    /// 1. `profiles/firmwares/{name}.toml` in filesystem
     /// 2. Embedded manifest `{name}.toml`
     pub fn load(name: &str) -> Result<Self, ManifestError> {
         let filename = format!("{}.toml", name);
-        let fs_path = PathBuf::from("firmware_profiles").join(&filename);
+        let fs_path = PathBuf::from("profiles/firmwares").join(&filename);
 
         // Try filesystem first (allows override)
         if fs_path.exists() {
@@ -75,7 +75,7 @@ impl FirmwareManifest {
         }
 
         // Add filesystem manifests (may override embedded)
-        if let Ok(entries) = fs::read_dir("firmware_profiles") {
+        if let Ok(entries) = fs::read_dir("profiles/firmwares") {
             for entry in entries.flatten() {
                 if let Some(name) = entry.path().file_stem().and_then(|s| s.to_str()) {
                     if entry.path().extension().and_then(|s| s.to_str()) == Some("toml") {
@@ -386,7 +386,7 @@ fn load_keyboard_profile(
         match KeyboardProfileDoc::load(trimmed) {
             Ok(document) => {
                 return Ok(Some(KeyboardProfileDocument {
-                    path: PathBuf::from(format!("keyboard_profiles/{}.toml", trimmed)),
+                    path: PathBuf::from(format!("profiles/keyboards/{}.toml", trimmed)),
                     document,
                 }));
             }
