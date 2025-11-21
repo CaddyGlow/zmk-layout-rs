@@ -9,11 +9,15 @@ use std::{
 };
 use thiserror::Error;
 use zmk_layout_rs::{
+    adapters::{
+        AdapterError, TemplateParseMode, export_standard_file, export_standard_str_with_template_mode,
+        import_standard_str_with_template, render_standard_template, template_contains_placeholders,
+    },
     build::{
         BuildError, BuildReport, BuildRequest, BuildRequestBuilder, BuildRequestError,
         CliDockerBackend, CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
     },
-    dts::DtsDocument,
+    dts::{DtsDocument, DtsError},
     flash::{
         FlashConfig, FlashError, FlashSideSelection, build_flash_targets, default_sides,
         discover_devices, flash_target, resolve_flash_source,
@@ -43,6 +47,7 @@ fn run_cli() -> Result<(), CliError> {
         Command::Script(args) => run_script(&args)?,
         Command::Firmware(cmd) => run_firmware(cmd)?,
         Command::Profiles(cmd) => run_profiles(cmd)?,
+        Command::Layer(cmd) => run_layer(cmd)?,
     };
     std::process::exit(code);
 }
@@ -64,6 +69,8 @@ enum Command {
     Firmware(FirmwareCommand),
     #[command(subcommand)]
     Profiles(ProfilesCommand),
+    #[command(subcommand)]
+    Layer(LayerCommand),
 }
 
 #[derive(Args, Clone)]
@@ -145,6 +152,12 @@ enum ProfilesCommand {
     Check(ProfileCheckArgs),
 }
 
+#[derive(Subcommand)]
+enum LayerCommand {
+    Export(LayerExportArgs),
+    Import(LayerImportArgs),
+}
+
 #[derive(Args, Clone)]
 struct ProfileCheckArgs {
     #[arg(
@@ -162,6 +175,41 @@ struct ProfileCheckArgs {
         help = "Directory scanned when --all is provided"
     )]
     profiles_dir: PathBuf,
+}
+
+#[derive(Args, Clone)]
+struct LayerExportArgs {
+    #[arg(long, value_name = "FILE", help = "Input DTS/.dtsi file to parse")]
+    dts: PathBuf,
+    #[arg(long, value_name = "FILE", help = "Destination JSON file to write")]
+    json: PathBuf,
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Optional template to extract metadata placeholders"
+    )]
+    template: Option<PathBuf>,
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = TemplateModeFlag::Strip,
+        help = "How to parse the DTS when a template is provided"
+    )]
+    template_mode: TemplateModeFlag,
+}
+
+#[derive(Args, Clone)]
+struct LayerImportArgs {
+    #[arg(long, value_name = "FILE", help = "Standard JSON layout file")]
+    json: PathBuf,
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "DTS template that provides macros, includes, etc."
+    )]
+    template: PathBuf,
+    #[arg(long, value_name = "FILE", help = "Output DTS path to write")]
+    output: PathBuf,
 }
 
 #[derive(Args, Clone)]
@@ -344,6 +392,21 @@ impl From<FlashSideFlag> for FlashSideSelection {
     }
 }
 
+#[derive(Copy, Clone, ValueEnum)]
+enum TemplateModeFlag {
+    Strip,
+    Full,
+}
+
+impl From<TemplateModeFlag> for TemplateParseMode {
+    fn from(flag: TemplateModeFlag) -> Self {
+        match flag {
+            TemplateModeFlag::Strip => TemplateParseMode::StripPlaceholders,
+            TemplateModeFlag::Full => TemplateParseMode::FullDocument,
+        }
+    }
+}
+
 fn run_apply(args: &ApplyArgs) -> Result<i32, CliError> {
     let PreparedContext { file, document, .. } = prepare(&args.shared)?;
     let exec = execute(document, &file, ExecutionMode::Apply);
@@ -465,6 +528,67 @@ fn run_profiles(command: ProfilesCommand) -> Result<i32, CliError> {
     match command {
         ProfilesCommand::Check(args) => run_profile_check(&args),
     }
+}
+
+fn run_layer(command: LayerCommand) -> Result<i32, CliError> {
+    match command {
+        LayerCommand::Export(args) => run_layer_export(&args),
+        LayerCommand::Import(args) => run_layer_import(&args),
+    }
+}
+
+fn run_layer_export(args: &LayerExportArgs) -> Result<i32, CliError> {
+    let source = fs::read_to_string(&args.dts).map_err(|source| CliError::ReadFile {
+        path: args.dts.clone(),
+        source,
+    })?;
+
+    if let Some(template_path) = &args.template {
+        let template_source = fs::read_to_string(template_path).map_err(|source| CliError::ReadFile {
+            path: template_path.clone(),
+            source,
+        })?;
+        let contents = export_standard_str_with_template_mode(
+            &source,
+            &template_source,
+            args.template_mode.into(),
+        )?;
+        fs::write(&args.json, contents).map_err(|source| CliError::WriteFile {
+            path: args.json.clone(),
+            source,
+        })?;
+    } else {
+        let document = DtsDocument::parse_str(&source).map_err(DtsError::from)?;
+        export_standard_file(&document, &args.json)?;
+    }
+
+    eprintln!("exported layout to {}", args.json.display());
+    Ok(0)
+}
+
+fn run_layer_import(args: &LayerImportArgs) -> Result<i32, CliError> {
+    let json_text = fs::read_to_string(&args.json).map_err(|source| CliError::ReadFile {
+        path: args.json.clone(),
+        source,
+    })?;
+    let template_source = fs::read_to_string(&args.template).map_err(|source| CliError::ReadFile {
+        path: args.template.clone(),
+        source,
+    })?;
+
+    if template_contains_placeholders(&template_source) {
+        let rendered = render_standard_template(&json_text, &template_source)?;
+        fs::write(&args.output, rendered).map_err(|source| CliError::WriteFile {
+            path: args.output.clone(),
+            source,
+        })?;
+    } else {
+        let imported = import_standard_str_with_template(&json_text, &template_source)?;
+        imported.write_to_file(&args.output)?;
+    }
+
+    eprintln!("imported layout to {}", args.output.display());
+    Ok(0)
 }
 
 fn run_firmware_flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {
@@ -1097,4 +1221,8 @@ enum CliError {
     MissingKeyboardProfile(String),
     #[error("flashing failed: {0}")]
     Flash(#[from] FlashError),
+    #[error("adapter error: {0}")]
+    Adapter(#[from] AdapterError),
+    #[error("DTS parsing error: {0}")]
+    DtsParse(#[from] DtsError),
 }
