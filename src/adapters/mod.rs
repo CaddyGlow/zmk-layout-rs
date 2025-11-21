@@ -2,6 +2,7 @@
 //! the DTS providers.
 
 pub mod bundle;
+pub mod moergo;
 pub mod standard;
 
 pub use standard::{

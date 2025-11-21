@@ -1,0 +1,180 @@
+# Derived from keyboards/config/common/all_kconfig.yaml
+[keymap.kconfig_options."BATTERY_REPORT_INTERVAL_SEC"]
+name = "CONFIG_ZMK_BATTERY_REPORT_INTERVAL"
+type = "int"
+default = 600
+description = "Battery level report interval in seconds. For detail ZMK documentation see CONFIG_ZMK_BATTERY_REPORT_INTERVAL."
+
+[keymap.kconfig_options."BEHAVIORS_QUEUE_SIZE"]
+name = "CONFIG_ZMK_BEHAVIORS_QUEUE_SIZE"
+type = "int"
+default = 64
+description = "Maximum number of behaviors to allow queueing from a macro or other complex behavior. For detail ZMK documentation see CONFIG_ZMK_BEHAVIORS_QUEUE_SIZE."
+
+[keymap.kconfig_options."BLE_AUTO_PHY_UPDATE"]
+name = "CONFIG_BT_AUTO_PHY_UPDATE"
+type = "bool"
+default = true
+description = "Maps to KConfig variable CONFIG_BT_AUTO_PHY_UPDATE. Do not override unless instructed by MoErgo."
+
+[keymap.kconfig_options."BLE_BAS"]
+name = "CONFIG_BT_BAS"
+type = "bool"
+default = true
+description = "Enable the Bluetooth BAS (battery reporting service)."
+
+[keymap.kconfig_options."BLE_CTLR_PHY_2M"]
+name = "CONFIG_BT_CTLR_PHY_2M"
+type = "bool"
+default = true
+description = "Maps to CONFIG_BT_CTLR_PHY_2M. Do not override this unless instructed by MoErgo."
+
+[keymap.kconfig_options."BLE_DEVICE_NAME_APPEND_SN"]
+name = "CONFIG_BT_DEVICE_NAME_APPEND_SN"
+type = "bool"
+default = false
+description = "When enabled, the advertised BLE device name is appended by the first 6 hexadecimal digits of the serial number."
+
+[keymap.kconfig_options."BLE_GATT_AUTO_SEC_REQ"]
+name = "CONFIG_BT_GATT_AUTO_SEC_REQ"
+type = "bool"
+default = false
+description = "Maps to KConfig variable CONFIG_BT_GATT_AUTO_SEC_REQ. Do not override unless instructed by MoErgo. Default is 'y' only for split peripheral side."
+
+[keymap.kconfig_options."BLE_LL_SW_LLCP"]
+name = "CONFIG_BT_LL_SW_LLCP"
+type = "bool"
+default = false
+description = "Maps to KConfig variable CONFIG_BT_LL_SW_LLCP. Make sure you set BLE_LL_SW_LLCP_LEGACY to opposite value. Do not override this unless instructed by MoErgo. Only available in v23.11/v23.12/v24.01."
+
+[keymap.kconfig_options."BLE_LL_SW_LLCP_LEGACY"]
+name = "CONFIG_BT_LL_SW_LLCP_LEGACY"
+type = "bool"
+default = false
+description = "Maps to KConfig variable CONFIG_BT_LL_SW_LLCP_LEGACY. Make sure you set BLE_LL_SW_LLCP to opposite value. Do not override this unless instructed by MoErgo. Only available in v23.11/v23.12/v24.01."
+
+[keymap.kconfig_options."BLE_PASSKEY_ENTRY"]
+name = "CONFIG_ZMK_BLE_PASSKEY_ENTRY"
+type = "bool"
+default = false
+description = "Require typing passkey from host to pair BLE connection."
+
+[keymap.kconfig_options."BLE_SMP_ALLOW_UNAUTH_OVERWRITE"]
+name = "CONFIG_BT_SMP_ALLOW_UNAUTH_OVERWRITE"
+type = "bool"
+default = false
+description = "Allows overwrite of keys from previously paired hosts. This is useful for connecting with dual-boot hosts."
+
+[keymap.kconfig_options."BLE_SMP_MIN_ENC_KEY_SIZE"]
+name = "CONFIG_BT_SMP_MIN_ENC_KEY_SIZE"
+type = "int"
+default = 7
+description = "Minimum encryption key size accepted in octets. Must be between 7 and 16."
+
+[keymap.kconfig_options."COMBO_MAX_COMBOS_PER_KEY"]
+name = "CONFIG_ZMK_COMBO_MAX_COMBOS_PER_KEY"
+type = "int"
+default = 5
+description = "Maximum number of active combos that use the same key position. For detail ZMK documentation see CONFIG_ZMK_COMBO_MAX_COMBOS_PER_KEY."
+
+[keymap.kconfig_options."COMBO_MAX_KEYS_PER_COMBO"]
+name = "CONFIG_ZMK_COMBO_MAX_KEYS_PER_COMBO"
+type = "int"
+default = 4
+description = "Maximum number of keys to press to activate a combo. For detail ZMK documentation see CONFIG_ZMK_COMBO_MAX_KEYS_PER_COMBO."
+
+[keymap.kconfig_options."COMBO_MAX_PRESSED_COMBOS"]
+name = "CONFIG_ZMK_COMBO_MAX_PRESSED_COMBOS"
+type = "int"
+default = 4
+description = "Maximum number of currently pressed combos. For detail ZMK documentation see CONFIG_ZMK_COMBO_MAX_PRESSED_COMBOS."
+
+[keymap.kconfig_options."DEEP_SLEEP"]
+name = "CONFIG_ZMK_SLEEP"
+type = "bool"
+default = false
+description = "Enable deep sleep, but may affect BLE reconnection. For detail ZMK documentation see CONFIG_ZMK_SLEEP."
+
+[keymap.kconfig_options."DEEP_SLEEP_TIMEOUT_MS"]
+name = "CONFIG_ZMK_IDLE_SLEEP_TIMEOUT"
+type = "int"
+default = 900000
+description = "Milliseconds of inactivity before entering deep sleep."
+
+[keymap.kconfig_options."EXPERIMENTAL_RGB_UNDERGLOW_AUTO_OFF_IDLE"]
+name = "CONFIG_EXPERIMENTAL_RGB_UNDERGLOW_AUTO_OFF_IDLE"
+type = "bool"
+default = false
+description = "To save battery, turn off the RGB when the keyboard is not used for 30s."
+
+[keymap.kconfig_options."HID_FULL_CONSUMER_REPORT"]
+name = "CONFIG_ZMK_HID_CONSUMER_REPORT_USAGES_FULL"
+type = "bool"
+default = true
+description = "Enable all consumer key codes, but may have compatibility issues with some host OSes."
+
+[keymap.kconfig_options."HID_NKRO"]
+name = "CONFIG_ZMK_HID_REPORT_TYPE_NKRO"
+type = "bool"
+default = true
+description = "Enable full N-key roll over"
+
+[keymap.kconfig_options."HID_POINTING"]
+name = "CONFIG_ZMK_POINTING"
+type = "bool"
+default = false
+description = "Enables mouse emulation capability. Re-pair your keyboard with your host via Bluetooth after enabling this feature."
+
+[keymap.kconfig_options."HID_SEPARATE_MOD_RELEASE_REPORT"]
+name = "CONFIG_ZMK_HID_SEPARATE_MOD_RELEASE_REPORT"
+type = "bool"
+default = false
+description = "Send modifier release event after non-modifier release event. This is available only for PR31, and not yet in production firmware."
+
+[keymap.kconfig_options."HW_STACK_PROTECTION"]
+name = "CONFIG_HW_STACK_PROTECTION"
+type = "bool"
+default = false
+description = "For debugging only; do not set this unless instructed by MoErgo."
+
+[keymap.kconfig_options."INPUT_LOG_LEVEL_DBG"]
+name = "CONFIG_INPUT_LOG_LEVEL_DBG"
+type = "bool"
+default = false
+description = "For debugging only; do not set this unless instructed by MoErgo. DEBUG log level is known to cause change in timing-sensitive behavior"
+
+[keymap.kconfig_options."KSCAN_DEBOUNCE_PRESS_MS"]
+name = "CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS"
+type = "int"
+default = 5
+description = "Keyscan press debounce in milliseconds. For detail ZMK documentation see CONFIG_ZMK_KSCAN_DEBOUNCE_PRESS_MS."
+
+[keymap.kconfig_options."KSCAN_DEBOUNCE_RELEASE_MS"]
+name = "CONFIG_ZMK_KSCAN_DEBOUNCE_RELEASE_MS"
+type = "int"
+default = 5
+description = "Keyscan release debounce in milliseconds. For detail ZMK documentation see CONFIG_ZMK_KSCAN_DEBOUNCE_RELEASE_MS."
+
+[keymap.kconfig_options."SETTINGS_SAVE_DEBOUNCE_MS"]
+name = "CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE"
+type = "int"
+default = 60000
+description = "Milliseconds to wait after a setting change before writing it to flash memory. For detail ZMK documentation see CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE."
+
+[keymap.kconfig_options."SPLIT_BLE_PREF_LATENCY"]
+name = "CONFIG_ZMK_SPLIT_BLE_PREF_LATENCY"
+type = "int"
+default = 30
+description = "Latency to use for split central/peripheral connection."
+
+[keymap.kconfig_options."SYSTEM_WORKQUEUE_STACK_SIZE"]
+name = "CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE"
+type = "int"
+default = 2048
+description = "For debugging only; do not set this unless instructed by MoErgo."
+
+[keymap.kconfig_options."USB_LOGGING"]
+name = "CONFIG_ZMK_USB_LOGGING"
+type = "bool"
+default = false
+description = "For debugging only; do not set this unless instructed by MoErgo. USB Logging is known to cause change in timing-sensitive behavior."
