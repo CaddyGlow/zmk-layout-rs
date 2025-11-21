@@ -1,0 +1,930 @@
+[
+    {
+        "code": "&macro_tap",
+        "name": "Macro Tap",
+        "description": "Set Macro To Tap Mode",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": []
+    },
+    {
+        "code": "&macro_press",
+        "name": "Macro Press",
+        "description": "Set Macro To Press Mode",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": []
+    },
+    {
+        "code": "&macro_release",
+        "name": "Macro Release",
+        "description": "Set Macro To Release Mode",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": []
+    },
+    {
+        "code": "&macro_tap_time",
+        "name": "Macro Tap Time",
+        "description": "Set Macro Tap Duration",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": [
+            {
+                "name": "Duration in milliseconds",
+                "type": "integer",
+                "min": 0
+            }
+        ]
+    },
+    {
+        "code": "&macro_wait_time",
+        "name": "Macro Wait Time",
+        "description": "Set Macro Wait Duration",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": [
+            {
+                "name": "Duration in milliseconds",
+                "type": "integer",
+                "min": 0
+            }
+        ]
+    },
+    {
+        "code": "&macro_pause_for_release",
+        "name": "Macro Pause For Release",
+        "description": "Macro Pause Until Release Marker",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": []
+    },
+    {
+        "code": "&macro_param_1to1",
+        "name": "Macro Parameter 1 to 1",
+        "description": "Macro Parameter One Substituted into Next Binding's First Parameter",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": []
+    },
+    {
+        "code": "&macro_param_1to2",
+        "name": "Macro Parameter 1 to 2",
+        "description": "Macro Parameter One Substituted into Next Binding's Second Parameter",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": []
+    },
+    {
+        "code": "&macro_param_2to1",
+        "name": "Macro Parameter 2 to 1",
+        "description": "Macro Parameter Two Substituted into Next Binding's First Parameter",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": []
+    },
+    {
+        "code": "&macro_param_2to2",
+        "name": "Macro Parameter 2 to 2",
+        "description": "Macro Parameter Two Substituted into Next Binding's Second Parameter",
+        "url": "https://zmk.dev/docs/behaviors/macros",
+        "isMacroControlBehavior": true,
+        "params": []
+    },
+    {
+        "code": "&trans",
+        "name": "Transparent",
+        "description": "The Transparent behavior simply ignores key position presses/releases, so they will be passed down to the next active layer in the stack.",
+        "url": "https://zmk.dev/docs/behaviors/misc",
+        "params": []
+    },
+    {
+        "code": "&none",
+        "name": "None",
+        "description": "The None behavior simply swallows and stops key position presses/releases, so they will not be passed down to the next active layer in the stack.",
+        "url": "https://zmk.dev/docs/behaviors/misc",
+        "params": []
+    },
+    {
+        "code": "&kp",
+        "name": "Key Press",
+        "description": "The Key Press behavior sends standard keycodes on press/release.\nIf you want to output modifier+keycode combinations, you can use modifier functions such as LG (for left GUI), LA (for left alt), LS (for left shift), LC (for left control), and the right equivalents.",
+        "url": "https://zmk.dev/docs/behaviors/key-press",
+        "params": [
+            "code"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/keys.h>"
+        ]
+    },
+    {
+        "code": "&caps_word",
+        "name": "Caps Word",
+        "description": "The Caps Word behavior behaves similar to a caps lock, but will automatically deactivate when any key not in a continue list is pressed, or if the caps word key is pressed again. ",
+        "url": "https://zmk.dev/docs/behaviors/caps-word",
+        "params": []
+    },
+    {
+        "code": "&key_repeat",
+        "name": "Key Repeat",
+        "description": "The Key Repeat behavior when triggered will send whatever keycode was last sent/triggered.",
+        "url": "https://zmk.dev/docs/behaviors/key-repeat",
+        "params": []
+    },
+    {
+        "code": "&kt",
+        "name": "Key Toggle",
+        "description": "The Key Toggle behavior toggles the press of a key. If the key is not currently pressed, key toggle will press it, holding it until the key toggle is pressed again or the key is released in some other way. If the key is currently pressed, key toggle will release it.",
+        "url": "https://zmk.dev/docs/behaviors/key-toggle",
+        "params": [
+            "code"
+        ]
+    },
+    {
+        "code": "&lt",
+        "name": "Layer Tap",
+        "description": "The Layer-Tap behavior enables a layer when a key is held, and outputs a keypress when the key is only tapped for a short time.",
+        "url": "https://zmk.dev/docs/behaviors/layers",
+        "params": [
+            "layer",
+            "code"
+        ]
+    },
+    {
+        "code": "&mo",
+        "name": "Momentary Layer",
+        "description": "The Momentary Layer behavior enables a layer while a certain key is pressed. Immediately upon activation of the key, the layer is enabled, and immediately upon release of the key, the layer is disabled again.",
+        "url": "https://zmk.dev/docs/behaviors/layers",
+        "params": [
+            "layer"
+        ]
+    },
+    {
+        "code": "&mt",
+        "name": "Mod Tap",
+        "description": "The Mod-Tap behavior sends a different keypress, depending on whether it's held or tapped. If you hold the key for longer than 200ms, the first keycode is sent. If you tap the key (release before 200ms), the second keycode is sent. If you press another key within the 200ms, the 'mod' behavior is also activated.",
+        "url": "https://zmk.dev/docs/behaviors/mod-tap",
+        "params": [
+            "code",
+            "code"
+        ]
+    },
+    {
+        "code": "&sk",
+        "name": "Sticky Key",
+        "description": "A Sticky Key stays pressed until another key is pressed. It is often used for 'sticky shift'. By using a sticky shift, you don't have to hold the shift key to write a capital.",
+        "url": "https://zmk.dev/docs/behaviors/sticky-key",
+        "params": [
+            "code"
+        ]
+    },
+    {
+        "code": "&sl",
+        "name": "Sticky Layer",
+        "description": "A Sticky Layer stays pressed until another key is pressed. By using a sticky layer, you don't have to hold the layer key to access a layer. Instead, tap the sticky layer key to activate the layer until the next keypress.",
+        "url": "https://zmk.dev/docs/behaviors/sticky-layer",
+        "params": [
+            "layer"
+        ]
+    },
+    {
+        "code": "&to",
+        "name": "To Layer",
+        "description": "The To Layer behavior enables a layer and disables all other layers except the default layer.",
+        "url": "https://zmk.dev/docs/behaviors/layers",
+        "params": [
+            "layer"
+        ]
+    },
+    {
+        "code": "&tog",
+        "name": "Toggle Layer",
+        "description": "The Toggle Layer behavior enables a layer until the layer is manually disabled.",
+        "url": "https://zmk.dev/docs/behaviors/layers",
+        "params": [
+            "layer"
+        ]
+    },
+    {
+        "code": "&bt",
+        "name": "Bluetooth",
+        "description": "The Bluetooth behavior allows management of various settings and states related to the bluetooth connection(s) between the keyboard and the host.",
+        "url": "https://zmk.dev/docs/behaviors/bluetooth",
+        "params": [
+            "command"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/bt.h>"
+        ],
+        "commands": [
+            {
+                "code": "BT_CLR",
+                "description": "Clear bond information between the keyboard and host for the selected profile."
+            },
+            {
+                "code": "BT_CLR_ALL",
+                "description": "Clear bond information between the keyboard and host for *all* profiles."
+            },
+            {
+                "code": "BT_NXT",
+                "description": "Switch to the next profile, cycling through to the first one when the end is reached."
+            },
+            {
+                "code": "BT_PRV",
+                "description": "Switch to the previous profile, cycling through to the last one when the beginning is reached."
+            },
+            {
+                "code": "BT_DISC",
+                "description": "[Beta-PR25 and newer] Disconnect from the 0-indexed profile by number, if it's currently connected and inactive. Please note: this definition must include a number as an argument in the keymap to work correctly. eg. `BT_DISC 0`",
+                "flatten": true,
+                "additionalParams": [
+                    {
+                        "name": "Bluetooth Profile",
+                        "type": "enum",
+                        "values": [
+                            0,
+                            1,
+                            2,
+                            3,
+                            4
+                        ]
+                    }
+                ]
+            },
+            {
+                "code": "BT_SEL",
+                "description": "Do not use this unless you are defining a macro; use &bt_0 to &bt_3 instead. Select the 0-indexed profile by number. Please note: this definition must include a number as an argument in the keymap to work correctly. eg. BT_SEL 0",
+                "flatten": true,
+                "additionalParams": [
+                    {
+                        "name": "Bluetooth Profile",
+                        "type": "enum",
+                        "values": [
+                            0,
+                            1,
+                            2,
+                            3,
+                            4
+                        ]
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "code": "&bt_0",
+        "name": "Bluetooth Profile 0",
+        "description": "Single quick tap to select the BT profile 0.\nDouble tap to disconnect BT profile 0.",
+        "url": "https://www.moergo.com/files/layout-editor-user-guide.pdf",
+        "params": []
+    },
+    {
+        "code": "&bt_1",
+        "name": "Bluetooth Profile 1",
+        "description": "Single quick tap to select the BT profile 1.\nDouble tap to disconnect BT profile 1.",
+        "url": "https://www.moergo.com/files/layout-editor-user-guide.pdf",
+        "params": []
+    },
+    {
+        "code": "&bt_2",
+        "name": "Bluetooth Profile 2",
+        "description": "Single quick tap to select the BT profile 2.\nDouble tap to disconnect BT profile 2.",
+        "url": "https://www.moergo.com/files/layout-editor-user-guide.pdf",
+        "params": []
+    },
+    {
+        "code": "&bt_3",
+        "name": "Bluetooth Profile 3",
+        "description": "Single quick tap to select the BT profile 3.\nDouble tap to disconnect BT profile 3.",
+        "url": "https://www.moergo.com/files/layout-editor-user-guide.pdf",
+        "params": []
+    },
+    {
+        "code": "&out",
+        "name": "Output Selection",
+        "description": "Allows selecting whether keyboard output is sent to the USB or bluetooth connection when both are connected.",
+        "url": "https://zmk.dev/docs/behaviors/outputs",
+        "params": [
+            "command"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/outputs.h>"
+        ],
+        "commands": [
+            {
+                "code": "OUT_BLE",
+                "description": "Prefer sending to the current bluetooth profile"
+            },
+            {
+                "code": "OUT_USB",
+                "description": "Prefer sending to USB"
+            },
+            {
+                "code": "OUT_TOG",
+                "description": "Toggle between USB and BLE"
+            }
+        ]
+    },
+    {
+        "code": "&rgb_ug",
+        "name": "RGB Underglow",
+        "description": "RGB underglow control",
+        "url": "https://zmk.dev/docs/behaviors/underglow",
+        "params": [
+            "command"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/rgb.h>"
+        ],
+        "commands": [
+            {
+                "code": "RGB_TOG",
+                "description": "Toggles the RGB feature on and off"
+            },
+            {
+                "code": "RGB_HUI",
+                "description": "Increases the hue of the RGB feature"
+            },
+            {
+                "code": "RGB_HUD",
+                "description": "Decreases the hue of the RGB feature"
+            },
+            {
+                "code": "RGB_SAI",
+                "description": "Increases the saturation of the RGB feature"
+            },
+            {
+                "code": "RGB_SAD",
+                "description": "Decreases the saturation of the RGB feature"
+            },
+            {
+                "code": "RGB_BRI",
+                "description": "Increases the brightness of the RGB feature"
+            },
+            {
+                "code": "RGB_BRD",
+                "description": "Decreases the brightness of the RGB feature"
+            },
+            {
+                "code": "RGB_SPI",
+                "description": "Increases the speed of the RGB feature effect's animation"
+            },
+            {
+                "code": "RGB_SPD",
+                "description": "Decreases the speed of the RGB feature effect's animation"
+            },
+            {
+                "code": "RGB_EFF",
+                "description": "Cycles the RGB feature's effect forwards"
+            },
+            {
+                "code": "RGB_EFR",
+                "description": "Cycles the RGB feature's effect reverse"
+            }
+        ]
+    },
+    {
+        "code": "&magic",
+        "name": "Magic Key",
+        "description": "Tap to show the indicators.\nHold to momentarily change to the Magic Layer.",
+        "url": "https://www.moergo.com/files/layout-editor-user-guide.pdf",
+        "params": []
+    },
+    {
+        "code": "&lower",
+        "name": "Lower Layer Key",
+        "description": "Hold to momentarily change to the Lower Layer.\nDouble-tap to persistently change to the Lower Layer.",
+        "url": "https://www.moergo.com/files/layout-editor-user-guide.pdf",
+        "params": []
+    },
+    {
+        "code": "&reset",
+        "name": "Reset Half",
+        "description": "Reset this half of the keyboard.",
+        "url": "https://zmk.dev/docs/behaviors/reset",
+        "params": []
+    },
+    {
+        "code": "&bootloader",
+        "name": "Half Bootloader",
+        "description": "Activate bootloader on this half of the keyboard, allowing you to flash a new firmware.",
+        "url": "https://zmk.dev/docs/behaviors/reset",
+        "params": []
+    },
+    {
+        "code": "Custom",
+        "name": "Custom Behavior",
+        "description": "Specify the key behavior by text input, to be used in conjunction with Custom Defined Behaviors.",
+        "url": "https://www.moergo.com/files/layout-editor-user-guide.pdf",
+        "params": [
+            "text_command"
+        ]
+    },
+    {
+        "code": "&layer",
+        "name": "Layer Key",
+        "description": "Hold to momentarily change to the specified layer.\nDouble-tap to persistently change to the layer.\n\nNOTE: This behavior can't be used in Macros or Hold-Taps",
+        "url": "https://www.moergo.com/files/layout-editor-user-guide.pdf",
+        "isSynthetic": true,
+        "params": [
+            "layer"
+        ]
+    },
+    {
+        "code": "&mkp",
+        "name": "Mouse Button Press",
+        "description": "Press/release mouse buttons. Requires Advanced Configuration parameter `HID_POINTING` set to `y`.",
+        "url": "https://zmk.dev/docs/keymaps/behaviors/mouse-emulation#mouse-button-press",
+        "params": [
+            "command"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/pointing.h>"
+        ],
+        "commands": [
+            {
+                "code": "MB1",
+                "name": "Mouse button 1",
+                "description": "Mouse button 1 (left click)"
+            },
+            {
+                "code": "LCLK",
+                "name": "Left click",
+                "description": "Mouse button 1 (left click)"
+            },
+            {
+                "code": "MB2",
+                "name": "Mouse button 2",
+                "description": "Mouse button 2 (right click)"
+            },
+            {
+                "code": "RCLK",
+                "name": "Right click",
+                "description": "Mouse button 2 (right click)"
+            },
+            {
+                "code": "MB3",
+                "name": "Mouse button 3",
+                "description": "Mouse button 3 (middle click)"
+            },
+            {
+                "code": "MCLK",
+                "name": "Middle click",
+                "description": "Mouse button 3 (middle click)"
+            },
+            {
+                "code": "MB4",
+                "name": "Mouse button 4",
+                "description": "Mouse button 4 (prev click)"
+            },
+            {
+                "code": "MB5",
+                "name": "Mouse button 5",
+                "description": "Mouse button 5 (next click)"
+            }
+        ]
+    },
+    {
+        "code": "&mmv",
+        "name": "Mouse Move",
+        "description": "Send mouse X/Y movement events. Requires Advanced Configuration parameter `HID_POINTING` set to `y`.",
+        "url": "https://zmk.dev/docs/keymaps/behaviors/mouse-emulation#mouse-move",
+        "params": [
+            "command"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/pointing.h>"
+        ],
+        "commands": [
+            {
+                "code": "MOVE_X",
+                "name": "Mouse horizontal movement",
+                "additionalParams": [
+                    {
+                        "name": "Horizontal movement",
+                        "type": "integer",
+                        "min": -30000,
+                        "max": 30000
+                    }
+                ]
+            },
+            {
+                "code": "MOVE_Y",
+                "name": "Mouse vertical movement",
+                "additionalParams": [
+                    {
+                        "name": "Vertical movement",
+                        "type": "integer",
+                        "min": -30000,
+                        "max": 30000
+                    }
+                ]
+            },
+            {
+                "code": "MOVE_UP",
+                "description": "Move up"
+            },
+            {
+                "code": "MOVE_DOWN",
+                "description": "Move down"
+            },
+            {
+                "code": "MOVE_LEFT",
+                "description": "Move left"
+            },
+            {
+                "code": "MOVE_RIGHT",
+                "description": "Move right"
+            }
+        ]
+    },
+    {
+        "code": "&msc",
+        "name": "Mouse Scroll",
+        "description": "Send vertical and horizontal mouse scroll events. Requires Advanced Configuration parameter `HID_POINTING` set to `y`.",
+        "url": "https://zmk.dev/docs/keymaps/behaviors/mouse-emulation#mouse-scroll",
+        "params": [
+            "command"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/pointing.h>"
+        ],
+        "commands": [
+            {
+                "code": "MOVE_X",
+                "name": "Mouse horizontal scroll",
+                "additionalParams": [
+                    {
+                        "name": "Horizontal scroll",
+                        "type": "integer",
+                        "min": -30000,
+                        "max": 30000
+                    }
+                ]
+            },
+            {
+                "code": "MOVE_Y",
+                "name": "Mouse vertical scroll",
+                "additionalParams": [
+                    {
+                        "name": "Vertical scroll",
+                        "type": "integer",
+                        "min": -30000,
+                        "max": 30000
+                    }
+                ]
+            },
+            {
+                "code": "SCRL_UP",
+                "description": "Scroll up"
+            },
+            {
+                "code": "SCRL_DOWN",
+                "description": "Scroll down"
+            },
+            {
+                "code": "SCRL_LEFT",
+                "description": "Scroll left"
+            },
+            {
+                "code": "SCRL_RIGHT",
+                "description": "Scroll right"
+            }
+        ]
+    },
+    {
+        "code": "&zip_scroll_transform",
+        "name": "Transform Scroll",
+        "description": "Applies transforms to wheel/horizontal wheel events",
+        "compatible": "zmk,input-processor-transform",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": [
+            {
+                "type": "set",
+                "values": [
+                    "INPUT_TRANSFORM_XY_SWAP",
+                    "INPUT_TRANSFORM_Y_INVERT",
+                    "INPUT_TRANSFORM_X_INVERT"
+                ]
+            }
+        ]
+    },
+    {
+        "code": "&zip_scroll_scaler",
+        "name": "Scale Scroll",
+        "description": "Scales wheel and horizontal wheel values. Requires firmware v25.04-beta.1 or newer.",
+        "compatible": "zmk,input-processor-scaler",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": [
+            {
+                "type": "integer",
+                "name": "Multiplier",
+                "default": 1,
+                "hint": "scale"
+            },
+            {
+                "type": "integer",
+                "name": "Divisor",
+                "default": 1,
+                "hint": "scale"
+            }
+        ]
+    },
+    {
+        "code": "&zip_xy_transform",
+        "name": "Transform XY Movement",
+        "description": "Applies transforms to X/Y movement",
+        "compatible": "zmk,input-processor-transform",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": [
+            {
+                "type": "set",
+                "values": [
+                    "INPUT_TRANSFORM_XY_SWAP",
+                    "INPUT_TRANSFORM_Y_INVERT",
+                    "INPUT_TRANSFORM_X_INVERT"
+                ]
+            }
+        ]
+    },
+    {
+        "code": "&zip_xy_scaler",
+        "name": "Scale XY Movement",
+        "description": "Scales horizontal and vertical movement by the same amount",
+        "compatible": "zmk,input-processor-scaler",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": [
+            {
+                "type": "integer",
+                "name": "Multiplier",
+                "default": 1,
+                "hint": "scale"
+            },
+            {
+                "type": "integer",
+                "name": "Divisor",
+                "default": 1,
+                "hint": "scale"
+            }
+        ]
+    },
+    {
+        "code": "&zip_x_scaler",
+        "name": "X Scaler",
+        "description": "Scales horizontal movement",
+        "compatible": "zmk,input-processor-scaler",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": [
+            {
+                "type": "integer",
+                "name": "Multiplier",
+                "default": 1,
+                "hint": "scale"
+            },
+            {
+                "type": "integer",
+                "name": "Divisor",
+                "default": 1,
+                "hint": "scale"
+            }
+        ]
+    },
+    {
+        "code": "&zip_y_scaler",
+        "name": "Y Scaler",
+        "description": "Scales vertical movement",
+        "compatible": "zmk,input-processor-scaler",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": [
+            {
+                "type": "integer",
+                "name": "Multiplier",
+                "default": 1,
+                "hint": "scale"
+            },
+            {
+                "type": "integer",
+                "name": "Divisor",
+                "default": 1,
+                "hint": "scale"
+            }
+        ]
+    },
+    {
+        "code": "&zip_xy_to_scroll_mapper",
+        "name": "Movement to Scroll",
+        "description": "Maps horizontal and vertical movement to horizontal and vertical wheel",
+        "compatible": "zmk,input-processor-code-mapper",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": []
+    },
+    {
+        "code": "&zip_xy_swap_mapper",
+        "name": "Swap X and Y",
+        "description": "Swaps horizontal and vertical movement",
+        "compatible": "zmk,input-processor-code-mapper",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": []
+    },
+    {
+        "code": "&zip_temp_layer",
+        "name": "Temporary Layer",
+        "description": "Enable a layer temporarily until no events are received",
+        "compatible": "zmk,input-processor-temp-layer",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": [
+            {
+                "type": "integer",
+                "name": "layer",
+                "default": 0,
+                "hint": "layer"
+            },
+            {
+                "type": "integer",
+                "name": "timeoutMs",
+                "default": 0,
+                "hint": "timeoutMs"
+            }
+        ]
+    },
+    {
+        "code": "&zip_button_behaviors",
+        "name": "Button Behaviors",
+        "description": "Maps left/right/middle clicks to a given behavior",
+        "compatible": "zmk,input-processor-behaviors",
+        "includes": [
+            "#include <input/processors.dtsi>",
+            "#include <dt-bindings/zmk/input_transform.h>"
+        ],
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "params": [
+            {
+                "type": "binding",
+                "name": "lmb",
+                "default": {
+                    "value": "&none",
+                    "params": []
+                }
+            },
+            {
+                "type": "binding",
+                "name": "mmb",
+                "default": {
+                    "value": "&none",
+                    "params": []
+                }
+            },
+            {
+                "type": "binding",
+                "name": "rmb",
+                "default": {
+                    "value": "&none",
+                    "params": []
+                }
+            }
+        ]
+    },
+    {
+        "code": "&mmv_input_listener",
+        "name": "Mouse Move",
+        "description": "Configuration for `&mmv`. Produces only X/Y movement events; do not use scroll input listeners here, unless you transform the XY events to scroll first.",
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/pointing.h>"
+        ],
+        "compatible": [
+            "zmk,input-processor-transform",
+            "zmk,input-processor-scaler",
+            "zmk,input-processor-code-mapper",
+            "zmk,input-processor-temp-layer"
+        ],
+        "params": []
+    },
+    {
+        "code": "&msc_input_listener",
+        "name": "Mouse Scroll",
+        "description": "Configuration for `&msc`. Produces only scroll events; do not use XY movement input listeners here, unless you transform the scroll to mouse movement first.",
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/pointing.h>"
+        ],
+        "compatible": [
+            "zmk,input-processor-transform",
+            "zmk,input-processor-scaler",
+            "zmk,input-processor-code-mapper",
+            "zmk,input-processor-temp-layer"
+        ],
+        "params": []
+    },
+    {
+        "code": "&mkp_input_listener",
+        "name": "Mouse Key Press",
+        "description": "Configuration for `&mkp`. Produces only button events; use only Misc type input listeners here.",
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/pointing.h>"
+        ],
+        "compatible": [
+            "zmk,input-processor-behaviors"
+        ],
+        "params": []
+    },
+    {
+        "code": "&cirque_lh_listener",
+        "name": "Left Touchpad",
+        "description": "Configuration for left touchpad module.",
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/pointing.h>"
+        ],
+        "compatible": [
+            "zmk,input-processor-transform",
+            "zmk,input-processor-scaler",
+            "zmk,input-processor-code-mapper",
+            "zmk,input-processor-temp-layer"
+        ],
+        "params": []
+    },
+    {
+        "code": "&cirque_rh_listener",
+        "name": "Right Touchpad",
+        "description": "Configuration for right touchpad module.",
+        "requires_config": [
+            "CONFIG_ZMK_POINTING"
+        ],
+        "includes": [
+            "#include <dt-bindings/zmk/pointing.h>"
+        ],
+        "compatible": [
+            "zmk,input-processor-transform",
+            "zmk,input-processor-scaler",
+            "zmk,input-processor-code-mapper",
+            "zmk,input-processor-temp-layer"
+        ],
+        "params": []
+    }
+]

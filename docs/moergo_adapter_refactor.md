@@ -12,6 +12,7 @@
   - `spec.rs`: serde structs mirroring the MoErgo JSON payload (document source/links).
   - `mapping.rs`: alias ↔ canonical KConfig map generated at build time from a TOML copy of `keyboards/config/common/all_kconfig.yaml` (embedded), with an optional on-disk override when the file exists; no runtime YAML parsing. The TOML copy lives under `profiles/vendors/moergo/`.
   - `adapter.rs`: import/export helpers that convert between MoErgo JSON and `LayoutBundle`, handling overlays, symbols, targets, and templates.
+  - `behaviors.rs` (or data loader): optional helpers that read `profiles/vendors/moergo/behaviors.json` (from the MoErgo editor) to map behaviors to required header includes/metadata.
   - `template.rs` (or constants): default template path (`templates/glove80/keymap.dtsi.j2`) plus helper to apply overrides.
 - **Bundle layer**: `bundle.rs` delegates to the MoErgo adapter for JSON import/export. Bundle remains unaware of alias logic.
 - **Mapping strategy**:
@@ -28,6 +29,7 @@
 ## Implementation Notes
 - **Filesystem layout**: Vendor assets (embedded TOML + optional override) live under `profiles/vendors/moergo/`. Profiles now live under `profiles/keyboards` and `profiles/firmwares` (previously `keyboard_profiles`/`firmware_profiles`); update consumers accordingly.
 - **Mapping source**: Convert `keyboards/config/common/all_kconfig.yaml` to TOML (stored at `profiles/vendors/moergo/all_kconfig.toml`), and generate a Rust map at build time (alias ↔ canonical). Load inverses for export. At runtime, first check for the TOML file on disk to override the embedded default; no runtime YAML parsing.
+- **Behavior metadata**: Ship `profiles/vendors/moergo/behaviors.json` (from the MoErgo editor) so the adapter can add required header includes (e.g., dt-bindings) and surface behavior metadata when importing/exporting layouts.
 - **Symbols contract**:
   - `symbols.defines`: canonical KConfig names for MoErgo imports (e.g., `HID_POINTING` alias → `CONFIG_ZMK_POINTING` stored).
   - `symbols.includes/search_paths/template_vars`: unchanged; `template_vars.locale` still set from payload.
