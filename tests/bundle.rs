@@ -9,10 +9,7 @@ use zmk_layout_rs::adapters::{
 
 #[test]
 fn moergo_bundle_imports() {
-    let json = fs::read_to_string(
-        "examples/85f92852-413b-4931-ac7d-cf42e6b129eb_TailorKey v4.2h Bilateral.json",
-    )
-    .expect("fixture present");
+    let json = fs::read_to_string("examples/moergo_factory.json").expect("fixture present");
     let bundle = LayoutBundle::from_moergo_str(&json).expect("import");
 
     assert_eq!(bundle.format_version, "layout-bundle/2025-02-01");
@@ -35,10 +32,7 @@ fn moergo_bundle_imports() {
 
 #[test]
 fn moergo_bundle_exports() {
-    let json = fs::read_to_string(
-        "examples/85f92852-413b-4931-ac7d-cf42e6b129eb_TailorKey v4.2h Bilateral.json",
-    )
-    .expect("fixture present");
+    let json = fs::read_to_string("examples/moergo_factory.json").expect("fixture present");
     let bundle = LayoutBundle::from_moergo_str(&json).expect("import");
     let exported = bundle.to_moergo_json().expect("export");
     let value: Value = serde_json::from_str(&exported).expect("json");
@@ -55,29 +49,57 @@ fn moergo_bundle_exports() {
 
 #[test]
 fn moergo_config_parameters_become_defines() {
-    let json = fs::read_to_string("examples/test.json").expect("fixture present");
+    let json = fs::read_to_string("examples/moergo_factory_rgb_hid.json").expect("fixture present");
     let bundle = LayoutBundle::from_moergo_str(&json).expect("import");
 
     assert_eq!(
-        bundle.symbols.defines.get("HID_POINTING"),
+        bundle.symbols.defines.get("CONFIG_ZMK_SLEEP"),
         Some(&Value::String("y".into()))
     );
     assert_eq!(
-        bundle.symbols.defines.get("HID_POINTING_SMOOTH_SCROLLING"),
+        bundle.symbols.defines.get("CONFIG_ZMK_POINTING"),
+        Some(&Value::String("y".into()))
+    );
+    assert_eq!(
+        bundle
+            .symbols
+            .defines
+            .get("CONFIG_BT_DEVICE_NAME_APPEND_SN"),
         Some(&Value::String("y".into()))
     );
 
     let target = bundle.targets.first().expect("target present");
-    assert!(
-        target.defines.contains(&"HID_POINTING".into())
-            && target
-                .defines
-                .contains(&"HID_POINTING_SMOOTH_SCROLLING".into())
-    );
+    for name in [
+        "CONFIG_ZMK_SLEEP",
+        "CONFIG_ZMK_POINTING",
+        "CONFIG_BT_DEVICE_NAME_APPEND_SN",
+    ] {
+        assert!(
+            target.defines.contains(&name.to_string()),
+            "missing target define {name}"
+        );
+    }
+
     assert_eq!(
         target.defines.len(),
         bundle.symbols.defines.len(),
         "all defines should be attached to the default target"
+    );
+
+    let exported = bundle.to_moergo_json().expect("export");
+    let value: Value = serde_json::from_str(&exported).expect("json");
+    let aliases: Vec<String> = value["config_parameters"]
+        .as_array()
+        .expect("config_parameters present")
+        .iter()
+        .filter_map(|entry| entry.get("paramName").and_then(|v| v.as_str()))
+        .map(|s| s.to_string())
+        .collect();
+    assert!(
+        aliases.contains(&"DEEP_SLEEP".to_string())
+            && aliases.contains(&"HID_POINTING".to_string())
+            && aliases.contains(&"BLE_DEVICE_NAME_APPEND_SN".to_string()),
+        "expected MoErgo aliases in export, got {aliases:?}"
     );
 }
 
@@ -198,9 +220,10 @@ fn validate_catches_missing_template_and_defines() {
         ..BundleTarget::default()
     }];
     let err = bundle.validate().expect_err("missing template should fail");
-    assert!(err
-        .to_string()
-        .contains("missing a template path"), "got {err:?}");
+    assert!(
+        err.to_string().contains("missing a template path"),
+        "got {err:?}"
+    );
 
     let mut bundle = LayoutBundle::default();
     bundle
