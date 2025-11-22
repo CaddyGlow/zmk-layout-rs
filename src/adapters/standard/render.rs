@@ -320,7 +320,16 @@ fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> Str
         }
         lines.push(line);
     }
-    let joined = lines.join("\n");
+    let min_indent = lines
+        .iter()
+        .map(|line| line.chars().take_while(|c| c.is_whitespace()).count())
+        .min()
+        .unwrap_or(0);
+    let normalized: Vec<String> = lines
+        .into_iter()
+        .map(|line| line.chars().skip(min_indent).collect())
+        .collect();
+    let joined = normalized.join("\n");
     format!("<\n{joined}\n{}>", fmt.base_indent)
 }
 
