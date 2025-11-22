@@ -649,7 +649,10 @@ fn render_combo_bindings(combo: &ComboSpec) -> Option<String> {
     if binding.is_empty() {
         return None;
     }
-    Some(format!("        bindings = <{}>;\n", binding))
+    Some(format!(
+        "        bindings = <{}>;\n",
+        format_binding(binding)
+    ))
 }
 
 fn render_macros(macros: &[MacroSpec]) -> String {
