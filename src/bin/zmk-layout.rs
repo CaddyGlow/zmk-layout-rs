@@ -1,5 +1,4 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use similar::{ChangeTag, TextDiff};
 use std::{
     collections::{BTreeSet, HashSet},
     fs,
@@ -24,6 +23,7 @@ use zmk_layout_rs::{
         FlashConfig, FlashError, FlashSideSelection, build_flash_targets, default_sides,
         discover_devices, flash_target, resolve_flash_source,
     },
+    io::{self, IoError, LoadedLayout},
     profiles::KeyboardProfileDoc,
     providers::KeymapDocument,
     tasks::{
@@ -473,7 +473,11 @@ impl From<TemplateModeFlag> for TemplateParseMode {
 }
 
 fn run_apply(args: &ApplyArgs) -> Result<i32, CliError> {
-    let PreparedContext { file, document, .. } = prepare(&args.shared)?;
+    let PreparedContext {
+        file,
+        document,
+        layout: _,
+    } = prepare(&args.shared)?;
     let exec = execute(document, &file, ExecutionMode::Apply);
     let code = print_results(&exec.results);
     if args.shared.combo_conditions {
@@ -483,12 +487,9 @@ fn run_apply(args: &ApplyArgs) -> Result<i32, CliError> {
         return Ok(code);
     }
 
-    let output = serialize_document(exec.document)?;
+    let output = io::serialize_keymap(exec.document)?;
     if let Some(path) = &args.output {
-        fs::write(path, output).map_err(|source| CliError::WriteFile {
-            path: path.clone(),
-            source,
-        })?;
+        io::write_text(path, &output)?;
         eprintln!("wrote updated layout to {}", path.display());
     } else {
         print!("{}", output);
@@ -498,7 +499,11 @@ fn run_apply(args: &ApplyArgs) -> Result<i32, CliError> {
 }
 
 fn run_validate(args: &ValidateArgs) -> Result<i32, CliError> {
-    let PreparedContext { file, document, .. } = prepare(&args.shared)?;
+    let PreparedContext {
+        file,
+        document,
+        layout: _,
+    } = prepare(&args.shared)?;
     let exec = execute(document, &file, ExecutionMode::DryRun);
     let code = print_results(&exec.results);
     if args.shared.combo_conditions {
@@ -511,7 +516,7 @@ fn run_diff(args: &DiffArgs) -> Result<i32, CliError> {
     let PreparedContext {
         file,
         document,
-        base_text,
+        layout,
     } = prepare(&args.shared)?;
     let exec = execute(document, &file, ExecutionMode::Apply);
     let code = print_results(&exec.results);
@@ -521,26 +526,16 @@ fn run_diff(args: &DiffArgs) -> Result<i32, CliError> {
     if code != 0 {
         return Ok(code);
     }
-    let updated = serialize_document(exec.document)?;
-    print_diff(&base_text, &updated, &args.shared.base_layout);
+    let updated = io::serialize_keymap(exec.document)?;
+    let diff = io::render_diff(&layout.text, &updated, &layout.path);
+    print!("{diff}");
     Ok(0)
 }
 
 fn run_script(args: &ScriptArgs) -> Result<i32, CliError> {
-    let script_text = fs::read_to_string(&args.script).map_err(|source| CliError::ReadFile {
-        path: args.script.clone(),
-        source,
-    })?;
-
-    let base_text = fs::read_to_string(&args.layout).map_err(|source| CliError::ReadFile {
-        path: args.layout.clone(),
-        source,
-    })?;
-    let dts = DtsDocument::parse_str(&base_text).map_err(|source| CliError::ParseLayout {
-        path: args.layout.clone(),
-        source,
-    })?;
-    let document = KeymapDocument::from_document(dts);
+    let script_text = io::read_text(&args.script)?;
+    let layout = io::load_layout(&args.layout)?;
+    let document = KeymapDocument::from_document(layout.document.clone());
 
     let script_dir = args.script.parent().map(|p| {
         if p.as_os_str().is_empty() {
@@ -564,15 +559,13 @@ fn run_script(args: &ScriptArgs) -> Result<i32, CliError> {
         return Ok(2);
     }
 
-    let output = serialize_document(result.document)?;
+    let output = io::serialize_keymap(result.document)?;
 
     if args.show_diff {
-        print_diff(&base_text, &output, &args.layout);
+        let diff = io::render_diff(&layout.text, &output, &layout.path);
+        print!("{diff}");
     } else if let Some(path) = &args.output {
-        fs::write(path, output).map_err(|source| CliError::WriteFile {
-            path: path.clone(),
-            source,
-        })?;
+        io::write_text(path, &output)?;
         eprintln!("wrote updated layout to {}", path.display());
     } else {
         print!("{}", output);
@@ -611,10 +604,7 @@ fn run_bundle(command: BundleCommand) -> Result<i32, CliError> {
 }
 
 fn run_layer_export(args: &LayerExportArgs) -> Result<i32, CliError> {
-    let source = fs::read_to_string(&args.dts).map_err(|source| CliError::ReadFile {
-        path: args.dts.clone(),
-        source,
-    })?;
+    let source = io::read_text(&args.dts)?;
 
     if let Some(vendor) = args.vendor {
         if args.template.is_some() {
@@ -625,35 +615,22 @@ fn run_layer_export(args: &LayerExportArgs) -> Result<i32, CliError> {
         let contents = match vendor {
             VendorExtractionFlag::Moergo => export_standard_str_from_moergo_dtsi(&source)?,
         };
-        fs::write(&args.json, contents).map_err(|source| CliError::WriteFile {
-            path: args.json.clone(),
-            source,
-        })?;
+        io::write_text(&args.json, &contents)?;
     } else if let Some(template_path) = &args.template {
-        let template_source =
-            fs::read_to_string(template_path).map_err(|source| CliError::ReadFile {
-                path: template_path.clone(),
-                source,
-            })?;
+        let template_source = io::read_text(template_path)?;
         let contents = export_standard_str_with_template_mode(
             &source,
             &template_source,
             args.template_mode.into(),
         )?;
-        fs::write(&args.json, contents).map_err(|source| CliError::WriteFile {
-            path: args.json.clone(),
-            source,
-        })?;
+        io::write_text(&args.json, &contents)?;
     } else {
         let document = DtsDocument::parse_str(&source).map_err(|source| CliError::ParseLayout {
             path: args.dts.clone(),
             source,
         })?;
         let contents = export_standard_str(&document)?;
-        fs::write(&args.json, contents).map_err(|source| CliError::WriteFile {
-            path: args.json.clone(),
-            source,
-        })?;
+        io::write_text(&args.json, &contents)?;
     }
 
     eprintln!("exported layout to {}", args.json.display());
@@ -661,29 +638,16 @@ fn run_layer_export(args: &LayerExportArgs) -> Result<i32, CliError> {
 }
 
 fn run_layer_import(args: &LayerImportArgs) -> Result<i32, CliError> {
-    let json_text = fs::read_to_string(&args.json).map_err(|source| CliError::ReadFile {
-        path: args.json.clone(),
-        source,
-    })?;
-    let template_source =
-        fs::read_to_string(&args.template).map_err(|source| CliError::ReadFile {
-            path: args.template.clone(),
-            source,
-        })?;
+    let json_text = io::read_text(&args.json)?;
+    let template_source = io::read_text(&args.template)?;
 
     if template_contains_placeholders(&template_source) {
         let rendered = render_standard_template(&json_text, &template_source)?;
-        fs::write(&args.output, rendered).map_err(|source| CliError::WriteFile {
-            path: args.output.clone(),
-            source,
-        })?;
+        io::write_text(&args.output, &rendered)?;
     } else {
         let imported = import_standard_str_with_template(&json_text, &template_source)?;
         let rendered = imported.to_string().map_err(CliError::Serialize)?;
-        fs::write(&args.output, rendered).map_err(|source| CliError::WriteFile {
-            path: args.output.clone(),
-            source,
-        })?;
+        io::write_text(&args.output, &rendered)?;
     }
 
     eprintln!("imported layout to {}", args.output.display());
@@ -706,10 +670,7 @@ fn run_bundle_export(args: &BundleExportArgs) -> Result<i32, CliError> {
     match args.format {
         BundleFormat::Moergo => {
             let json = bundle.to_moergo_json()?;
-            fs::write(&args.output, json).map_err(|source| CliError::WriteFile {
-                path: args.output.clone(),
-                source,
-            })?;
+            io::write_text(&args.output, &json)?;
         }
     }
     eprintln!("exported bundle to {}", args.output.display());
@@ -720,10 +681,7 @@ fn run_bundle_render(args: &BundleRenderArgs) -> Result<i32, CliError> {
     let bundle = LayoutBundle::from_json_file(&args.bundle)?;
     let rendered = bundle.render_target(&args.target, args.template.as_deref())?;
     if let Some(path) = &args.output {
-        fs::write(path, &rendered).map_err(|source| CliError::WriteFile {
-            path: path.clone(),
-            source,
-        })?;
+        io::write_text(path, &rendered)?;
         eprintln!("rendered target {} to {}", args.target, path.display());
     } else {
         println!("{rendered}");
@@ -1033,15 +991,8 @@ fn apply_firmware_layout(
                 "multiple layout inputs were provided".into(),
             ));
         }
-        let text = fs::read_to_string(path).map_err(|source| CliError::ReadFile {
-            path: path.clone(),
-            source,
-        })?;
-        let document = DtsDocument::parse_str(&text).map_err(|source| CliError::ParseLayout {
-            path: path.clone(),
-            source,
-        })?;
-        builder = builder.layout_document(document);
+        let layout = io::load_layout(path)?;
+        builder = builder.layout_document(layout.document);
         layout_set = true;
     }
     match (&args.keymap, &args.kconfig) {
@@ -1166,17 +1117,14 @@ fn describe_layout(source: &LayoutSource) -> String {
 
 struct PreparedContext {
     file: TaskFile,
+    layout: LoadedLayout,
     document: KeymapDocument,
-    base_text: String,
 }
 
 fn prepare(args: &SharedArgs) -> Result<PreparedContext, CliError> {
-    let task_text = fs::read_to_string(&args.tasks).map_err(|source| CliError::ReadFile {
-        path: args.tasks.clone(),
-        source,
-    })?;
-    let mut file = TaskFile::from_toml_str(&task_text)?;
-    if let Some(parent) = args.tasks.parent().map(|p| {
+    let loaded = io::load_task_file(&args.tasks)?;
+    let mut file = loaded.file;
+    if let Some(parent) = loaded.path.parent().map(|p| {
         if p.as_os_str().is_empty() {
             PathBuf::from(".")
         } else {
@@ -1190,31 +1138,18 @@ fn prepare(args: &SharedArgs) -> Result<PreparedContext, CliError> {
     }
     warn_base_metadata(&file, args);
 
-    let base_text = fs::read_to_string(&args.base_layout).map_err(|source| CliError::ReadFile {
-        path: args.base_layout.clone(),
-        source,
-    })?;
-    let dts = DtsDocument::parse_str(&base_text).map_err(|source| CliError::ParseLayout {
-        path: args.base_layout.clone(),
-        source,
-    })?;
-    let document = KeymapDocument::from_document(dts);
-
+    let layout = io::load_layout(&args.base_layout)?;
+    let document = KeymapDocument::from_document(layout.document.clone());
     Ok(PreparedContext {
         file,
+        layout,
         document,
-        base_text,
     })
 }
 
 fn execute(document: KeymapDocument, file: &TaskFile, mode: ExecutionMode) -> TaskExecution {
     let options = TaskEngineOptions { mode };
     apply_tasks_with_options(document, file, options)
-}
-
-fn serialize_document(document: KeymapDocument) -> Result<String, CliError> {
-    let dts = document.into_document();
-    dts.to_string().map_err(CliError::Serialize)
 }
 
 fn print_results(results: &[TaskOutcome]) -> i32 {
@@ -1303,23 +1238,6 @@ fn warn_base_metadata(file: &TaskFile, args: &SharedArgs) {
     }
 }
 
-fn print_diff(base: &str, updated: &str, base_path: &PathBuf) {
-    println!("--- {}", base_path.display());
-    println!("+++ updated");
-    let diff = TextDiff::from_lines(base, updated);
-    for change in diff.iter_all_changes() {
-        let sign = match change.tag() {
-            ChangeTag::Delete => '-',
-            ChangeTag::Insert => '+',
-            ChangeTag::Equal => ' ',
-        };
-        print!("{}{}", sign, change);
-        if !change.value().ends_with('\n') {
-            println!();
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 enum CliError {
     #[error("failed to read {path}: {source}")]
@@ -1367,4 +1285,16 @@ enum CliError {
     Bundle(#[from] zmk_layout_rs::adapters::bundle::BundleError),
     #[error("invalid arguments: {0}")]
     InvalidArgument(String),
+}
+
+impl From<IoError> for CliError {
+    fn from(err: IoError) -> Self {
+        match err {
+            IoError::ReadFile { path, source } => CliError::ReadFile { path, source },
+            IoError::WriteFile { path, source } => CliError::WriteFile { path, source },
+            IoError::ParseLayout { path, source } => CliError::ParseLayout { path, source },
+            IoError::ParseTaskFile { source, .. } => CliError::TaskConfig(source),
+            IoError::SerializeLayout(err) => CliError::Serialize(err),
+        }
+    }
 }
