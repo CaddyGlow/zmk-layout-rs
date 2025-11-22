@@ -290,15 +290,15 @@ fn render_keymap_node(layout: &AdapterLayout) -> String {
 }
 
 fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> String {
-    let placeholder = "&none".to_string();
     let mut width_per_col: Vec<usize> = Vec::new();
     for row in &fmt.rows {
         for (idx, pos) in row.iter().enumerate() {
-            let token = binding_for_pos(layer, *pos).unwrap_or(&placeholder);
+            let token = binding_for_pos(layer, *pos);
+            let len = token.map(|t| t.len()).unwrap_or_default();
             if width_per_col.len() <= idx {
-                width_per_col.push(token.len());
-            } else if token.len() > width_per_col[idx] {
-                width_per_col[idx] = token.len();
+                width_per_col.push(len);
+            } else if len > width_per_col[idx] {
+                width_per_col[idx] = len;
             }
         }
     }
@@ -310,9 +310,13 @@ fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> Str
             if col > 0 {
                 line.push_str(&fmt.key_gap);
             }
-            let token = binding_for_pos(layer, *pos).unwrap_or(&placeholder);
-            let width = *width_per_col.get(col).unwrap_or(&token.len());
-            line.push_str(&format!("{token:<width$}"));
+            let token = binding_for_pos(layer, *pos);
+            let width = *width_per_col.get(col).unwrap_or(&0);
+            if let Some(tok) = token {
+                line.push_str(&format!("{tok:>width$}"));
+            } else {
+                line.push_str(&" ".repeat(width.max(1)));
+            }
         }
         lines.push(line);
     }
