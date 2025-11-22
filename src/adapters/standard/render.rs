@@ -12,6 +12,46 @@ use super::{
     },
 };
 
+#[derive(Debug)]
+struct FormattingHints {
+    rows: Vec<Vec<i32>>,
+    key_gap: String,
+    base_indent: String,
+}
+
+impl FormattingHints {
+    fn from_extras(extras: &BTreeMap<String, Value>) -> Option<Self> {
+        let rows_value = extras.get("formatting_rows")?;
+        let rows = rows_value.as_array()?.iter().filter_map(|row| {
+            row.as_array().map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|val| val.as_i64().map(|v| v as i32))
+                    .collect::<Vec<_>>()
+            })
+        });
+        let collected: Vec<Vec<i32>> = rows.collect();
+        if collected.is_empty() {
+            return None;
+        }
+        let key_gap = extras
+            .get("formatting_key_gap")
+            .and_then(|v| v.as_str())
+            .unwrap_or(" ")
+            .to_string();
+        let base_indent = extras
+            .get("formatting_base_indent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Some(Self {
+            rows: collected,
+            key_gap,
+            base_indent,
+        })
+    }
+}
+
 pub fn render_layout_with_template(
     layout: &AdapterLayout,
     template: &str,
@@ -50,10 +90,10 @@ fn build_template_replacements(layout: &AdapterLayout) -> BTreeMap<String, Strin
     insert_placeholder(&mut map, "layer_names_defines", layer_defines.clone());
     insert_placeholder(&mut map, "layer_defines", layer_defines);
 
-    let rendered_layers = render_layers_only(&layout.layers);
+    let rendered_layers = render_layers_only(layout);
     insert_placeholder(&mut map, "rendered_layers", rendered_layers);
 
-    let keymap_node = render_keymap_node(&layout.layers);
+    let keymap_node = render_keymap_node(layout);
     insert_placeholder(&mut map, "keymap_node", keymap_node);
 
     let macros_block = render_macros(&layout.macros);
@@ -213,33 +253,77 @@ fn render_layer_defines(layers: &[LayerSpec]) -> String {
     output
 }
 
-fn render_layers_only(layers: &[LayerSpec]) -> String {
-    if layers.is_empty() {
+fn render_layers_only(layout: &AdapterLayout) -> String {
+    if layout.layers.is_empty() {
         return String::new();
     }
+    let formatting = FormattingHints::from_extras(&layout.metadata.extras);
     let mut output = String::new();
-    for layer in layers {
+    for layer in &layout.layers {
         output.push_str("        ");
         output.push_str(&layer.name);
         output.push_str(" {\n");
         output.push_str("            bindings = ");
-        output.push_str(&format_list(&layer.bindings));
-        output.push_str(";\n        };\n");
+        match formatting.as_ref() {
+            Some(fmt) => output.push_str(&format_layer_with_formatting(layer, fmt)),
+            None => {
+                output.push_str(&format_list(&layer.bindings));
+            }
+        }
+        output.push_str(";");
+        output.push_str("\n        };\n");
     }
     output
 }
 
-fn render_keymap_node(layers: &[LayerSpec]) -> String {
+fn render_keymap_node(layout: &AdapterLayout) -> String {
     let mut output = String::new();
     output.push_str("keymap {\n    compatible = \"zmk,keymap\";\n");
-    if !layers.is_empty() {
-        let rendered = render_layers_only(layers);
+    if !layout.layers.is_empty() {
+        let rendered = render_layers_only(layout);
         output.push('\n');
         output.push_str(rendered.trim_end());
         output.push('\n');
     }
     output.push_str("};\n");
     output
+}
+
+fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> String {
+    let placeholder = "&none".to_string();
+    let mut width_per_col: Vec<usize> = Vec::new();
+    for row in &fmt.rows {
+        for (idx, pos) in row.iter().enumerate() {
+            let token = binding_for_pos(layer, *pos).unwrap_or(&placeholder);
+            if width_per_col.len() <= idx {
+                width_per_col.push(token.len());
+            } else if token.len() > width_per_col[idx] {
+                width_per_col[idx] = token.len();
+            }
+        }
+    }
+    let mut lines = Vec::new();
+    for row in &fmt.rows {
+        let mut line = String::new();
+        line.push_str(&fmt.base_indent);
+        for (col, pos) in row.iter().enumerate() {
+            if col > 0 {
+                line.push_str(&fmt.key_gap);
+            }
+            let token = binding_for_pos(layer, *pos).unwrap_or(&placeholder);
+            let width = *width_per_col.get(col).unwrap_or(&token.len());
+            line.push_str(&format!("{token:<width$}"));
+        }
+        lines.push(line);
+    }
+    format!("<\n{}\n            >", lines.join("\n            "))
+}
+
+fn binding_for_pos<'a>(layer: &'a LayerSpec, pos: i32) -> Option<&'a String> {
+    if pos < 0 {
+        return None;
+    }
+    layer.bindings.get(pos as usize)
 }
 
 fn render_behaviors<'a>(behaviors: impl Iterator<Item = &'a BehaviorSpec>) -> String {

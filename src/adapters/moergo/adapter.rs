@@ -88,6 +88,31 @@ pub fn import_bundle_from_str(json: &str) -> Result<LayoutBundle, BundleError> {
     metadata.keyboard = payload.keyboard.clone();
     metadata.tags = payload.tags.clone().unwrap_or_default();
     if let Some(profile) = profile.as_ref() {
+        let mut rows = Vec::new();
+        for row in &profile.layout.formatting.rows {
+            let entries: Vec<Value> = row
+                .keys
+                .iter()
+                .map(|idx| Value::Number((*idx).into()))
+                .collect();
+            rows.push(Value::Array(entries));
+        }
+        layout
+            .metadata
+            .extras
+            .insert("formatting_rows".into(), Value::Array(rows));
+        if let Some(gap) = profile.layout.formatting.key_gap.as_ref() {
+            layout
+                .metadata
+                .extras
+                .insert("formatting_key_gap".into(), Value::String(gap.clone()));
+        }
+        if let Some(indent) = profile.layout.formatting.base_indent.as_ref() {
+            layout.metadata.extras.insert(
+                "formatting_base_indent".into(),
+                Value::String(indent.clone()),
+            );
+        }
         if let Some(system) = profile.layout.keymap.system_behaviors_dts() {
             metadata.extras.insert(
                 "system_behaviors_dts".into(),
