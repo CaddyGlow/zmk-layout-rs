@@ -8,6 +8,7 @@ pub mod adapters;
 pub mod ast;
 pub mod bindings;
 pub mod build;
+pub mod cli;
 pub mod dts;
 pub mod flash;
 pub mod layout_engine;
