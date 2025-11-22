@@ -313,9 +313,14 @@ fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> Str
             let token = binding_for_pos(layer, *pos);
             let width = *width_per_col.get(col).unwrap_or(&0);
             if let Some(tok) = token {
-                line.push_str(&format!("{tok:>width$}"));
+                if col == 0 {
+                    line.push_str(&tok);
+                } else {
+                    line.push_str(&format!("{tok:>width$}"));
+                }
             } else {
-                line.push_str(&" ".repeat(width.max(1)));
+                let pad = if col == 0 { 1 } else { width.max(1) };
+                line.push_str(&" ".repeat(pad));
             }
         }
         lines.push(line);
