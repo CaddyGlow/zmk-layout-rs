@@ -18,6 +18,7 @@ struct FormattingHints {
     key_gap: String,
     base_indent: String,
     layer_prefix: String,
+    combo_prefix: String,
 }
 
 impl FormattingHints {
@@ -50,11 +51,17 @@ impl FormattingHints {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        let combo_prefix = extras
+            .get("formatting_combo_prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         Some(Self {
             rows: collected,
             key_gap,
             base_indent,
             layer_prefix,
+            combo_prefix,
         })
     }
 }
@@ -63,10 +70,11 @@ pub fn render_layout_with_template(
     layout: &AdapterLayout,
     template: &str,
 ) -> Result<String, TemplateError> {
-    let mut replacements = build_template_replacements(layout);
+    let formatting = FormattingHints::from_extras(&layout.metadata.extras);
+    let mut replacements = build_template_replacements(layout, formatting.as_ref());
     let has_explicit_includes = layout.metadata.extras.contains_key("includes");
     normalize_template_includes(template, &mut replacements, has_explicit_includes);
-    let context = build_template_context(layout, replacements)?;
+    let context = build_template_context(layout, replacements, formatting.as_ref())?;
 
     let mut env = Environment::new();
     env.set_auto_escape_callback(|_| AutoEscape::None);
@@ -75,7 +83,10 @@ pub fn render_layout_with_template(
     Ok(env.render_str(template, &context)?)
 }
 
-fn build_template_replacements(layout: &AdapterLayout) -> BTreeMap<String, String> {
+fn build_template_replacements(
+    layout: &AdapterLayout,
+    formatting: Option<&FormattingHints>,
+) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     let extras = &layout.metadata.extras;
 
@@ -97,10 +108,10 @@ fn build_template_replacements(layout: &AdapterLayout) -> BTreeMap<String, Strin
     insert_placeholder(&mut map, "layer_names_defines", layer_defines.clone());
     insert_placeholder(&mut map, "layer_defines", layer_defines);
 
-    let rendered_layers = render_layers_only(layout);
+    let rendered_layers = render_layers_only(layout, formatting);
     insert_placeholder(&mut map, "rendered_layers", rendered_layers);
 
-    let keymap_node = render_keymap_node(layout);
+    let keymap_node = render_keymap_node(layout, formatting);
     insert_placeholder(&mut map, "keymap_node", keymap_node);
 
     let macros_block = render_macros(&layout.macros);
@@ -111,7 +122,7 @@ fn build_template_replacements(layout: &AdapterLayout) -> BTreeMap<String, Strin
     insert_placeholder(&mut map, "behaviors", behaviors_block.clone());
     insert_placeholder(&mut map, "user_behaviors_dtsi", behaviors_block);
 
-    if let Some((combos_root, combos_body)) = render_combos(&layout.combos) {
+    if let Some((combos_root, combos_body)) = render_combos(&layout.combos, formatting) {
         insert_placeholder(&mut map, "combos", combos_root);
         insert_placeholder(&mut map, "combos_dtsi", combos_body);
     } else {
@@ -176,6 +187,7 @@ fn normalize_template_includes(
 fn build_template_context(
     layout: &AdapterLayout,
     placeholders: BTreeMap<String, String>,
+    formatting: Option<&FormattingHints>,
 ) -> Result<Value, TemplateError> {
     let mut context = Map::new();
     let mut content = Map::new();
@@ -186,7 +198,17 @@ fn build_template_context(
     }
 
     context.insert("content".into(), Value::Object(content));
-    context.insert("layout".into(), serde_json::to_value(layout)?);
+    let mut layout_value = serde_json::to_value(layout)?;
+    if let (Some(fmt), Some(obj)) = (formatting, layout_value.as_object_mut()) {
+        obj.insert(
+            "formatting".into(),
+            serde_json::json!({
+                "layerPrefix": fmt.layer_prefix,
+                "comboPrefix": fmt.combo_prefix
+            }),
+        );
+    }
+    context.insert("layout".into(), layout_value);
 
     Ok(Value::Object(context))
 }
@@ -260,11 +282,10 @@ fn render_layer_defines(layers: &[LayerSpec]) -> String {
     output
 }
 
-fn render_layers_only(layout: &AdapterLayout) -> String {
+fn render_layers_only(layout: &AdapterLayout, formatting: Option<&FormattingHints>) -> String {
     if layout.layers.is_empty() {
         return String::new();
     }
-    let formatting = FormattingHints::from_extras(&layout.metadata.extras);
     let mut output = String::new();
     for layer in &layout.layers {
         output.push_str("        ");
@@ -292,11 +313,11 @@ fn render_layers_only(layout: &AdapterLayout) -> String {
     output
 }
 
-fn render_keymap_node(layout: &AdapterLayout) -> String {
+fn render_keymap_node(layout: &AdapterLayout, formatting: Option<&FormattingHints>) -> String {
     let mut output = String::new();
     output.push_str("keymap {\n    compatible = \"zmk,keymap\";\n");
     if !layout.layers.is_empty() {
-        let rendered = render_layers_only(layout);
+        let rendered = render_layers_only(layout, formatting);
         output.push('\n');
         output.push_str(rendered.trim_end());
         output.push('\n');
@@ -520,7 +541,10 @@ fn push_comment_lines_with_depth(block: &mut String, depth: usize, text: &str) {
     push_comment_lines(block, &indent, text);
 }
 
-fn render_combos(combos: &[ComboSpec]) -> Option<(String, String)> {
+fn render_combos(
+    combos: &[ComboSpec],
+    formatting: Option<&FormattingHints>,
+) -> Option<(String, String)> {
     if combos.is_empty() {
         return None;
     }
@@ -529,6 +553,11 @@ fn render_combos(combos: &[ComboSpec]) -> Option<(String, String)> {
     inner.push_str("    compatible = \"zmk,combos\";\n");
     for combo in combos {
         let node_name = sanitize_node_identifier(&combo.name);
+        let node_name = if let Some(fmt) = formatting.as_ref() {
+            format!("{}{}", fmt.combo_prefix, node_name)
+        } else {
+            node_name
+        };
         push_comment_lines(&mut inner, "    ", &combo.description);
         inner.push_str("    ");
         inner.push_str(&node_name);

@@ -117,6 +117,14 @@ pub fn import_bundle_from_str(json: &str) -> Result<LayoutBundle, BundleError> {
             "formatting_layer_prefix".into(),
             Value::String("layer_".into()),
         );
+        layout.metadata.extras.insert(
+            "formatting_combo_prefix".into(),
+            Value::String("combo_".into()),
+        );
+        layout.metadata.extras.insert(
+            "formatting_combo_prefix".into(),
+            Value::String("combo_".into()),
+        );
         if let Some(system) = profile.layout.keymap.system_behaviors_dts() {
             metadata.extras.insert(
                 "system_behaviors_dts".into(),
@@ -346,7 +354,12 @@ fn moergo_combo_to_combo_spec(combo: MoergoCombo) -> ComboSpec {
         binding: Some(binding_to_string(&combo.binding)),
         behavior: None,
         properties: BTreeMap::new(),
-        property_order: Vec::new(),
+        property_order: vec![
+            "timeout-ms".into(),
+            "key-positions".into(),
+            "bindings".into(),
+            "layers".into(),
+        ],
     }
 }
 
@@ -380,9 +393,24 @@ fn moergo_macro_to_macro_spec(m: MoergoMacro) -> MacroSpec {
             .collect(),
         binding_cells,
         compatible,
-        label,
+        label: label.clone(),
         properties: BTreeMap::new(),
-        property_order: Vec::new(),
+        property_order: {
+            let mut order = Vec::new();
+            if label.is_some() {
+                order.push("label".into());
+            }
+            order.push("compatible".into());
+            order.push("#binding-cells".into());
+            if m.tap_ms.is_some() {
+                order.push("tap-ms".into());
+            }
+            if m.wait_ms.is_some() {
+                order.push("wait-ms".into());
+            }
+            order.push("bindings".into());
+            order
+        },
     }
 }
 
@@ -397,7 +425,7 @@ fn moergo_hold_tap_to_behavior_spec(ht: MoergoHoldTap) -> BehaviorSpec {
     if let Some(term) = ht.tapping_term_ms {
         properties.insert("tapping-term-ms".into(), format!("<{term}>"));
     }
-    if let Some(flavor) = ht.flavor {
+    if let Some(ref flavor) = ht.flavor {
         properties.insert("flavor".into(), format!("\"{flavor}\""));
     }
     if let Some(qt) = ht.quick_tap_ms {
@@ -406,7 +434,7 @@ fn moergo_hold_tap_to_behavior_spec(ht: MoergoHoldTap) -> BehaviorSpec {
     if let Some(req) = ht.require_prior_idle_ms {
         properties.insert("require-prior-idle-ms".into(), format!("<{req}>"));
     }
-    if let Some(pos) = ht.hold_trigger_key_positions {
+    if let Some(ref pos) = ht.hold_trigger_key_positions {
         let rendered = pos
             .iter()
             .map(|v| v.to_string())
@@ -425,7 +453,31 @@ fn moergo_hold_tap_to_behavior_spec(ht: MoergoHoldTap) -> BehaviorSpec {
         label: None,
         bindings: ht.bindings,
         properties,
-        property_order: Vec::new(),
+        property_order: {
+            let mut order = Vec::new();
+            order.push("compatible".into());
+            order.push("#binding-cells".into());
+            if ht.tapping_term_ms.is_some() {
+                order.push("tapping-term-ms".into());
+            }
+            order.push("bindings".into());
+            if ht.flavor.is_some() {
+                order.push("flavor".into());
+            }
+            if ht.quick_tap_ms.is_some() {
+                order.push("quick-tap-ms".into());
+            }
+            if ht.require_prior_idle_ms.is_some() {
+                order.push("require-prior-idle-ms".into());
+            }
+            if ht.hold_trigger_key_positions.is_some() {
+                order.push("hold-trigger-key-positions".into());
+            }
+            if ht.hold_trigger_on_release.unwrap_or(false) {
+                order.push("hold-trigger-on-release".into());
+            }
+            order
+        },
     }
 }
 
