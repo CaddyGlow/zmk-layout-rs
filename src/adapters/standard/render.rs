@@ -37,7 +37,7 @@ impl FormattingHints {
         let key_gap = extras
             .get("formatting_key_gap")
             .and_then(|v| v.as_str())
-            .unwrap_or(" ")
+            .unwrap_or("  ")
             .to_string();
         let base_indent = extras
             .get("formatting_base_indent")
@@ -313,14 +313,9 @@ fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> Str
             let token = binding_for_pos(layer, *pos);
             let width = *width_per_col.get(col).unwrap_or(&0);
             if let Some(tok) = token {
-                if col == 0 {
-                    line.push_str(&tok);
-                } else {
-                    line.push_str(&format!("{tok:>width$}"));
-                }
+                line.push_str(&format!("{tok:>width$}"));
             } else {
-                let pad = if col == 0 { 1 } else { width.max(1) };
-                line.push_str(&" ".repeat(pad));
+                line.push_str(&" ".repeat(width.max(1)));
             }
         }
         lines.push(line);
@@ -349,24 +344,45 @@ fn binding_for_pos<'a>(layer: &'a LayerSpec, pos: i32) -> Option<String> {
 }
 
 fn format_binding(raw: &str) -> String {
-    let mut tokens: Vec<&str> = raw.split_whitespace().filter(|t| !t.is_empty()).collect();
-    if tokens.is_empty() {
+    let tokens: Vec<&str> = raw.split_whitespace().filter(|t| !t.is_empty()).collect();
+    if tokens.len() < 2 {
         return raw.to_string();
     }
-    let head = tokens.remove(0);
-    if head != "&kp" || tokens.len() < 2 {
+    let head = tokens[0];
+    let modifiers = &tokens[1..tokens.len() - 1];
+    let base = tokens.last().copied().unwrap_or_default();
+    if !head.starts_with('&') || base.contains('(') || base.contains(')') {
         return raw.to_string();
     }
-    let base = tokens.pop().unwrap_or_default().to_string();
-    let mut wrapped = base;
-    for modifier in tokens.into_iter().rev() {
-        if modifier.contains('(') {
-            wrapped = format!("{modifier}{wrapped}");
-        } else {
-            wrapped = format!("{modifier}({wrapped})");
-        }
+    if !modifiers.iter().all(|m| is_known_modifier(m)) {
+        return raw.to_string();
+    }
+    let mut wrapped = base.to_string();
+    for modifier in modifiers.iter().rev() {
+        wrapped = format!("{modifier}({wrapped})");
     }
     format!("{head} {wrapped}")
+}
+
+fn is_known_modifier(token: &str) -> bool {
+    matches!(
+        token,
+        "LC" | "RC"
+            | "LS"
+            | "RS"
+            | "LG"
+            | "RG"
+            | "LA"
+            | "RA"
+            | "LALT"
+            | "RALT"
+            | "LCTL"
+            | "RCTL"
+            | "LSFT"
+            | "RSFT"
+            | "LGUI"
+            | "RGUI"
+    )
 }
 
 fn render_behaviors<'a>(behaviors: impl Iterator<Item = &'a BehaviorSpec>) -> String {
@@ -697,15 +713,20 @@ fn render_macro_bindings(macro_behavior: &MacroSpec, block: &mut String) -> bool
     if macro_behavior.bindings.is_empty() {
         return false;
     }
+    let formatted: Vec<String> = macro_behavior
+        .bindings
+        .iter()
+        .map(|b| format_binding(b))
+        .collect();
     block.push_str("            bindings = <");
-    block.push_str(macro_behavior.bindings[0].trim());
+    block.push_str(formatted[0].trim());
     block.push_str(">");
-    if macro_behavior.bindings.len() == 1 {
+    if formatted.len() == 1 {
         block.push_str(";\n");
     } else {
         block.push('\n');
-        let last_index = macro_behavior.bindings.len() - 1;
-        for (idx, binding) in macro_behavior.bindings.iter().enumerate().skip(1) {
+        let last_index = formatted.len() - 1;
+        for (idx, binding) in formatted.iter().enumerate().skip(1) {
             block.push_str("                , <");
             block.push_str(binding.trim());
             block.push('>');

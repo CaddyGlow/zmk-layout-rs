@@ -359,9 +359,7 @@ fn moergo_macro_to_macro_spec(m: MoergoMacro) -> MacroSpec {
     } else {
         None
     };
-    let label = if m.params.is_empty() {
-        None
-    } else if original_name.starts_with('&') {
+    let label = if original_name.starts_with('&') {
         Some(original_name.to_ascii_uppercase())
     } else {
         None
