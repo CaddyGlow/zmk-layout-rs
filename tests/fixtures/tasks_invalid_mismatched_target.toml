@@ -1,0 +1,8 @@
+[config]
+format_version = "1.0.0"
+
+[[tasks]]
+type = "override"
+path = "layers.base.bindings[0]"
+value = "&kp ESC"
+target = "combos.wrong"

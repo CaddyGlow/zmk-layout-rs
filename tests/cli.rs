@@ -308,3 +308,135 @@ fn cli_layer_import_export_with_template_placeholders() {
         .unwrap_or("");
     assert_eq!(combo_binding, "&kp ESC", "combo binding preserved");
 }
+
+#[test]
+fn cli_script_diff_outputs_expected_patch() {
+    let expected = fs::read_to_string(fixture("cli_script_diff.txt")).expect("fixture");
+
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("script")
+        .arg("--script")
+        .arg(fixture("script_task_file.lua"))
+        .arg("--layout")
+        .arg(fixture("cli_base.dts"))
+        .arg("--diff");
+
+    let assert = cmd.assert().success();
+    let output = assert.get_output();
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        expected,
+        "script diff output should match snapshot"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("file script start"),
+        "script stderr should contain logs"
+    );
+}
+
+#[test]
+fn cli_script_output_writes_expected_layout() {
+    let dir = tempdir().expect("tempdir");
+    let output_path = dir.path().join("script.dts");
+
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("script")
+        .arg("--script")
+        .arg(fixture("script_task_file.lua"))
+        .arg("--layout")
+        .arg(fixture("cli_base.dts"))
+        .arg("--output")
+        .arg(&output_path);
+
+    cmd.assert().success().stderr(
+        predicates::str::contains("file script start")
+            .and(predicates::str::contains("wrote updated layout")),
+    );
+
+    let rendered = fs::read_to_string(&output_path).expect("read rendered layout");
+    let expected = fs::read_to_string(fixture("cli_script_output.dts")).expect("fixture");
+    assert_eq!(rendered, expected);
+}
+
+#[test]
+fn cli_bundle_import_render_export_match_snapshots() {
+    let dir = tempdir().expect("tempdir");
+    let bundle_path = dir.path().join("bundle.json");
+    let render_path = dir.path().join("render.dts");
+    let export_path = dir.path().join("moergo.json");
+
+    let mut import_cmd = cargo_bin_cmd!("zmk-layout");
+    import_cmd
+        .arg("bundle")
+        .arg("import")
+        .arg("--input")
+        .arg("examples/moergo_factory.json")
+        .arg("--output")
+        .arg(&bundle_path);
+    import_cmd.assert().success();
+
+    let imported = fs::read_to_string(&bundle_path).expect("read imported bundle");
+    let expected_bundle =
+        fs::read_to_string(fixture("cli_bundle_import.json")).expect("bundle fixture");
+    assert_eq!(imported, expected_bundle, "bundle import snapshot");
+
+    let mut render_cmd = cargo_bin_cmd!("zmk-layout");
+    render_cmd
+        .arg("bundle")
+        .arg("render")
+        .arg("--bundle")
+        .arg(&bundle_path)
+        .arg("--target")
+        .arg("moergo")
+        .arg("--output")
+        .arg(&render_path);
+    render_cmd.assert().success();
+
+    let rendered = fs::read_to_string(&render_path).expect("read rendered bundle");
+    let expected_render =
+        fs::read_to_string(fixture("cli_bundle_render.dts")).expect("render fixture");
+    assert_eq!(rendered, expected_render, "bundle render snapshot");
+
+    let mut export_cmd = cargo_bin_cmd!("zmk-layout");
+    export_cmd
+        .arg("bundle")
+        .arg("export")
+        .arg("--bundle")
+        .arg(&bundle_path)
+        .arg("--format")
+        .arg("moergo")
+        .arg("--output")
+        .arg(&export_path);
+    export_cmd.assert().success();
+
+    let exported = fs::read_to_string(&export_path).expect("read exported moergo json");
+    let expected_export =
+        fs::read_to_string(fixture("cli_bundle_export.json")).expect("export fixture");
+    assert_eq!(exported, expected_export, "bundle export snapshot");
+}
+
+#[test]
+fn cli_firmware_devices_respects_query() {
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("firmware")
+        .arg("devices")
+        .arg("--manifest")
+        .arg(fixture("firmware_manifest.toml"))
+        .arg("--keyboard")
+        .arg("glove80")
+        .arg("--query")
+        .arg("serial~=__nope__");
+
+    let expected = fs::read_to_string(fixture("cli_firmware_devices_empty.txt")).expect("fixture");
+    let output = cmd
+        .assert()
+        .success()
+        .stdout(predicates::str::is_empty())
+        .get_output()
+        .clone();
+    assert_eq!(
+        String::from_utf8_lossy(&output.stderr),
+        expected,
+        "device listing output should match snapshot"
+    );
+}

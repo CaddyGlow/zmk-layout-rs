@@ -1,0 +1,8 @@
+[config]
+default_conflict = "prompt"
+
+[[tasks]]
+type = "override"
+path = "layers.base.bindings[0]"
+value = "&kp A"
+target = "layers.base.bindings[0]"

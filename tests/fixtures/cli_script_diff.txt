@@ -1,0 +1,29 @@
+--- tests/fixtures/cli_base.dts
++++ updated
+ keymap {
+-    compatible = "zmk,keymap";
+-    base {
+-        bindings = < &kp Q &kp W &kp E >;
+-    };
+-    raise {
+-        bindings = < &kp A &kp S &kp D >;
+-    };
++  compatible = "zmk,keymap";
++  base {
++    bindings = < &kp Q &kp TAB &kp E >;
++  };
++  raise {
++    bindings = < &kp A &kp S &kp D >;
++  };
+ };
+ 
+ combos {
+-    combo_esc {
+-        key-positions = < 0 1 >;
+-        bindings = < &kp ESC >;
+-    };
++  combo_esc {
++    key-positions = < 0 1 >;
++    bindings = < &kp ESC >;
++  };
+ };

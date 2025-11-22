@@ -1,0 +1,10 @@
+[config]
+format_version = "1.0.0"
+default_conflict = "prompt"
+
+[[tasks]]
+type = "override"
+path = "layers.base.bindings[0]"
+value = "&kp TAB"
+target = "layers.base.bindings[0]"
+expected = "&kp ESC"

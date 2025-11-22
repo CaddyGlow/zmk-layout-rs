@@ -1,0 +1,2 @@
+device query: serial~=__nope__
+no devices found

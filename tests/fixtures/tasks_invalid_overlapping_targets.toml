@@ -1,0 +1,14 @@
+[config]
+format_version = "1.0.0"
+
+[[tasks]]
+type = "layer"
+name = "nav"
+bindings = ["&kp A"]
+target = "layers.nav"
+
+[[tasks]]
+type = "override"
+path = "layers.nav.bindings[0]"
+value = "&kp B"
+target = "layers.nav.bindings[0]"
