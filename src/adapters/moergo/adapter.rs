@@ -322,8 +322,27 @@ fn moergo_combo_to_combo_spec(combo: MoergoCombo) -> ComboSpec {
 }
 
 fn moergo_macro_to_macro_spec(m: MoergoMacro) -> MacroSpec {
+    let original_name = m.name;
+    let name = original_name.trim_start_matches('&').to_string();
+    let binding_cells = if m.params.is_empty() {
+        None
+    } else {
+        Some(m.params.len() as u32)
+    };
+    let compatible = if m.params.len() == 1 {
+        Some("zmk,behavior-macro-one-param".to_string())
+    } else {
+        None
+    };
+    let label = if m.params.is_empty() {
+        None
+    } else if original_name.starts_with('&') {
+        Some(original_name.to_ascii_uppercase())
+    } else {
+        None
+    };
     MacroSpec {
-        name: m.name,
+        name,
         description: m.description.unwrap_or_default(),
         wait_ms: m.wait_ms,
         tap_ms: m.tap_ms,
@@ -332,27 +351,33 @@ fn moergo_macro_to_macro_spec(m: MoergoMacro) -> MacroSpec {
             .into_iter()
             .map(|binding| binding_to_string(&binding))
             .collect(),
-        binding_cells: None,
-        compatible: None,
-        label: None,
+        binding_cells,
+        compatible,
+        label,
         properties: BTreeMap::new(),
         property_order: Vec::new(),
     }
 }
 
 fn moergo_hold_tap_to_behavior_spec(ht: MoergoHoldTap) -> BehaviorSpec {
+    let name = ht.name.trim_start_matches('&').to_string();
+    let binding_cells = if ht.bindings.is_empty() {
+        None
+    } else {
+        Some(ht.bindings.len() as u32)
+    };
     let mut properties = BTreeMap::new();
     if let Some(term) = ht.tapping_term_ms {
-        properties.insert("tapping-term-ms".into(), term.to_string());
+        properties.insert("tapping-term-ms".into(), format!("<{term}>"));
     }
     if let Some(flavor) = ht.flavor {
-        properties.insert("flavor".into(), flavor);
+        properties.insert("flavor".into(), format!("\"{flavor}\""));
     }
     if let Some(qt) = ht.quick_tap_ms {
-        properties.insert("quick-tap-ms".into(), qt.to_string());
+        properties.insert("quick-tap-ms".into(), format!("<{qt}>"));
     }
     if let Some(req) = ht.require_prior_idle_ms {
-        properties.insert("require-prior-idle-ms".into(), req.to_string());
+        properties.insert("require-prior-idle-ms".into(), format!("<{req}>"));
     }
     if let Some(pos) = ht.hold_trigger_key_positions {
         let rendered = pos
@@ -360,16 +385,16 @@ fn moergo_hold_tap_to_behavior_spec(ht: MoergoHoldTap) -> BehaviorSpec {
             .map(|v| v.to_string())
             .collect::<Vec<_>>()
             .join(" ");
-        properties.insert("hold-trigger-key-positions".into(), rendered);
+        properties.insert("hold-trigger-key-positions".into(), format!("<{rendered}>"));
     }
-    if let Some(on_release) = ht.hold_trigger_on_release {
-        properties.insert("hold-trigger-on-release".into(), on_release.to_string());
+    if ht.hold_trigger_on_release.unwrap_or(false) {
+        properties.insert("hold-trigger-on-release".into(), String::new());
     }
     BehaviorSpec {
-        name: ht.name,
+        name,
         description: ht.description.unwrap_or_default(),
         compatible: Some("zmk,behavior-hold-tap".into()),
-        binding_cells: None,
+        binding_cells,
         label: None,
         bindings: ht.bindings,
         properties,
