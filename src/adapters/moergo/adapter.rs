@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fs,
     path::Path,
 };
@@ -12,6 +12,7 @@ use crate::adapters::{
         BundleSymbols, BundleTarget, LayoutBundle,
     },
     moergo::{
+        behaviors::{BehaviorMetadata, load_behavior_metadata},
         mapping::{MoergoKconfigMap, load_kconfig_map},
         spec::{
             MoergoBinding, MoergoCombo, MoergoHoldTap, MoergoInputListener,
@@ -24,10 +25,15 @@ use crate::adapters::{
         LayoutMetadata, MacroSpec,
     },
 };
+use crate::profiles::KeyboardProfileDoc;
 
 /// Build a bundle from a MoErgo JSON payload.
 pub fn import_bundle_from_str(json: &str) -> Result<LayoutBundle, BundleError> {
     let payload: MoergoLayout = serde_json::from_str(json)?;
+    let profile = payload
+        .keyboard
+        .as_deref()
+        .and_then(|name| KeyboardProfileDoc::load(name).ok());
     let mapping = load_kconfig_map()?;
 
     let layers = build_layers(&payload);
@@ -81,9 +87,26 @@ pub fn import_bundle_from_str(json: &str) -> Result<LayoutBundle, BundleError> {
     metadata.description = payload.notes.clone();
     metadata.keyboard = payload.keyboard.clone();
     metadata.tags = payload.tags.clone().unwrap_or_default();
+    if let Some(profile) = profile.as_ref() {
+        if let Some(system) = profile.layout.keymap.system_behaviors_dts() {
+            metadata.extras.insert(
+                "system_behaviors_dts".into(),
+                Value::String(system.to_string()),
+            );
+        }
+    }
 
-    let overlays = build_overlays(&payload);
-    let config = config_parameters_to_defines(&payload.config_parameters, &mapping);
+    let overlays = build_overlays(
+        &payload,
+        profile.as_ref().and_then(|doc| {
+            doc.layout
+                .keymap
+                .key_position_header()
+                .map(|s| s.to_string())
+        }),
+    );
+    let mut config = config_parameters_to_defines(&payload.config_parameters, &mapping);
+    let behavior_metadata = load_behavior_metadata()?;
 
     let mut symbols = BundleSymbols::default();
     if let Some(locale) = payload.locale.clone() {
@@ -91,6 +114,18 @@ pub fn import_bundle_from_str(json: &str) -> Result<LayoutBundle, BundleError> {
             .template_vars
             .insert("locale".into(), Value::String(locale));
     }
+    let profile_includes: Vec<String> = profile
+        .as_ref()
+        .map(|doc| doc.layout.keymap.header_includes.clone())
+        .unwrap_or_default();
+    let (includes, required_configs) =
+        collect_behavior_includes_and_configs(&layout, &behavior_metadata, &profile_includes);
+    symbols.includes = includes;
+
+    for name in required_configs {
+        push_required_define(&mut config, &name);
+    }
+
     symbols.defines = config.defines.clone();
 
     metadata.extras.insert(
@@ -545,7 +580,7 @@ fn moergo_metadata_block(payload: &MoergoLayout, config_order: &[String]) -> Val
     Value::Object(map)
 }
 
-fn build_overlays(payload: &MoergoLayout) -> BundleOverlays {
+fn build_overlays(payload: &MoergoLayout, fallback_header: Option<String>) -> BundleOverlays {
     BundleOverlays {
         custom_devicetree: non_empty(payload.custom_devicetree.clone()),
         custom_behaviors: non_empty(payload.custom_defined_behaviors.clone()),
@@ -553,7 +588,11 @@ fn build_overlays(payload: &MoergoLayout) -> BundleOverlays {
         input_listeners: None,
         fragments: {
             let mut map = BTreeMap::new();
-            if let Some(header) = payload.key_position_header.clone() {
+            if let Some(header) = payload
+                .key_position_header
+                .clone()
+                .or_else(|| fallback_header)
+            {
                 if !header.trim().is_empty() {
                     map.insert("key_position_header".to_string(), header);
                 }
@@ -667,6 +706,114 @@ fn normalize_canonical(raw: &str) -> String {
         trimmed.to_string()
     } else {
         format!("CONFIG_ZMK_{trimmed}")
+    }
+}
+
+fn push_required_define(config: &mut ConfigParameters, name: &str) {
+    let canonical = normalize_canonical(name);
+    if config.defines.contains_key(&canonical) {
+        return;
+    }
+    config.defines.insert(canonical.clone(), Value::Bool(true));
+    config.define_order.push(canonical);
+}
+
+fn collect_behavior_includes_and_configs(
+    layout: &AdapterLayout,
+    metadata: &BehaviorMetadata,
+    profile_includes: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let mut includes = Vec::new();
+    let mut required_configs = Vec::new();
+    let mut include_seen = HashSet::new();
+    let mut config_seen = HashSet::new();
+
+    // Always include the behaviors base header.
+    include_if_new(
+        &mut includes,
+        &mut include_seen,
+        "#include <behaviors.dtsi>",
+    );
+
+    for inc in profile_includes {
+        include_if_new(&mut includes, &mut include_seen, inc);
+    }
+
+    let codes = collect_behavior_codes(layout);
+    for code in codes {
+        if let Some(extra_includes) = metadata.includes_for(&code) {
+            for inc in extra_includes {
+                include_if_new(&mut includes, &mut include_seen, inc);
+            }
+        }
+        if let Some(configs) = metadata.required_configs_for(&code) {
+            for cfg in configs {
+                if config_seen.insert(cfg.to_string()) {
+                    required_configs.push(cfg.to_string());
+                }
+            }
+        }
+    }
+
+    // Input listeners pull in processor includes.
+    if !layout.input_listeners.is_empty() {
+        include_if_new(
+            &mut includes,
+            &mut include_seen,
+            "#include <input/processors.dtsi>",
+        );
+    }
+
+    (includes, required_configs)
+}
+
+fn collect_behavior_codes(layout: &AdapterLayout) -> BTreeSet<String> {
+    let mut codes = BTreeSet::new();
+    for layer in &layout.layers {
+        for binding in &layer.bindings {
+            if let Some(code) = first_binding_token(binding) {
+                codes.insert(code);
+            }
+        }
+    }
+    for combo in &layout.combos {
+        if let Some(binding) = combo.binding.as_deref() {
+            if let Some(code) = first_binding_token(binding) {
+                codes.insert(code);
+            }
+        }
+    }
+    for mac in &layout.macros {
+        for binding in &mac.bindings {
+            if let Some(code) = first_binding_token(binding) {
+                codes.insert(code);
+            }
+        }
+    }
+    for behavior in &layout.behaviors {
+        for binding in &behavior.bindings {
+            if let Some(code) = first_binding_token(binding) {
+                codes.insert(code);
+            }
+        }
+    }
+    codes
+}
+
+fn first_binding_token(binding: &str) -> Option<String> {
+    binding
+        .split_whitespace()
+        .find(|token| token.starts_with('&'))
+        .map(|token| token.trim().to_string())
+}
+
+fn include_if_new(includes: &mut Vec<String>, seen: &mut HashSet<String>, inc: &str) {
+    let trimmed = inc.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if seen.insert(trimmed.to_string()) {
+        includes.push(trimmed.to_string());
     }
 }
 
