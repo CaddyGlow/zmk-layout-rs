@@ -93,41 +93,46 @@ fn build_template_replacements(
     let keyboard_name = metadata_text(extras, "keyboard_name")
         .or_else(|| layout.metadata.title.clone())
         .unwrap_or_else(|| "ZMK Layout".to_string());
-    insert_placeholder(&mut map, "keyboard_name", keyboard_name);
+    insert_placeholder(&mut map, "keyboard_name", keyboard_name, extras);
 
     let includes = metadata_text(extras, "includes")
         .or_else(|| metadata_text(extras, "resolved_includes"))
         .unwrap_or_default();
-    insert_placeholder(&mut map, "includes", includes.clone());
-    insert_placeholder(&mut map, "resolved_includes", includes);
+    insert_placeholder(&mut map, "includes", includes.clone(), extras);
+    insert_placeholder(&mut map, "resolved_includes", includes, extras);
 
     let defines = metadata_text(extras, "defines").unwrap_or_default();
-    insert_placeholder(&mut map, "defines", defines);
+    insert_placeholder(&mut map, "defines", defines, extras);
 
     let layer_defines = render_layer_defines(&layout.layers);
-    insert_placeholder(&mut map, "layer_names_defines", layer_defines.clone());
-    insert_placeholder(&mut map, "layer_defines", layer_defines);
+    insert_placeholder(
+        &mut map,
+        "layer_names_defines",
+        layer_defines.clone(),
+        extras,
+    );
+    insert_placeholder(&mut map, "layer_defines", layer_defines, extras);
 
     let rendered_layers = render_layers_only(layout, formatting);
-    insert_placeholder(&mut map, "rendered_layers", rendered_layers);
+    insert_placeholder(&mut map, "rendered_layers", rendered_layers, extras);
 
     let keymap_node = render_keymap_node(layout, formatting);
-    insert_placeholder(&mut map, "keymap_node", keymap_node);
+    insert_placeholder(&mut map, "keymap_node", keymap_node, extras);
 
     let macros_block = render_macros(&layout.macros);
-    insert_placeholder(&mut map, "macros", macros_block.clone());
-    insert_placeholder(&mut map, "user_macros_dtsi", macros_block);
+    insert_placeholder(&mut map, "macros", macros_block.clone(), extras);
+    insert_placeholder(&mut map, "user_macros_dtsi", macros_block, extras);
 
     let behaviors_block = render_behaviors(layout.behaviors.iter());
-    insert_placeholder(&mut map, "behaviors", behaviors_block.clone());
-    insert_placeholder(&mut map, "user_behaviors_dtsi", behaviors_block);
+    insert_placeholder(&mut map, "behaviors", behaviors_block.clone(), extras);
+    insert_placeholder(&mut map, "user_behaviors_dtsi", behaviors_block, extras);
 
     if let Some((combos_root, combos_body)) = render_combos(&layout.combos, formatting) {
-        insert_placeholder(&mut map, "combos", combos_root);
-        insert_placeholder(&mut map, "combos_dtsi", combos_body);
+        insert_placeholder(&mut map, "combos", combos_root, extras);
+        insert_placeholder(&mut map, "combos_dtsi", combos_body, extras);
     } else {
-        insert_placeholder(&mut map, "combos", String::new());
-        insert_placeholder(&mut map, "combos_dtsi", String::new());
+        insert_placeholder(&mut map, "combos", String::new(), extras);
+        insert_placeholder(&mut map, "combos_dtsi", String::new(), extras);
     }
 
     let rendered_input_listeners = render_input_listeners(&layout.input_listeners);
@@ -140,6 +145,8 @@ fn build_template_replacements(
         "system_behaviors_dts",
         "key_position_header",
         "custom_defined_macros",
+        "keycode_locale_definitions",
+        "key_position_defines",
     ] {
         let value = match metadata_text(extras, key) {
             Some(text) => text,
@@ -148,7 +155,7 @@ fn build_template_replacements(
             }
             None => String::new(),
         };
-        insert_placeholder(&mut map, key, value);
+        insert_placeholder(&mut map, key, value, extras);
     }
 
     map
@@ -243,8 +250,67 @@ fn filter_includes_not_in_template(value: &str, template_lines: &BTreeSet<String
     result
 }
 
-fn insert_placeholder(map: &mut BTreeMap<String, String>, key: &str, value: String) {
-    map.insert(key.to_string(), value);
+fn insert_placeholder(
+    map: &mut BTreeMap<String, String>,
+    key: &str,
+    value: String,
+    extras: &BTreeMap<String, Value>,
+) {
+    for name in placeholder_names(extras, key) {
+        map.insert(name, value.clone());
+    }
+}
+
+fn placeholder_names(extras: &BTreeMap<String, Value>, key: &str) -> Vec<String> {
+    const DEFAULT_ALIASES: &[(&str, &[&str])] =
+        &[("key_position_header", &["key_position_defines"])];
+
+    let mut names = vec![key.to_string()];
+
+    if let Some((_, aliases)) = DEFAULT_ALIASES
+        .iter()
+        .find(|(canonical, _)| canonical == &key)
+    {
+        names.extend(aliases.iter().map(|alias| alias.to_string()));
+    }
+
+    let alias_key = format!("placeholder_alias_{key}");
+    if let Some(value) = extras.get(&alias_key) {
+        push_alias_value(&mut names, value);
+    }
+
+    if let Some(map) = extras
+        .get("template_placeholders")
+        .and_then(|v| v.as_object())
+    {
+        if let Some(value) = map.get(key) {
+            push_alias_value(&mut names, value);
+        }
+    }
+
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn push_alias_value(names: &mut Vec<String>, value: &Value) {
+    match value {
+        Value::String(alias) => {
+            if !alias.trim().is_empty() {
+                names.push(alias.clone());
+            }
+        }
+        Value::Array(values) => {
+            for entry in values {
+                if let Value::String(alias) = entry {
+                    if !alias.trim().is_empty() {
+                        names.push(alias.clone());
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn metadata_text(extras: &BTreeMap<String, Value>, key: &str) -> Option<String> {

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use minijinja::Error as MiniJinjaError;
+use regex::Regex;
 use serde_json::Value;
 use thiserror::Error;
 
@@ -27,6 +28,35 @@ pub fn template_contains_placeholders(source: &str) -> bool {
 pub enum TemplateParseMode {
     StripPlaceholders,
     FullDocument,
+}
+
+/// Captures a user-defined slice of the rendered DTS using regex delimiters.
+#[derive(Debug, Clone)]
+pub struct RegexExtractionConfig {
+    pub placeholder: String,
+    pub start_delimiter: Regex,
+    pub end_delimiter: Regex,
+    pub strip_for_parse: bool,
+}
+
+impl RegexExtractionConfig {
+    pub fn new(
+        placeholder: impl Into<String>,
+        start_delimiter: &str,
+        end_delimiter: &str,
+    ) -> Result<Self, regex::Error> {
+        Ok(Self {
+            placeholder: placeholder.into(),
+            start_delimiter: Regex::new(start_delimiter)?,
+            end_delimiter: Regex::new(end_delimiter)?,
+            strip_for_parse: false,
+        })
+    }
+
+    pub fn with_strip_for_parse(mut self, strip: bool) -> Self {
+        self.strip_for_parse = strip;
+        self
+    }
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -78,14 +108,51 @@ pub(crate) fn capture_template_sections(
     capture_template_values(template_source, rendered_source)
 }
 
+pub(crate) fn capture_regex_sections(
+    rendered_source: &str,
+    configs: &[RegexExtractionConfig],
+) -> TemplateCapture {
+    let mut capture = TemplateCapture::default();
+    for config in configs {
+        let Some(start) = config.start_delimiter.find(rendered_source) else {
+            continue;
+        };
+        let haystack = &rendered_source[start.end()..];
+        let Some(end) = config.end_delimiter.find(haystack) else {
+            continue;
+        };
+        let value_start = start.end();
+        let value_end = value_start + end.start();
+        capture.values.insert(
+            config.placeholder.clone(),
+            rendered_source[value_start..value_end].to_string(),
+        );
+        capture.fragments.push(CapturedFragment {
+            key: config.placeholder.clone(),
+            start: value_start,
+            end: value_end,
+        });
+    }
+    capture.fragments.sort_by_key(|frag| frag.start);
+    capture
+}
+
 pub(crate) fn strip_template_fragments(
     rendered_source: &str,
     fragments: &[CapturedFragment],
 ) -> String {
+    strip_fragments_matching(rendered_source, fragments, should_strip_before_parse)
+}
+
+pub(crate) fn strip_fragments_matching(
+    rendered_source: &str,
+    fragments: &[CapturedFragment],
+    should_strip: impl Fn(&str) -> bool,
+) -> String {
     let mut output = String::with_capacity(rendered_source.len());
     let mut cursor = 0;
     for fragment in fragments {
-        if should_strip_before_parse(&fragment.key) {
+        if should_strip(&fragment.key) {
             if cursor < fragment.start {
                 output.push_str(&rendered_source[cursor..fragment.start]);
             }

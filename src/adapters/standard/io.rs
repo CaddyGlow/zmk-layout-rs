@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
 };
@@ -13,8 +14,9 @@ use super::{
     layout::AdapterLayout,
     render::render_layout_with_template,
     template::{
-        TemplateCapture, TemplateParseMode, apply_captured_template_values,
-        capture_template_sections, strip_template_fragments, template_contains_placeholders,
+        RegexExtractionConfig, TemplateCapture, TemplateParseMode, apply_captured_template_values,
+        capture_regex_sections, capture_template_sections, strip_fragments_matching,
+        strip_template_fragments, template_contains_placeholders,
     },
 };
 
@@ -59,6 +61,25 @@ pub fn export_standard_str_with_template_mode(
         }
         TemplateParseMode::FullDocument => rendered_source.to_string(),
     };
+    let document = DtsDocument::parse_str(&source_to_parse).map_err(DtsError::from)?;
+    let mut layout = AdapterLayout::from_document(&document);
+    apply_captured_template_values(&mut layout, values);
+    Ok(layout.to_standard_json()?)
+}
+
+/// Export a document to the standard JSON format using regex delimiters instead of a template.
+pub fn export_standard_str_with_regex_extractions(
+    rendered_source: &str,
+    extractors: &[RegexExtractionConfig],
+) -> Result<String, AdapterError> {
+    let TemplateCapture { values, fragments } = capture_regex_sections(rendered_source, extractors);
+    let strip_keys: HashSet<&str> = extractors
+        .iter()
+        .filter(|cfg| cfg.strip_for_parse)
+        .map(|cfg| cfg.placeholder.as_str())
+        .collect();
+    let source_to_parse =
+        strip_fragments_matching(rendered_source, &fragments, |key| strip_keys.contains(key));
     let document = DtsDocument::parse_str(&source_to_parse).map_err(DtsError::from)?;
     let mut layout = AdapterLayout::from_document(&document);
     apply_captured_template_values(&mut layout, values);

@@ -12,7 +12,8 @@ use zmk_layout_rs::{
     adapters::{
         AdapterError, TemplateParseMode, bundle::LayoutBundle, export_standard_str,
         export_standard_str_with_template_mode, import_standard_str_with_template,
-        render_standard_template, template_contains_placeholders,
+        moergo::export_standard_str_from_moergo_dtsi, render_standard_template,
+        template_contains_placeholders,
     },
     build::{
         BuildError, BuildReport, BuildRequest, BuildRequestBuilder, BuildRequestError,
@@ -238,6 +239,12 @@ struct LayerExportArgs {
     json: PathBuf,
     #[arg(
         long,
+        value_enum,
+        help = "Use vendor-specific regex extraction instead of a template"
+    )]
+    vendor: Option<VendorExtractionFlag>,
+    #[arg(
+        long,
         value_name = "FILE",
         help = "Optional template to extract metadata placeholders"
     )]
@@ -263,6 +270,11 @@ struct LayerImportArgs {
     template: PathBuf,
     #[arg(long, value_name = "FILE", help = "Output DTS path to write")]
     output: PathBuf,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+enum VendorExtractionFlag {
+    Moergo,
 }
 
 #[derive(Args, Clone)]
@@ -604,7 +616,20 @@ fn run_layer_export(args: &LayerExportArgs) -> Result<i32, CliError> {
         source,
     })?;
 
-    if let Some(template_path) = &args.template {
+    if let Some(vendor) = args.vendor {
+        if args.template.is_some() {
+            return Err(CliError::InvalidArgument(
+                "choose either --vendor or --template, not both".into(),
+            ));
+        }
+        let contents = match vendor {
+            VendorExtractionFlag::Moergo => export_standard_str_from_moergo_dtsi(&source)?,
+        };
+        fs::write(&args.json, contents).map_err(|source| CliError::WriteFile {
+            path: args.json.clone(),
+            source,
+        })?;
+    } else if let Some(template_path) = &args.template {
         let template_source =
             fs::read_to_string(template_path).map_err(|source| CliError::ReadFile {
                 path: template_path.clone(),
@@ -1340,4 +1365,6 @@ enum CliError {
     Adapter(#[from] AdapterError),
     #[error("bundle error: {0}")]
     Bundle(#[from] zmk_layout_rs::adapters::bundle::BundleError),
+    #[error("invalid arguments: {0}")]
+    InvalidArgument(String),
 }
