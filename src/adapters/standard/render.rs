@@ -302,10 +302,9 @@ fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> Str
             }
         }
     }
-    let mut lines = Vec::new();
+    let mut lines: Vec<String> = Vec::new();
     for row in &fmt.rows {
         let mut line = String::new();
-        line.push_str(&fmt.base_indent);
         for (col, pos) in row.iter().enumerate() {
             if col > 0 {
                 line.push_str(&fmt.key_gap);
@@ -320,7 +319,16 @@ fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> Str
         }
         lines.push(line);
     }
-    format!("<\n{}\n            >", lines.join("\n            "))
+    let trimmed: Vec<String> = lines
+        .into_iter()
+        .map(|line| line.trim_start().to_string())
+        .collect();
+    let joined = trimmed
+        .iter()
+        .map(|line| format!("{}{}", fmt.base_indent, line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("<\n{joined}\n{}>", fmt.base_indent)
 }
 
 fn binding_for_pos<'a>(layer: &'a LayerSpec, pos: i32) -> Option<&'a String> {
