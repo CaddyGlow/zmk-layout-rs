@@ -17,6 +17,7 @@ struct FormattingHints {
     rows: Vec<Vec<i32>>,
     key_gap: String,
     base_indent: String,
+    layer_prefix: String,
 }
 
 impl FormattingHints {
@@ -44,10 +45,16 @@ impl FormattingHints {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        let layer_prefix = extras
+            .get("formatting_layer_prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         Some(Self {
             rows: collected,
             key_gap,
             base_indent,
+            layer_prefix,
         })
     }
 }
@@ -261,7 +268,16 @@ fn render_layers_only(layout: &AdapterLayout) -> String {
     let mut output = String::new();
     for layer in &layout.layers {
         output.push_str("        ");
-        output.push_str(&layer.name);
+        let name = if let Some(fmt) = formatting.as_ref() {
+            format!(
+                "{}{}",
+                fmt.layer_prefix,
+                sanitize_node_identifier(&layer.name)
+            )
+        } else {
+            sanitize_node_identifier(&layer.name)
+        };
+        output.push_str(&name);
         output.push_str(" {\n");
         output.push_str("            bindings = ");
         match formatting.as_ref() {

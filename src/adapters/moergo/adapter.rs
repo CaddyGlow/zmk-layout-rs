@@ -113,6 +113,10 @@ pub fn import_bundle_from_str(json: &str) -> Result<LayoutBundle, BundleError> {
                 Value::String(indent.clone()),
             );
         }
+        layout.metadata.extras.insert(
+            "formatting_layer_prefix".into(),
+            Value::String("layer_".into()),
+        );
         if let Some(system) = profile.layout.keymap.system_behaviors_dts() {
             metadata.extras.insert(
                 "system_behaviors_dts".into(),
