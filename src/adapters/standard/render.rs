@@ -331,11 +331,35 @@ fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> Str
     format!("<\n{joined}\n{}>", fmt.base_indent)
 }
 
-fn binding_for_pos<'a>(layer: &'a LayerSpec, pos: i32) -> Option<&'a String> {
+fn binding_for_pos<'a>(layer: &'a LayerSpec, pos: i32) -> Option<String> {
     if pos < 0 {
         return None;
     }
-    layer.bindings.get(pos as usize)
+    layer
+        .bindings
+        .get(pos as usize)
+        .map(|raw| format_binding(raw))
+}
+
+fn format_binding(raw: &str) -> String {
+    let mut tokens: Vec<&str> = raw.split_whitespace().filter(|t| !t.is_empty()).collect();
+    if tokens.is_empty() {
+        return raw.to_string();
+    }
+    let head = tokens.remove(0);
+    if head != "&kp" || tokens.len() < 2 {
+        return raw.to_string();
+    }
+    let base = tokens.pop().unwrap_or_default().to_string();
+    let mut wrapped = base;
+    for modifier in tokens.into_iter().rev() {
+        if modifier.contains('(') {
+            wrapped = format!("{modifier}{wrapped}");
+        } else {
+            wrapped = format!("{modifier}({wrapped})");
+        }
+    }
+    format!("{head} {wrapped}")
 }
 
 fn render_behaviors<'a>(behaviors: impl Iterator<Item = &'a BehaviorSpec>) -> String {
