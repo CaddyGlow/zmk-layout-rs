@@ -2,7 +2,10 @@ use std::{fs, io::Write, path::PathBuf};
 
 use serde_json::Value as JsonValue;
 
-use crate::dts::DtsDocument;
+use crate::{
+    adapters::AdapterPipeline,
+    dts::DtsDocument,
+};
 
 use super::{error::BuildError, request::LayoutSource, workspace::WorkspaceHandle};
 
@@ -33,6 +36,7 @@ impl LayoutStager {
             LayoutSource::Files { keymap, extra } => {
                 self.copy_files(keymap, extra.as_ref(), workspace)
             }
+            LayoutSource::Pipeline(pipeline) => self.write_pipeline(pipeline, workspace),
         }
     }
 
@@ -75,6 +79,26 @@ impl LayoutStager {
         fs::write(&dest, text).map_err(BuildError::Io)?;
         Ok(KeymapArtifacts {
             keymap: Some(dest),
+            ..Default::default()
+        })
+    }
+
+    fn write_pipeline(
+        &self,
+        pipeline: &AdapterPipeline,
+        workspace: &WorkspaceHandle,
+    ) -> Result<KeymapArtifacts, BuildError> {
+        let layout = pipeline
+            .clone()
+            .load()
+            .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+        let json_dest = workspace.layout_dir().join("layout.json");
+        let json = layout
+            .to_standard_json()
+            .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+        fs::write(&json_dest, json).map_err(BuildError::Io)?;
+        Ok(KeymapArtifacts {
+            json: Some(json_dest),
             ..Default::default()
         })
     }

@@ -14,3 +14,6 @@ pub use standard::{
     import_standard_file_with_template, import_standard_str, import_standard_str_with_template,
     render_standard_template, render_standard_template_for_profile, template_contains_placeholders,
 };
+pub use pipeline::{
+    AdapterPipeline, LayoutInput,
+};

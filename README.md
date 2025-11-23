@@ -20,14 +20,16 @@ without `unsafe`.
 - **Binding-aware editing** – `bindings` understands ZMK behaviors (tap/hold,
   mod chains, etc.) and normalizes them for consistent round‑tripping.
 - **Provider APIs** – `providers` exposes ergonomic methods for mutating
-  `DtsDocument`s (layers, combos, behavior metadata) with structured errors.
+  `DtsDocument`s (layers, combos, behavior metadata) with structured errors; modules are split into `layers`, `combos`, `behaviors`, and shared `format`/`util` helpers.
 - **Standard adapter** – `adapters::standard` converts between Devicetree and a
   JSON schema (`layers`, `combos`, `behaviors`, `metadata`) for use by other
-  projects.
+  projects, with a unified `adapters::pipeline` that loads JSON/DTS (paths or text) and optionally captures template metadata.
 
 ```
 src
-├── adapters/standard.rs   # JSON import/export helpers
+├── adapters/             # Standard/MoErgo adapters + unified pipeline
+│   ├── standard/         # JSON import/export helpers
+│   └── pipeline.rs       # JSON/DTS loader with template capture
 ├── ast/                   # AST definitions + walkers
 ├── bindings/              # Binding parser & normalization rules
 ├── dts/                   # High level DtsDocument wrapper
@@ -126,6 +128,30 @@ cargo run --example standard_cli -- import \
   --output keymap.moergo.dts
 ```
 
+### Adapter pipeline (JSON/DTS sources)
+
+Load layouts from JSON or DTS (paths or text) with optional template capture:
+
+```rust
+use zmk_layout_rs::adapters::{AdapterPipeline, TemplateParseMode};
+
+fn load_any_layout() -> Result<(), Box<dyn std::error::Error>> {
+    // From JSON path
+    let json_layout = AdapterPipeline::from_json_path("layout.json").load()?;
+
+    // From DTS + template (strip placeholders before parse)
+    let rendered = std::fs::read_to_string("rendered.dts")?;
+    let template = std::fs::read_to_string("template.dtsi")?;
+    let layout = AdapterPipeline::from_dts_text(rendered)
+        .template_source(template)
+        .template_mode(TemplateParseMode::StripPlaceholders)
+        .load()?;
+
+    println!("layers: {}", layout.layers.len());
+    Ok(())
+}
+```
+
 ### Keyboard profiles
 
 Use the TOML keyboard profiles to hydrate layouts and resolve template metadata:
@@ -182,6 +208,18 @@ Helpful flags:
 
 See the docs for conflict policies, `target` naming guidance, and troubleshooting tips.
 The same document covers the Lua scripting hooks that power `script` tasks and conflict handlers.
+
+#### Preprocessing zmk-helpers (optional)
+
+Build with `--features ancpp-preprocessor` to enable C-preprocessing before parsing DTS files (helps when keymaps use zmk-helpers macros). When the feature is on, CLI flags appear on DTS-consuming commands:
+
+- `--preprocess` opt-in flag; add `--cpp-include DIR` for zmk-helpers and your config dir, `--cpp-system-include DIR` for Zephyr/ZMK headers, and `--cpp-define NAME[=VALUE]` for things like `HOST_OS=2`.
+- Tasks/Script: `zmk-layout apply/validate/diff` and `zmk-layout script` accept the flags and preprocess `--base-layout` / `--layout` first.
+- Layer export: `zmk-layout layer export --preprocess ... --dts config/keymap.dts --json layout.json` expands macros before exporting JSON or running template extraction.
+- Firmware build: `zmk-layout firmware build --preprocess ... --layout-dts config/keymap.dts ...` preprocesses the DTS before feeding the build pipeline.
+- Bundle commands operate on JSON bundles and don’t need preprocessing; preprocess when generating the bundle upstream if your source DTS relies on macros.
+
+The ancpp crate is MPL-2.0 with additional terms; keep it feature-gated if your project requires MIT/Apache-only dependencies.
 
 ### Standalone Lua Scripts
 

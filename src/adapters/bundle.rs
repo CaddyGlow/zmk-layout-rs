@@ -9,7 +9,10 @@ use serde_json::{self, Value};
 use thiserror::Error;
 
 use crate::{
-    adapters::standard::{AdapterLayout, render_layout_with_template},
+    adapters::{
+        pipeline::AdapterPipeline,
+        standard::{AdapterLayout, TemplateParseMode, render_layout_with_template},
+    },
     dts::DtsDocument,
 };
 
@@ -97,6 +100,27 @@ impl LayoutBundle {
     /// Build a bundle from a MoErgo JSON payload.
     pub fn from_moergo_str(json: &str) -> Result<Self, BundleError> {
         crate::adapters::moergo::adapter::import_bundle_from_str(json)
+    }
+
+    /// Build a bundle from rendered DTS with optional template metadata.
+    pub fn from_layout_source(
+        source: &str,
+        template: Option<&str>,
+        template_mode: TemplateParseMode,
+    ) -> Result<Self, BundleError> {
+        let layout = if let Some(tpl) = template {
+            AdapterPipeline::from_dts_text(source.to_string())
+                .template_source(tpl.to_string())
+                .template_mode(template_mode)
+                .load()?
+        } else {
+            let doc = DtsDocument::parse_str(source)?;
+            AdapterLayout::from_document(&doc)
+        };
+        Ok(Self {
+            layout,
+            ..Self::default()
+        })
     }
 
     /// Serialize the bundle back into a MoErgo JSON payload.
@@ -387,6 +411,8 @@ pub enum BundleError {
     Dts(#[from] crate::dts::DtsError),
     #[error("layout parse error: {0}")]
     Layout(#[from] crate::tokenizer::LayoutError),
+    #[error("adapter error: {0}")]
+    Adapter(#[from] crate::adapters::AdapterError),
     #[error("validation error: {0}")]
     Validation(String),
     #[error("target `{0}` not found")]

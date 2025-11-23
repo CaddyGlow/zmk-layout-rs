@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fmt, path::PathBuf, sync::Arc};
 use serde_json::Value as JsonValue;
 use thiserror::Error;
 
-use crate::{dts::DtsDocument, profiles::KeyboardProfileDoc};
+use crate::{adapters::AdapterPipeline, dts::DtsDocument, profiles::KeyboardProfileDoc};
 
 use super::{
     error::BuildError,
@@ -19,6 +19,7 @@ pub enum LayoutSource {
     JsonPath(PathBuf),
     JsonValue(JsonValue),
     Document(DtsDocument),
+    Pipeline(AdapterPipeline),
     Files {
         keymap: PathBuf,
         extra: Option<PathBuf>,
@@ -134,6 +135,11 @@ impl BuildRequestBuilder {
 
     pub fn layout_document(mut self, document: DtsDocument) -> Self {
         self.layout = Some(LayoutSource::Document(document));
+        self
+    }
+
+    pub fn layout_via_pipeline(mut self, pipeline: AdapterPipeline) -> Self {
+        self.layout = Some(LayoutSource::Pipeline(pipeline));
         self
     }
 

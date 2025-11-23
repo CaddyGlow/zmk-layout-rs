@@ -14,6 +14,7 @@ use crate::{
         render_device, render_flash_outcome, render_flash_warning, resolve_flash_source,
     },
     io,
+    adapters::AdapterPipeline,
 };
 #[cfg(feature = "ancpp-preprocessor")]
 use crate::cli::preprocess::build_config;
@@ -191,7 +192,9 @@ fn apply_firmware_layout(
         };
         #[cfg(not(feature = "ancpp-preprocessor"))]
         let layout = io::load_layout(path)?;
-        builder = builder.layout_document(layout.document);
+        let pipeline =
+            AdapterPipeline::from_dts_text(layout.text).template_mode(crate::adapters::standard::TemplateParseMode::FullDocument);
+        builder = builder.layout_via_pipeline(pipeline);
         layout_set = true;
     }
     match (&args.keymap, &args.kconfig) {
@@ -307,6 +310,7 @@ fn describe_layout(source: &LayoutSource) -> String {
         LayoutSource::JsonPath(path) => format!("json:{}", path.display()),
         LayoutSource::JsonValue(_) => "json:value".into(),
         LayoutSource::Document(_) => "dts:document".into(),
+        LayoutSource::Pipeline(_) => "pipeline".into(),
         LayoutSource::Files { keymap, extra } => match extra {
             Some(config) => {
                 format!("files:{} + {}", keymap.display(), config.display())
