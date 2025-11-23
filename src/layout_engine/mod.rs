@@ -129,8 +129,9 @@ impl LayoutEngine {
         layer: &str,
         bindings: &[String],
     ) -> Result<(), LayoutEngineError> {
+        let refs: Vec<&str> = bindings.iter().map(|binding| binding.as_str()).collect();
         self.document
-            .set_layer_bindings(layer, bindings)
+            .set_layer_bindings(layer, &refs)
             .map_err(LayoutEngineError::from)
     }
 
@@ -328,8 +329,9 @@ impl LayoutEngine {
         }
 
         // Add the layer using the provider
+        let refs: Vec<&str> = bindings.iter().map(|b| b.as_str()).collect();
         self.document
-            .add_layer(name, bindings)
+            .add_layer(name, &refs)
             .map_err(LayoutEngineError::from)
     }
 
