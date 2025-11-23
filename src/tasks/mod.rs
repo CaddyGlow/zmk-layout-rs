@@ -3,10 +3,10 @@ pub mod targets;
 pub mod lua_engine;
 pub mod engine;
 
-#[allow(unused_imports)]
 pub use config::*;
-#[allow(unused_imports)]
 pub use targets::*;
-#[allow(unused_imports)]
 pub use lua_engine::*;
-pub use engine::*;
+pub use engine::{
+    apply_tasks, apply_tasks_with_options, execute_script, ExecutionMode, MetadataMap,
+    ScriptResult, TaskEngineOptions, TaskExecution, TaskOutcome, TaskStatus,
+};

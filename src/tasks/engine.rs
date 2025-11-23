@@ -853,9 +853,9 @@ struct ScriptEnvironment<'a> {
     conflict_script: Option<&'a str>,
 }
 
-const SCRIPT_MAX_OPERATIONS: u64 = 100_000;
-const SCRIPT_MAX_CALL_DEPTH: usize = 64;
-const SCRIPT_HOOK_INTERVAL: u64 = 1_000;
+pub(crate) const SCRIPT_MAX_OPERATIONS: u64 = 100_000;
+pub(crate) const SCRIPT_MAX_CALL_DEPTH: usize = 64;
+pub(crate) const SCRIPT_HOOK_INTERVAL: u64 = 1_000;
 
 impl<'a> ScriptEnvironment<'a> {
     fn new(file: &'a TaskFile) -> Self {
@@ -1032,7 +1032,7 @@ struct ScriptGlobals<'a> {
     comment: Option<&'a str>,
 }
 
-fn create_layout_lua(
+pub(crate) fn create_layout_lua(
     layout: Rc<RefCell<LayoutEngine>>,
     logs: Rc<RefCell<Vec<String>>>,
 ) -> LuaResult<Lua> {
@@ -1042,13 +1042,13 @@ fn create_layout_lua(
     Ok(lua)
 }
 
-fn create_lua_with_limits() -> LuaResult<Lua> {
+pub(crate) fn create_lua_with_limits() -> LuaResult<Lua> {
     let lua = Lua::new();
     configure_lua_limits(&lua)?;
     Ok(lua)
 }
 
-fn configure_lua_limits(lua: &Lua) -> LuaResult<()> {
+pub(crate) fn configure_lua_limits(lua: &Lua) -> LuaResult<()> {
     let operation_counter = Rc::new(Cell::new(0u64));
     let depth_counter = Rc::new(Cell::new(0i32));
 
@@ -1091,7 +1091,7 @@ fn configure_lua_limits(lua: &Lua) -> LuaResult<()> {
     Ok(())
 }
 
-fn register_script_api(
+pub(crate) fn register_script_api(
     lua: &Lua,
     layout: Rc<RefCell<LayoutEngine>>,
     logs: Rc<RefCell<Vec<String>>>,
@@ -1550,7 +1550,7 @@ fn resolve_script_path(root: Option<&Path>, path: &str) -> PathBuf {
     }
 }
 
-fn parse_override_path(path: &str) -> Result<(String, usize), String> {
+pub fn parse_override_path(path: &str) -> Result<(String, usize), String> {
     const LAYERS_PREFIX: &str = "layers.";
     const BINDINGS_SEGMENT: &str = ".bindings";
     if !path.starts_with(LAYERS_PREFIX) {
@@ -2117,11 +2117,11 @@ fn slugify(input: &str) -> String {
     slug
 }
 
-fn normalize_locator(value: &str) -> String {
+pub fn normalize_locator(value: &str) -> String {
     value.split_whitespace().collect::<String>()
 }
 
-fn find_overlapping_target(existing: &[String], candidate: &str) -> Option<String> {
+pub fn find_overlapping_target(existing: &[String], candidate: &str) -> Option<String> {
     for entry in existing {
         if targets_overlap(entry, candidate) {
             return Some(entry.clone());
