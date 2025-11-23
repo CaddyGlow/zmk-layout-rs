@@ -1,0 +1,3 @@
+flashed left using /media/GLV80 (4096 bytes)
+note: flashed device serial SER123
+note: could not read board-id from /media/GLV80 to verify side

@@ -1,7 +1,7 @@
 use crate::{
     cli::{
         app::{ApplyArgs, DiffArgs, ValidateArgs},
-        context::{execute, prepare, print_combo_conditions, print_results, PreparedContext},
+        context::{PreparedContext, execute, prepare, print_combo_conditions, print_results},
         error::CliError,
     },
     io,

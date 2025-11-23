@@ -6,9 +6,7 @@ mod script;
 mod tasks;
 
 use crate::cli::{
-    app::{
-        BundleCommand, Command, FirmwareCommand, LayerCommand, ProfilesCommand,
-    },
+    app::{BundleCommand, Command, FirmwareCommand, LayerCommand, ProfilesCommand},
     error::CliError,
 };
 

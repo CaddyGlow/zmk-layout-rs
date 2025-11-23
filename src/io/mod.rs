@@ -6,10 +6,7 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    dts::DtsDocument,
-    providers::KeymapDocument,
-    serialization::SerializeError,
-    tasks::TaskFile,
+    dts::DtsDocument, providers::KeymapDocument, serialization::SerializeError, tasks::TaskFile,
     tokenizer::LayoutError,
 };
 
@@ -32,13 +29,22 @@ pub struct LoadedTaskFile {
 #[derive(Debug, Error)]
 pub enum IoError {
     #[error("failed to read {path}: {source}")]
-    ReadFile { path: PathBuf, source: std::io::Error },
+    ReadFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("failed to write {path}: {source}")]
-    WriteFile { path: PathBuf, source: std::io::Error },
+    WriteFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
     #[error("failed to parse layout {path}: {source}")]
     ParseLayout { path: PathBuf, source: LayoutError },
     #[error("failed to parse task file {path}: {source}")]
-    ParseTaskFile { path: PathBuf, source: crate::tasks::TaskConfigError },
+    ParseTaskFile {
+        path: PathBuf,
+        source: crate::tasks::TaskConfigError,
+    },
     #[error("failed to serialize layout: {0}")]
     SerializeLayout(#[from] SerializeError),
 }
@@ -59,9 +65,15 @@ pub fn write_text(path: impl AsRef<Path>, contents: &str) -> Result<(), IoError>
 pub fn load_layout(path: impl AsRef<Path>) -> Result<LoadedLayout, IoError> {
     let path = path.as_ref().to_path_buf();
     let text = read_text(&path)?;
-    let document = DtsDocument::parse_str(&text)
-        .map_err(|source| IoError::ParseLayout { path: path.clone(), source })?;
-    Ok(LoadedLayout { path, text, document })
+    let document = DtsDocument::parse_str(&text).map_err(|source| IoError::ParseLayout {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(LoadedLayout {
+        path,
+        text,
+        document,
+    })
 }
 
 /// Serialize a keymap back to text.
@@ -74,8 +86,10 @@ pub fn serialize_keymap(document: KeymapDocument) -> Result<String, IoError> {
 pub fn load_task_file(path: impl AsRef<Path>) -> Result<LoadedTaskFile, IoError> {
     let path = path.as_ref().to_path_buf();
     let text = read_text(&path)?;
-    let file = TaskFile::from_toml_str(&text)
-        .map_err(|source| IoError::ParseTaskFile { path: path.clone(), source })?;
+    let file = TaskFile::from_toml_str(&text).map_err(|source| IoError::ParseTaskFile {
+        path: path.clone(),
+        source,
+    })?;
     Ok(LoadedTaskFile { path, text, file })
 }
 

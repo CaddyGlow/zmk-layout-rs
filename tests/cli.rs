@@ -440,3 +440,74 @@ fn cli_firmware_devices_respects_query() {
         "device listing output should match snapshot"
     );
 }
+
+#[test]
+#[cfg(feature = "flash-fake-backend")]
+fn cli_firmware_devices_with_fake_backend() {
+    let dir = tempdir().expect("tempdir");
+    let mount = dir.path().join("mnt");
+    fs::create_dir_all(&mount).expect("mount dir");
+
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.env("ZMK_FLASH_FAKE_BACKEND", "1")
+        .env("ZMK_FLASH_FAKE_MOUNTPOINT", &mount)
+        .env("ZMK_FLASH_FAKE_NAME", "FAKE_FLASH")
+        .env("ZMK_FLASH_FAKE_SERIAL", "GLV80-FAKE")
+        .env("ZMK_FLASH_FAKE_VENDOR", "DemoVendor")
+        .env("ZMK_FLASH_FAKE_MODEL", "DemoModel")
+        .env("ZMK_FLASH_FAKE_FSTYPE", "vfat")
+        .arg("firmware")
+        .arg("devices")
+        .arg("--manifest")
+        .arg(fixture("firmware_manifest.toml"))
+        .arg("--keyboard")
+        .arg("glove80")
+        .arg("--all");
+
+    cmd.assert().success().stdout(
+        predicates::str::contains("FAKE_FLASH")
+            .and(predicates::str::contains("GLV80-FAKE"))
+            .and(predicates::str::contains(mount.to_string_lossy())),
+    );
+}
+
+#[test]
+#[cfg(feature = "flash-fake-backend")]
+fn cli_firmware_flash_with_fake_backend() {
+    let dir = tempdir().expect("tempdir");
+    let mount = dir.path().join("mnt");
+    let artifact = dir.path().join("firmware.uf2");
+    fs::create_dir_all(&mount).expect("mount dir");
+    fs::write(&artifact, b"demo-bytes").expect("artifact");
+    fs::write(mount.join("INFO_UF2.TXT"), "Board-ID: glove80_lh").expect("board id");
+
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.env("ZMK_FLASH_FAKE_BACKEND", "1")
+        .env("ZMK_FLASH_FAKE_MOUNTPOINT", &mount)
+        .env("ZMK_FLASH_FAKE_NAME", "FAKE_FLASH")
+        .env("ZMK_FLASH_FAKE_SERIAL", "GLV80-FAKE")
+        .env("ZMK_FLASH_FAKE_VENDOR", "DemoVendor")
+        .env("ZMK_FLASH_FAKE_MODEL", "DemoModel")
+        .env("ZMK_FLASH_FAKE_FSTYPE", "vfat")
+        .arg("firmware")
+        .arg("flash")
+        .arg("--manifest")
+        .arg(fixture("firmware_manifest.toml"))
+        .arg("--keyboard")
+        .arg("glove80")
+        .arg("--firmware")
+        .arg(&artifact)
+        .arg("--side")
+        .arg("left");
+
+    cmd.assert()
+        .success()
+        .stderr(
+            predicates::str::contains("flashed left using")
+                .and(predicates::str::contains("GLV80-FAKE")),
+        );
+    let copied = mount.join("firmware.uf2");
+    assert!(copied.exists(), "artifact should be copied to mountpoint");
+    let data = fs::read(&copied).expect("copied artifact");
+    assert_eq!(data, b"demo-bytes");
+}

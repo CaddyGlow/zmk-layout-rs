@@ -14,9 +14,10 @@ fn task_file_requires_format_version() {
 
 #[test]
 fn task_file_rejects_overlapping_targets() {
-    let err =
-        TaskFile::from_toml_str(include_str!("fixtures/tasks_invalid_overlapping_targets.toml"))
-            .expect_err("overlapping targets");
+    let err = TaskFile::from_toml_str(include_str!(
+        "fixtures/tasks_invalid_overlapping_targets.toml"
+    ))
+    .expect_err("overlapping targets");
     assert!(matches!(
         err,
         TaskConfigError::OverlappingTarget { ref new, ref existing }
@@ -30,9 +31,10 @@ fn task_file_rejects_overlapping_targets() {
 
 #[test]
 fn task_file_rejects_mismatched_target_path() {
-    let err =
-        TaskFile::from_toml_str(include_str!("fixtures/tasks_invalid_mismatched_target.toml"))
-            .expect_err("mismatched target");
+    let err = TaskFile::from_toml_str(include_str!(
+        "fixtures/tasks_invalid_mismatched_target.toml"
+    ))
+    .expect_err("mismatched target");
     assert!(matches!(
         err,
         TaskConfigError::InvalidField { field, .. } if field == "target"
@@ -45,9 +47,8 @@ fn task_file_rejects_mismatched_target_path() {
 
 #[test]
 fn task_expected_state_conflict_reports_mismatch() {
-    let file =
-        TaskFile::from_toml_str(include_str!("fixtures/tasks_conflict_expected_state.toml"))
-            .expect("parse conflict fixture");
+    let file = TaskFile::from_toml_str(include_str!("fixtures/tasks_conflict_expected_state.toml"))
+        .expect("parse conflict fixture");
     let base = include_str!("fixtures/tasks_regression_base.dts");
     let dts = DtsDocument::parse_str(base).expect("parse base layout");
     let document = KeymapDocument::from_document(dts);

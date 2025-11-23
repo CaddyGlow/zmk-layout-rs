@@ -1,9 +1,4 @@
-use std::{
-    collections::HashSet,
-    path::PathBuf,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 
 use crate::{
     build::{
@@ -16,7 +11,7 @@ use crate::{
     },
     flash::{
         FlashConfig, build_flash_targets, default_sides, discover_devices, flash_target,
-        resolve_flash_source,
+        render_device, render_flash_outcome, render_flash_warning, resolve_flash_source,
     },
     io,
 };
@@ -91,14 +86,9 @@ pub fn flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {
             eprintln!("-- prepare the {} half --", target.side);
         }
         let outcome = flash_target(&target, &source, args.device.as_deref(), &mut seen_serials)?;
-        eprintln!(
-            "flashed {} using {} ({} bytes)",
-            outcome.side,
-            outcome.mountpoint.display(),
-            outcome.bytes_written
-        );
+        eprintln!("{}", render_flash_outcome(&outcome));
         for warning in outcome.warnings {
-            eprintln!("note: {warning}");
+            eprintln!("{}", render_flash_warning(&warning));
         }
     }
     Ok(0)
@@ -147,32 +137,7 @@ pub fn devices(args: &FirmwareDevicesArgs) -> Result<i32, CliError> {
 
     devices.sort_by(|a, b| a.name.cmp(&b.name));
     for dev in devices {
-        let mountpoints = if dev.mountpoints.is_empty() {
-            "<not mounted>".to_string()
-        } else {
-            dev.mountpoints
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        let dev_path = dev
-            .dev_path
-            .as_ref()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "-".into());
-        let fs_type = dev.fs_type.as_deref().unwrap_or("-");
-        let serial = dev.serial.as_deref().unwrap_or("-");
-        let vendor = dev.vendor.as_deref().unwrap_or("-");
-        let model = dev.model.as_deref().unwrap_or("-");
-        let removable = dev
-            .removable
-            .map(|r| if r { "removable" } else { "fixed" })
-            .unwrap_or("-");
-        println!(
-            "{}  dev={}  mount={}  fs={}  serial={}  vendor={}  model={}  {}",
-            dev.name, dev_path, mountpoints, fs_type, serial, vendor, model, removable
-        );
+        println!("{}", render_device(&dev));
     }
     Ok(0)
 }

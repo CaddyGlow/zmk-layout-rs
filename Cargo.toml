@@ -3,6 +3,13 @@ name = "zmk-layout-rs"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["flash-linux", "flash-macos", "flash-windows", "flash-fake-backend"]
+flash-linux = []
+flash-macos = []
+flash-windows = []
+flash-fake-backend = []
+
 [dependencies]
 logos = "0.15"
 thiserror = "1"

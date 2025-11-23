@@ -9,10 +9,7 @@ use crate::{
     },
 };
 
-use super::{
-    app::SharedArgs,
-    error::CliError,
-};
+use super::{app::SharedArgs, error::CliError};
 
 pub struct PreparedContext {
     pub file: TaskFile,

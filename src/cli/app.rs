@@ -1,11 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-use crate::{
-    adapters::TemplateParseMode,
-    flash::FlashSideSelection,
-    tasks::ConflictPolicy,
-};
+use crate::{adapters::TemplateParseMode, flash::FlashSideSelection, tasks::ConflictPolicy};
 
 #[derive(Parser)]
 #[command(name = "zmk-layout", version, about = "Layout customization CLI")]

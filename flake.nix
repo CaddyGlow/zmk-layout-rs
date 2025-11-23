@@ -1,5 +1,5 @@
 {
-  description = "Nix flake for the ZMK layout project";
+  description = "Nix flake for the ZMK layout project (dev shell; build with Cargo)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
@@ -23,96 +23,59 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          config = {
-            allowUnfree = true;
-          };
+          config.allowUnfree = true;
         };
+
         lib = pkgs.lib;
         isLinux = pkgs.stdenv.isLinux;
         isDarwin = pkgs.stdenv.isDarwin;
+
         fenixPkgs = fenix.packages.${system};
-        fenixToolchain = fenixPkgs.complete.withComponents [
+
+        # Host toolchain (Linux/macOS) with the usual components
+        fenixHostToolchain = fenixPkgs.complete.withComponents [
           "cargo"
           "clippy"
           "rust-src"
           "rustc"
           "rustfmt"
         ];
-        rustPlatform = pkgs.makeRustPlatform {
-          cargo = fenixToolchain;
-          rustc = fenixToolchain;
-        };
-        cargoToml = lib.importTOML ./Cargo.toml;
-        crateName = cargoToml.package.name;
-        crateVersion = cargoToml.package.version;
 
-        projectDescription = "ZMK layout editor";
+        # Cross stdlib for Windows GNU target
+        fenixWindowsStd = fenixPkgs.targets.x86_64-pc-windows-gnu.latest.rust-std;
 
-        cratePackage = rustPlatform.buildRustPackage {
-          pname = crateName;
-          version = crateVersion;
-          src = lib.cleanSource ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-          cargoHash = lib.fakeSha256;
-          inherit nativeBuildInputs;
-          buildInputs = [ ];
-          meta = with lib; {
-            description = projectDescription;
-            license = licenses.mit;
-            maintainers = [ ];
-          };
-        };
+        # Combined toolchain: host + Windows std
+        fenixToolchain = fenixPkgs.combine [
+          fenixHostToolchain
+          fenixWindowsStd
+        ];
 
-        # Cross-compilation helper function
-        mkCrossPackage =
-          {
-            crossPkgs,
-            targetTriple,
-            targetName,
-          }:
-          let
-            targetToolchain = fenixPkgs.combine [
-              fenixPkgs.complete.cargo
-              fenixPkgs.complete.rustc
-              fenixPkgs.targets.${targetTriple}.latest.rust-std
-            ];
-            crossRustPlatform = crossPkgs.makeRustPlatform {
-              cargo = targetToolchain;
-              rustc = targetToolchain;
-            };
-          in
-          crossRustPlatform.buildRustPackage {
-            pname = "${crateName}-${targetName}";
-            version = crateVersion;
-            src = lib.cleanSource ./.;
-            cargoLock.lockFile = ./Cargo.lock;
-            cargoHash = lib.fakeSha256;
+        # Winpthreads (libpthread.a) for Windows GNU cross-linking
+        mingwPthreads = pkgs.pkgsCross.mingwW64.windows.pthreads;
 
-            # Don't include pkg-config for cross-compilation as it often fails
-            # and isn't needed for static Rust binaries
-            nativeBuildInputs = [ ];
-            buildInputs = [ ];
+        nativeBuildInputs = [
+          pkgs.pkg-config
+        ];
 
-            meta = with lib; {
-              description = "${projectDescription} (${targetName})";
-              license = licenses.mit;
-              maintainers = [ ];
-            };
-          };
-
-        nativeBuildInputs = [ pkgs.pkg-config ];
         commonDevPackages = [
           fenixToolchain
           fenixPkgs.rust-analyzer
+
           pkgs.cargo-edit
           pkgs.cargo-deny
           pkgs.cargo-audit
           pkgs.cargo-ndk
           pkgs.cargo-cross
+
           pkgs.pkg-config
           pkgs.protobuf
           pkgs.openssl
+
+          # MinGW cross-compiler: provides x86_64-w64-mingw32-gcc/ar, etc.
+          pkgs.pkgsCross.mingwW64.stdenv.cc
+          mingwPthreads
         ];
+
         linuxDevPackages =
           if isLinux then
             [
@@ -120,69 +83,40 @@
             ]
           else
             [ ];
-        darwinDevPackages = if isDarwin then [ pkgs.libiconv ] else [ ];
+
+        darwinDevPackages =
+          if isDarwin then
+            [
+              pkgs.libiconv
+            ]
+          else
+            [ ];
 
       in
       {
-        packages = {
-          default = cratePackage;
-
-          # Cross-platform builds
-          # Windows
-          windows-x86_64 = mkCrossPackage {
-            crossPkgs = pkgs.pkgsCross.mingwW64;
-            targetTriple = "x86_64-pc-windows-gnu";
-            targetName = "windows-x86_64";
-          };
-
-          # macOS
-          macos-aarch64 = mkCrossPackage {
-            crossPkgs = pkgs.pkgsCross.aarch64-darwin;
-            targetTriple = "aarch64-apple-darwin";
-            targetName = "macos-aarch64";
-          };
-          macos-x86_64 = mkCrossPackage {
-            crossPkgs = pkgs.pkgsCross.x86_64-darwin;
-            targetTriple = "x86_64-apple-darwin";
-            targetName = "macos-x86_64";
-          };
-
-          # Linux
-          linux-x86_64 = mkCrossPackage {
-            crossPkgs = pkgs.pkgsCross.gnu64;
-            targetTriple = "x86_64-unknown-linux-gnu";
-            targetName = "linux-x86_64";
-          };
-          linux-x86_64-musl = mkCrossPackage {
-            crossPkgs = pkgs.pkgsCross.musl64;
-            targetTriple = "x86_64-unknown-linux-musl";
-            targetName = "linux-x86_64-musl";
-          };
-          linux-aarch64 = mkCrossPackage {
-            crossPkgs = pkgs.pkgsCross.aarch64-multiplatform;
-            targetTriple = "aarch64-unknown-linux-gnu";
-            targetName = "linux-aarch64";
-          };
-
-          # Android builds for common architectures
-        };
-
-        apps.default = {
-          type = "app";
-          program = "${cratePackage}/bin/${crateName}";
-        };
-
+        # Dev shell: use this, then build with `cargo` directly
         devShells.default = pkgs.mkShell {
           packages = commonDevPackages ++ linuxDevPackages ++ darwinDevPackages;
 
           inherit nativeBuildInputs;
 
-          shellHook = '''';
+          env = {
+            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER = "x86_64-w64-mingw32-gcc";
+            CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUSTFLAGS = "-L native=${mingwPthreads}/lib";
+            CC_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-gcc";
+            AR_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-ar";
+          };
+
+          # Optional: small hint when entering the shell
+          shellHook = ''
+            echo "Rust dev shell (fenix + x86_64-pc-windows-gnu)."
+            echo "  Linux build:   cargo build"
+            echo "  Windows build: cargo build --target x86_64-pc-windows-gnu"
+          '';
         };
 
+        # Formatter for Nix files
         formatter = pkgs.alejandra;
-
-        checks.build = cratePackage;
       }
     );
 }

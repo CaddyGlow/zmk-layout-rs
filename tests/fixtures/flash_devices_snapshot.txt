@@ -1,0 +1,2 @@
+GLV80_BOOT  dev=/dev/sda1  mount=/media/GLV80  fs=vfat  serial=SER123  vendor=MoErgo  model=Glove80 Boot  removable
+OTHER_DEV  dev=/dev/sdb1  mount=<not mounted>  fs=-  serial=-  vendor=-  model=-  fixed
