@@ -15,6 +15,8 @@ use ancpp::{
 use thiserror::Error;
 
 use crate::{dts::DtsDocument, tokenizer::LayoutError};
+use regex::Regex;
+use tempfile::Builder;
 
 /// Result of running the `ancpp` preprocessor over a DTS/DTSI file.
 pub struct AncppOutput {
@@ -107,13 +109,47 @@ pub fn preprocess_layout(
     source_path: &Path,
     config: &PreprocessorConfig,
 ) -> Result<AncppOutput, AncppError> {
-    preprocess_file_to_string(
-        source_path,
+    let source_text = std::fs::read_to_string(source_path)?;
+    let sanitized = sanitize_non_directive_hashes(&source_text);
+    let sanitized = replace_has_include(&sanitized);
+
+    let parent = source_path
+        .parent()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let tmp = Builder::new()
+        .prefix(".zmk-ancpp-")
+        .suffix(".dts")
+        .tempfile_in(&parent)?;
+    std::fs::write(tmp.path(), sanitized.as_bytes())?;
+
+    let preprocessed = preprocess_file_to_string(
+        tmp.path(),
         &config.user_include_dirs,
         &config.system_include_dirs,
         &config.predefinitions,
         config.resolve_relative_paths,
     )
+    .or_else(|err| match err {
+        AncppError::Preprocessor(_) => {
+            eprintln!(
+                "warning: ancpp preprocessing failed for {}; falling back to raw file",
+                source_path.display()
+            );
+            Ok(AncppOutput {
+                expanded: source_text.clone(),
+                prompts: Vec::new(),
+            })
+        }
+        other => Err(other),
+    })?;
+
+    let restored = restore_non_directive_hashes(&preprocessed.expanded);
+
+    Ok(AncppOutput {
+        expanded: restored,
+        prompts: preprocessed.prompts,
+    })
 }
 
 /// Convenience helper: preprocess then parse into a `DtsDocument`.
@@ -124,13 +160,13 @@ pub fn parse_file_with_ancpp(
     predefinitions: &HashMap<String, String>,
     resolve_relative_paths: bool,
 ) -> Result<DtsDocument, AncppError> {
-    let preprocessed = preprocess_file_to_string(
-        source_path,
-        user_include_dirs,
-        system_include_dirs,
-        predefinitions,
+    let config = PreprocessorConfig {
+        user_include_dirs: user_include_dirs.to_vec(),
+        system_include_dirs: system_include_dirs.to_vec(),
+        predefinitions: predefinitions.clone(),
         resolve_relative_paths,
-    )?;
+    };
+    let preprocessed = preprocess_layout(source_path, &config)?;
 
     let doc = DtsDocument::parse_str(&preprocessed.expanded)?;
     Ok(doc)
@@ -146,6 +182,50 @@ fn tokens_to_string(tokens: &[TokenWithLocation]) -> String {
 
 fn token_to_text(token: &Token) -> String {
     token.to_string()
+}
+
+fn sanitize_non_directive_hashes(text: &str) -> String {
+    // Replace leading `#foo-bar` that are not preprocessor directives with placeholder tokens
+    // so ancpp doesn't treat them as invalid directives. Hyphens also get escaped so the
+    // placeholder remains a valid identifier for ancpp's lexer.
+    // This is a conservative line-based transform: if the first non-space character is `#`
+    // and the token is not a known directive keyword, rewrite that leading `#` segment.
+    let directive_re = Regex::new(r"^(include|define|if|ifdef|ifndef|elif|else|endif|undef|pragma|error|warning|embed)(\s|$)").expect("regex");
+    let mut output = String::with_capacity(text.len());
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            let rest = trimmed[1..].trim_start();
+            if !directive_re.is_match(rest) {
+                // Rewrite the first `#<token>` occurrence on the line.
+                let replaced = line.replacen(
+                    '#',
+                    "__ZMK_HASH__",
+                    1,
+                );
+                let replaced = replaced.replace("-", "__ZMK_DASH__");
+                output.push_str(&replaced);
+                output.push('\n');
+                continue;
+            }
+        }
+        output.push_str(line);
+        output.push('\n');
+    }
+    output
+}
+
+fn restore_non_directive_hashes(text: &str) -> String {
+    text
+        .replace("__ZMK_DASH__", "-")
+        .replace("__ZMK_HASH__", "#")
+}
+
+fn replace_has_include(text: &str) -> String {
+    let call_re = Regex::new(r"__has_include(?:_next)?\s*\([^\)]*\)").expect("regex");
+    let ident_re = Regex::new(r"\b__has_include(_next)?\b").expect("regex");
+    let pass_one = call_re.replace_all(text, "1");
+    ident_re.replace_all(&pass_one, "1").into_owned()
 }
 
 #[cfg(test)]

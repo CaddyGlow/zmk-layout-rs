@@ -102,6 +102,15 @@ impl LayoutBundle {
         crate::adapters::moergo::adapter::import_bundle_from_str(json)
     }
 
+    /// Build a bundle directly from JSON/DTS sources via the adapter pipeline.
+    pub fn from_pipeline(pipeline: AdapterPipeline) -> Result<Self, BundleError> {
+        let layout = pipeline.load()?;
+        Ok(Self {
+            layout,
+            ..Self::default()
+        })
+    }
+
     /// Build a bundle from rendered DTS with optional template metadata.
     pub fn from_layout_source(
         source: &str,

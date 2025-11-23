@@ -24,6 +24,7 @@ without `unsafe`.
 - **Standard adapter** – `adapters::standard` converts between Devicetree and a
   JSON schema (`layers`, `combos`, `behaviors`, `metadata`) for use by other
   projects, with a unified `adapters::pipeline` that loads JSON/DTS (paths or text) and optionally captures template metadata.
+- **Flash fakes** – set `ZMK_FLASH_FAKE_BACKEND=1` plus `ZMK_FLASH_FAKE_MOUNTPOINT`, `ZMK_FLASH_FAKE_NAME`, `ZMK_FLASH_FAKE_SERIAL`, `ZMK_FLASH_FAKE_VENDOR`, `ZMK_FLASH_FAKE_MODEL`, and `ZMK_FLASH_FAKE_FSTYPE` to run firmware `devices`/`flash` commands without hardware.
 
 ```
 src
@@ -35,7 +36,7 @@ src
 ├── dts/                   # High level DtsDocument wrapper
 ├── macro_support/         # Macro registry & expansion
 ├── parser/                # Devicetree parser
-├── providers/             # Keymap/behavior/combo helpers
+├── providers/             # Keymap/behavior/combo helpers (see docs/providers.md)
 ├── serialization/         # Serializer back to DTS text
 └── tokenizer/             # Logos-based tokenizer
 ```

@@ -87,6 +87,18 @@ let layout = AdapterPipeline::from_dts_text(rendered_dts)
 let layers = layout.layers;
 ```
 
+### Flash fake backend (CLI)
+
+For local testing of `zmk-layout firmware devices/flash` without hardware, set:
+
+- `ZMK_FLASH_FAKE_BACKEND=1`
+- `ZMK_FLASH_FAKE_MOUNTPOINT=/path/to/tmpdir`
+- `ZMK_FLASH_FAKE_NAME=FAKE_DEVICE`
+- `ZMK_FLASH_FAKE_SERIAL=GLV80-FAKE`
+- `ZMK_FLASH_FAKE_VENDOR=DemoVendor`
+- `ZMK_FLASH_FAKE_MODEL=DemoModel`
+- `ZMK_FLASH_FAKE_FSTYPE=vfat`
+
 ---
 
 ### get_layer
