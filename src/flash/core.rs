@@ -1047,6 +1047,26 @@ mod tests {
         }
     }
 
+    struct TimeoutBackend;
+
+    impl FlashBackend for TimeoutBackend {
+        fn discover_devices(
+            &self,
+            _config: &FlashConfig,
+        ) -> Result<Vec<FlashDiscovery>, FlashError> {
+            Err(FlashError::NoMatchingDevice("<unspecified>".into()))
+        }
+
+        fn wait_for_device(
+            &self,
+            _config: &FlashConfig,
+            _target: Option<&FlashTarget>,
+            _seen_serials: &HashSet<String>,
+        ) -> Result<FlashDevice, FlashError> {
+            Err(FlashError::NoMatchingDevice("serial~=NONE".into()))
+        }
+    }
+
     #[test]
     fn duplicate_serial_detection() {
         let mut seen: HashSet<String> = HashSet::new();
@@ -1303,6 +1323,78 @@ mod tests {
         )
         .expect_err("should fail on invalid mount");
         assert!(matches!(err, FlashError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn wait_for_device_timeout_error_is_surfaced() {
+        let temp = tempdir().expect("tempdir");
+        let artifact = temp.path().join("firmware.uf2");
+        fs::write(&artifact, b"demo").expect("artifact");
+
+        let backend = TimeoutBackend;
+        let target = FlashTarget {
+            side: FlashSide::Left,
+            board_id: None,
+            config: FlashConfig {
+                device_query: Some("serial~=NONE".into()),
+                ..Default::default()
+            },
+        };
+        let source = FlashSource::Single(artifact);
+        let err = flash_target_with_backend(&backend, &target, &source, None, &mut HashSet::new())
+            .expect_err("timeout should surface");
+        match err {
+            FlashError::NoMatchingDevice(query) => assert_eq!(query, "serial~=NONE"),
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn permission_denied_during_copy_is_reported() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().expect("tempdir");
+        let mount = temp.path().join("mnt");
+        fs::create_dir_all(&mount).expect("mount dir");
+        let artifact = temp.path().join("firmware.uf2");
+        fs::write(&artifact, b"demo-bytes").expect("artifact");
+
+        // Remove write permissions so the copy fails with a permission error.
+        let mut perms = fs::metadata(&mount).expect("metadata").permissions();
+        perms.set_mode(0o555);
+        fs::set_permissions(&mount, perms).expect("set permissions");
+
+        let device = FlashDevice {
+            name: "ro-mount".into(),
+            dev_path: None,
+            mountpoint: mount.clone(),
+            serial: None,
+            vendor: None,
+            model: None,
+            fs_type: None,
+            auto_unmount: false,
+            cleanup_path: None,
+            vendor_id: None,
+            product_id: None,
+        };
+        let backend = FakeBackend::new(device, Vec::new());
+        let target = FlashTarget {
+            side: FlashSide::Left,
+            board_id: None,
+            config: FlashConfig::default(),
+        };
+        let source = FlashSource::Single(artifact);
+        let err = flash_target_with_backend(&backend, &target, &source, None, &mut HashSet::new())
+            .expect_err("copy should fail on read-only mount");
+        match err {
+            FlashError::Copy { dest, .. } => assert!(
+                dest.starts_with(&mount),
+                "expected copy dest under mount, got {}",
+                dest.display()
+            ),
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }
 
