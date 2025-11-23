@@ -39,5 +39,7 @@ pub enum AdapterError {
     #[error(transparent)]
     Dts(#[from] DtsError),
     #[error(transparent)]
+    Layout(#[from] crate::tokenizer::LayoutError),
+    #[error(transparent)]
     Template(#[from] TemplateError),
 }

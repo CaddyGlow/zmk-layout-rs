@@ -2,6 +2,8 @@ pub mod app;
 mod commands;
 pub mod context;
 pub mod error;
+#[cfg(feature = "ancpp-preprocessor")]
+pub mod preprocess;
 
 pub use app::Cli;
 pub use error::CliError;

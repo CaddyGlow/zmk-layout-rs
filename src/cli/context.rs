@@ -8,6 +8,8 @@ use crate::{
         TaskOutcome, TaskStatus, apply_tasks_with_options,
     },
 };
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::cli::preprocess::build_config;
 
 use super::{app::SharedArgs, error::CliError};
 
@@ -34,6 +36,14 @@ pub fn prepare(args: &SharedArgs) -> Result<PreparedContext, CliError> {
     }
     warn_base_metadata(&file, args);
 
+    #[cfg(feature = "ancpp-preprocessor")]
+    let layout = if args.preprocess.preprocess {
+        let cfg = build_config(&args.preprocess, &args.base_layout)?;
+        io::load_layout_preprocessed(&args.base_layout, &cfg)?
+    } else {
+        io::load_layout(&args.base_layout)?
+    };
+    #[cfg(not(feature = "ancpp-preprocessor"))]
     let layout = io::load_layout(&args.base_layout)?;
     let document = KeymapDocument::from_document(layout.document.clone());
     Ok(PreparedContext {

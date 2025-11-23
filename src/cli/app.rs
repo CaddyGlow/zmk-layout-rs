@@ -3,6 +3,39 @@ use std::path::PathBuf;
 
 use crate::{adapters::TemplateParseMode, flash::FlashSideSelection, tasks::ConflictPolicy};
 
+#[cfg(feature = "ancpp-preprocessor")]
+#[derive(Args, Clone, Default)]
+pub struct PreprocessorArgs {
+    #[arg(long, help = "Preprocess layout files with ancpp before parsing")]
+    pub preprocess: bool,
+    #[arg(
+        long = "cpp-include",
+        value_name = "DIR",
+        help = "User include directory forwarded to ancpp (repeatable)",
+        num_args = 0..
+    )]
+    pub include: Vec<PathBuf>,
+    #[arg(
+        long = "cpp-system-include",
+        value_name = "DIR",
+        help = "System include directory forwarded to ancpp (repeatable)",
+        num_args = 0..
+    )]
+    pub system_include: Vec<PathBuf>,
+    #[arg(
+        long = "cpp-define",
+        value_name = "NAME[=VALUE]",
+        help = "Predefine a macro for preprocessing (repeatable)",
+        num_args = 0..
+    )]
+    pub define: Vec<String>,
+    #[arg(
+        long = "no-cpp-relative",
+        help = "Disable resolving relative #include paths from the source file location"
+    )]
+    pub no_resolve_relative: bool,
+}
+
 #[derive(Parser)]
 #[command(name = "zmk-layout", version, about = "Layout customization CLI")]
 pub struct Cli {
@@ -65,6 +98,9 @@ pub struct SharedArgs {
         help = "Print a summary of combo conditions after task execution"
     )]
     pub combo_conditions: bool,
+    #[cfg(feature = "ancpp-preprocessor")]
+    #[command(flatten)]
+    pub preprocess: PreprocessorArgs,
 }
 
 #[derive(Args, Clone)]
@@ -97,6 +133,9 @@ pub struct ScriptArgs {
     pub output: Option<PathBuf>,
     #[arg(long = "diff", help = "Show diff instead of writing output")]
     pub show_diff: bool,
+    #[cfg(feature = "ancpp-preprocessor")]
+    #[command(flatten)]
+    pub preprocess: PreprocessorArgs,
 }
 
 #[derive(Subcommand)]
@@ -209,6 +248,9 @@ pub struct LayerExportArgs {
         help = "How to parse the DTS when a template is provided"
     )]
     pub template_mode: TemplateModeFlag,
+    #[cfg(feature = "ancpp-preprocessor")]
+    #[command(flatten)]
+    pub preprocess: PreprocessorArgs,
 }
 
 #[derive(Args, Clone)]
@@ -291,6 +333,9 @@ pub struct FirmwareBuildArgs {
         help = "Only print the resolved firmware request without running Docker"
     )]
     pub dry_run: bool,
+    #[cfg(feature = "ancpp-preprocessor")]
+    #[command(flatten)]
+    pub preprocess: PreprocessorArgs,
 }
 
 #[derive(Args, Clone)]

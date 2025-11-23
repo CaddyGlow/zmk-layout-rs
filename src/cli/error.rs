@@ -10,6 +10,8 @@ use crate::{
     serialization::SerializeError,
     tasks::{ScriptExecutionError, TaskConfigError},
 };
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::preprocessor::AncppError;
 
 #[derive(Debug, Error)]
 pub enum CliError {
@@ -58,6 +60,9 @@ pub enum CliError {
     Bundle(#[from] crate::adapters::bundle::BundleError),
     #[error("invalid arguments: {0}")]
     InvalidArgument(String),
+    #[cfg(feature = "ancpp-preprocessor")]
+    #[error("failed to preprocess layout {path}: {source}")]
+    PreprocessLayout { path: PathBuf, source: AncppError },
 }
 
 impl From<IoError> for CliError {
@@ -68,6 +73,8 @@ impl From<IoError> for CliError {
             IoError::ParseLayout { path, source } => CliError::ParseLayout { path, source },
             IoError::ParseTaskFile { source, .. } => CliError::TaskConfig(source),
             IoError::SerializeLayout(err) => CliError::Serialize(err),
+            #[cfg(feature = "ancpp-preprocessor")]
+            IoError::PreprocessLayout { path, source } => CliError::PreprocessLayout { path, source },
         }
     }
 }

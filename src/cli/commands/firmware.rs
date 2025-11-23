@@ -15,6 +15,8 @@ use crate::{
     },
     io,
 };
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::cli::preprocess::build_config;
 
 pub fn build(args: &FirmwareBuildArgs) -> Result<i32, CliError> {
     let manifest = load_manifest_flexible(&args.manifest)?;
@@ -180,6 +182,14 @@ fn apply_firmware_layout(
                 "multiple layout inputs were provided".into(),
             ));
         }
+        #[cfg(feature = "ancpp-preprocessor")]
+        let layout = if args.preprocess.preprocess {
+            let cfg = build_config(&args.preprocess, path)?;
+            io::load_layout_preprocessed(path, &cfg)?
+        } else {
+            io::load_layout(path)?
+        };
+        #[cfg(not(feature = "ancpp-preprocessor"))]
         let layout = io::load_layout(path)?;
         builder = builder.layout_document(layout.document);
         layout_set = true;

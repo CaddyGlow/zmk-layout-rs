@@ -16,6 +16,8 @@ pub mod layout_engine;
 pub mod lua_api;
 pub mod macro_support;
 pub mod parser;
+#[cfg(feature = "ancpp-preprocessor")]
+pub mod preprocessor;
 pub mod profiles;
 pub mod providers;
 pub mod serialization;

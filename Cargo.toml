@@ -9,6 +9,8 @@ flash-linux = []
 flash-macos = []
 flash-windows = []
 flash-fake-backend = []
+# Optional: enable preprocessing via `ancpp` (C23 preprocessor).
+ancpp-preprocessor = ["ancpp"]
 
 [dependencies]
 logos = "0.15"
@@ -28,6 +30,7 @@ plist = "1"
 rust-embed = "8"
 log = "0.4"
 env_logger = { version = "0.10", default-features = false }
+ancpp = { git = "https://github.com/hemashushu/xiaoxuan-c-preprocessor.git", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", features = ["user"] }

@@ -10,6 +10,9 @@ use crate::{
     tokenizer::LayoutError,
 };
 
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::preprocessor::{AncppError, PreprocessorConfig, preprocess_layout};
+
 /// Loaded layout with original text and parsed document.
 #[derive(Debug)]
 pub struct LoadedLayout {
@@ -47,6 +50,9 @@ pub enum IoError {
     },
     #[error("failed to serialize layout: {0}")]
     SerializeLayout(#[from] SerializeError),
+    #[cfg(feature = "ancpp-preprocessor")]
+    #[error("failed to preprocess layout {path}: {source}")]
+    PreprocessLayout { path: PathBuf, source: AncppError },
 }
 
 /// Read a text file into memory.
@@ -72,6 +78,26 @@ pub fn load_layout(path: impl AsRef<Path>) -> Result<LoadedLayout, IoError> {
     Ok(LoadedLayout {
         path,
         text,
+        document,
+    })
+}
+
+/// Load and parse a DTS layout after running the ancpp preprocessor.
+#[cfg(feature = "ancpp-preprocessor")]
+pub fn load_layout_preprocessed(
+    path: impl AsRef<Path>,
+    config: &PreprocessorConfig,
+) -> Result<LoadedLayout, IoError> {
+    let path = path.as_ref().to_path_buf();
+    let output = preprocess_layout(&path, config)
+        .map_err(|source| IoError::PreprocessLayout { path: path.clone(), source })?;
+    let document = DtsDocument::parse_str(&output.expanded).map_err(|source| IoError::ParseLayout {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(LoadedLayout {
+        path,
+        text: output.expanded,
         document,
     })
 }

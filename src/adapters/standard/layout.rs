@@ -159,6 +159,12 @@ impl AdapterLayout {
         Ok(payload.into())
     }
 
+    /// Parse a JSON layout from an already-deserialized value.
+    pub fn from_standard_json_value(value: serde_json::Value) -> serde_json::Result<Self> {
+        let payload: StandardFormat = serde_json::from_value(value)?;
+        Ok(payload.into())
+    }
+
     pub fn ensure_property_orders(&mut self) {
         self.ensure_behavior_property_orders();
         self.ensure_combo_property_orders();

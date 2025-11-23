@@ -3,6 +3,7 @@
 
 pub mod bundle;
 pub mod moergo;
+pub mod pipeline;
 pub mod standard;
 
 pub use standard::{

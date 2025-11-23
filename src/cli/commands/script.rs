@@ -6,9 +6,19 @@ use crate::{
     providers::KeymapDocument,
     tasks::execute_script,
 };
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::cli::preprocess::build_config;
 
 pub fn run(args: &ScriptArgs) -> Result<i32, CliError> {
     let script_text = io::read_text(&args.script)?;
+    #[cfg(feature = "ancpp-preprocessor")]
+    let layout = if args.preprocess.preprocess {
+        let cfg = build_config(&args.preprocess, &args.layout)?;
+        io::load_layout_preprocessed(&args.layout, &cfg)?
+    } else {
+        io::load_layout(&args.layout)?
+    };
+    #[cfg(not(feature = "ancpp-preprocessor"))]
     let layout = io::load_layout(&args.layout)?;
     let document = KeymapDocument::from_document(layout.document.clone());
 

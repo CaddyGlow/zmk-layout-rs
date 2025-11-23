@@ -30,6 +30,12 @@ pub enum TemplateParseMode {
     FullDocument,
 }
 
+impl Default for TemplateParseMode {
+    fn default() -> Self {
+        TemplateParseMode::StripPlaceholders
+    }
+}
+
 /// Captures a user-defined slice of the rendered DTS using regex delimiters.
 #[derive(Debug, Clone)]
 pub struct RegexExtractionConfig {
