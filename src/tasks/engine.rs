@@ -853,9 +853,9 @@ struct ScriptEnvironment<'a> {
     conflict_script: Option<&'a str>,
 }
 
-pub(crate) const SCRIPT_MAX_OPERATIONS: u64 = 100_000;
-pub(crate) const SCRIPT_MAX_CALL_DEPTH: usize = 64;
-pub(crate) const SCRIPT_HOOK_INTERVAL: u64 = 1_000;
+pub const SCRIPT_MAX_OPERATIONS: u64 = 100_000;
+pub const SCRIPT_MAX_CALL_DEPTH: usize = 64;
+pub const SCRIPT_HOOK_INTERVAL: u64 = 1_000;
 
 impl<'a> ScriptEnvironment<'a> {
     fn new(file: &'a TaskFile) -> Self {
@@ -1032,7 +1032,7 @@ struct ScriptGlobals<'a> {
     comment: Option<&'a str>,
 }
 
-pub(crate) fn create_layout_lua(
+fn create_layout_lua(
     layout: Rc<RefCell<LayoutEngine>>,
     logs: Rc<RefCell<Vec<String>>>,
 ) -> LuaResult<Lua> {
@@ -1042,13 +1042,13 @@ pub(crate) fn create_layout_lua(
     Ok(lua)
 }
 
-pub(crate) fn create_lua_with_limits() -> LuaResult<Lua> {
+fn create_lua_with_limits() -> LuaResult<Lua> {
     let lua = Lua::new();
     configure_lua_limits(&lua)?;
     Ok(lua)
 }
 
-pub(crate) fn configure_lua_limits(lua: &Lua) -> LuaResult<()> {
+fn configure_lua_limits(lua: &Lua) -> LuaResult<()> {
     let operation_counter = Rc::new(Cell::new(0u64));
     let depth_counter = Rc::new(Cell::new(0i32));
 
@@ -1091,7 +1091,7 @@ pub(crate) fn configure_lua_limits(lua: &Lua) -> LuaResult<()> {
     Ok(())
 }
 
-pub(crate) fn register_script_api(
+fn register_script_api(
     lua: &Lua,
     layout: Rc<RefCell<LayoutEngine>>,
     logs: Rc<RefCell<Vec<String>>>,
