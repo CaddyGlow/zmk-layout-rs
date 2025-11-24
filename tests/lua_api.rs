@@ -1,6 +1,7 @@
 use std::{cell::RefCell, fs, rc::Rc};
 
 use mlua::Lua;
+use serde_json::Value as JsonValue;
 use tempfile::tempdir;
 
 use zmk_layout_rs::{
@@ -311,5 +312,150 @@ fn double_apply_throws_error() {
             message.contains("already applied"),
             "expected double-apply error, got {message}"
         );
+    });
+}
+
+#[test]
+fn dts_and_json_string_helpers_work() {
+    let engine = Rc::new(RefCell::new(make_engine()));
+    with_lua(Rc::clone(&engine), |lua| {
+        let dts: String = lua
+            .load(
+                r#"
+                layout:parse_dts([[
+                keymap {
+                    compatible = "zmk,keymap";
+                    base { bindings = < &kp A &kp B >; };
+                };
+                ]])
+                layout:layer("base"):bind(2, "&kp C"):apply()
+                return layout:to_dts_string()
+                "#,
+            )
+            .eval()
+            .unwrap();
+        assert!(
+            dts.contains("&kp C"),
+            "to_dts_string should include edited binding"
+        );
+
+        let json: String = lua
+            .load(r#"return layout:to_json_string()"#)
+            .eval()
+            .unwrap();
+        let parsed: JsonValue = serde_json::from_str(&json).expect("valid JSON");
+        let layers = parsed
+            .get("layers")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(layers.len(), 1, "expected one layer in exported JSON");
+        let bindings = layers[0]
+            .get("bindings")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(
+            bindings.get(1).and_then(|v| v.as_str()).unwrap_or_default(),
+            "&kp C",
+            "exported JSON reflects updated bindings"
+        );
+    });
+}
+
+#[test]
+fn parse_json_with_template_updates_layout() {
+    let dir = tempdir().unwrap();
+    let template_path = dir.path().join("template.dts");
+    fs::write(
+        &template_path,
+        r#"
+keymap {
+    compatible = "zmk,keymap";
+    base {
+        bindings = < &none >;
+    };
+};
+"#,
+    )
+    .unwrap();
+
+    let engine = Rc::new(RefCell::new(make_engine()));
+    with_lua(Rc::clone(&engine), |lua| {
+        lua.load(format!(
+            r#"
+            layout:parse_dts([[
+            keymap {{
+                compatible = "zmk,keymap";
+                base {{ bindings = < &kp A &kp B >; }};
+            }};
+            ]])
+            local json = layout:to_json_string()
+            layout:parse_json(json, "{template}")
+            "#,
+            template = template_path.display()
+        ))
+        .exec()
+        .unwrap();
+    });
+
+    let bindings = engine.borrow().layer_bindings("base").unwrap();
+    assert_eq!(bindings[0], "&kp A");
+    assert_eq!(bindings[1], "&kp B");
+}
+
+#[test]
+fn firmware_build_dry_run_skips_execution() {
+    let dir = tempdir().unwrap();
+    let layout_path = dir.path().join("layout.dts");
+    let output_dir = dir.path().join("out");
+    fs::write(
+        &layout_path,
+        r#"
+keymap {
+    compatible = "zmk,keymap";
+    base { bindings = < &kp A >; };
+};
+"#,
+    )
+    .unwrap();
+
+    let manifest = std::path::Path::new("profiles/firmwares/glove80.toml");
+    assert!(
+        manifest.exists(),
+        "fixture manifest should exist: {}",
+        manifest.display()
+    );
+
+    let engine = Rc::new(RefCell::new(make_engine()));
+    with_lua(Rc::clone(&engine), |lua| {
+        let result: mlua::Table = lua
+            .load(format!(
+                r#"
+                return layout:build_firmware({{
+                    manifest = "{manifest}",
+                    keyboard = "glove80",
+                    layout_dts = "{layout}",
+                    targets = {{"left"}},
+                    output_dir = "{out}",
+                    dry_run = true,
+                    disable_cache = true,
+                }})
+                "#,
+                manifest = manifest.display(),
+                layout = layout_path.display(),
+                out = output_dir.display(),
+            ))
+            .eval()
+            .unwrap();
+
+        let built: bool = result.get("built").unwrap();
+        assert!(!built, "dry-run should skip actual build");
+        let request: mlua::Table = result.get("request").unwrap();
+        let layout_kind: String = request.get("layout_kind").unwrap();
+        assert_eq!(layout_kind, "layout_dts_path");
+        let targets: mlua::Table = request.get("targets").unwrap();
+        let first_target: String = targets.get(1).unwrap();
+        assert_eq!(first_target, "left");
     });
 }
