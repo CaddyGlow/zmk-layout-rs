@@ -70,6 +70,14 @@ impl AdapterPipeline {
         self
     }
 
+    pub fn template_source_ref(&self) -> Option<&String> {
+        self.template_source.as_ref()
+    }
+
+    pub fn template_mode_value(&self) -> TemplateParseMode {
+        self.template_mode
+    }
+
     /// Load an `AdapterLayout` from the configured input/template combination.
     pub fn load(self) -> Result<AdapterLayout, AdapterError> {
         let template = self.template_source;

@@ -65,6 +65,13 @@ Goal: replace the current ad-hoc layout representations (`LoadedLayout`, `Keymap
      - Preprocessed input: `raw_for_diff` flag triggers warning and diff text matches expanded content.
      - Firmware staging for each `LayoutSource` variant yields keymap/config paths and passes toolchain requirements.
 
+## Empty layout constructor
+- Add `LayoutHandle::empty(profile: &KeyboardProfileDoc) -> Result<Self, Error>` (or `from_profile_template`):
+  - Resolve the profile template, render a minimal DTS (behaviors/macros/combos roots + predictable base layer), set `origin = LayoutOrigin::Generated`.
+  - Populate `raw_text` with the rendered template, set `template_source`/`template_mode`, parse into `document`, and seed `adapter_layout` for JSON export.
+  - Skip preprocessing for generated content; enforce a warning/error if preprocessing is requested with no source path.
+- Use this in CLI/task flows when no layout is provided, and in firmware builds only when a profile is available; otherwise fail fast.
+
 ## Expected Outcomes
 - Single, explicit source of truth for “layout in memory” with clear provenance.
 - Deterministic staging for all input types (no more missing keymap when starting from JSON/pipeline).

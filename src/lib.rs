@@ -13,6 +13,7 @@ pub mod dts;
 pub mod flash;
 pub mod io;
 pub mod layout_engine;
+pub mod layout_handle;
 pub mod lua_api;
 pub mod macro_support;
 pub mod parser;

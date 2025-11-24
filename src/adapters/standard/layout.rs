@@ -110,7 +110,16 @@ impl AdapterLayout {
                 .map(|binding| binding.as_str())
                 .collect();
             if !binding_refs.is_empty() {
-                provider.set_behavior_bindings(&macro_behavior.name, &binding_refs)?;
+                match provider.set_behavior_bindings(&macro_behavior.name, &binding_refs) {
+                    Ok(()) => {}
+                    Err(ProviderError::BehaviorNotFound(name)) if name == macro_behavior.name => {
+                        // Ignore missing behaviors for macros; they may live under `macros`.
+                    }
+                    Err(ProviderError::PropertyMissing { .. }) => {
+                        // Ignore missing bindings on macros; existing macros keep their bindings.
+                    }
+                    Err(err) => return Err(err),
+                }
             }
             provider.set_macro_timing(
                 &macro_behavior.name,

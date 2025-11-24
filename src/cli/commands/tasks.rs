@@ -63,7 +63,11 @@ pub fn diff(args: &DiffArgs) -> Result<i32, CliError> {
         return Ok(code);
     }
     let updated = io::serialize_keymap(exec.document)?;
-    let diff = io::render_diff(&layout.text, &updated, &layout.path);
+    let (base_text, is_preprocessed) = layout.raw_for_diff();
+    if is_preprocessed {
+        eprintln!("warning: diff is against preprocessed layout content");
+    }
+    let diff = io::render_diff(&base_text, &updated, &layout.diff_base_path());
     print!("{diff}");
     Ok(0)
 }

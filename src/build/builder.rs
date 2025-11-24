@@ -88,7 +88,11 @@ impl FirmwareBuilder {
             request.disable_cache,
         )?;
         let stager = LayoutStager::new();
-        let layout = stager.stage(&request.layout, &workspace)?;
+        let layout = stager.stage(
+            &request.layout,
+            request.keyboard_profile_document(),
+            &workspace,
+        )?;
 
         let ctx = BuildContext {
             manifest: &self.manifest,

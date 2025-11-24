@@ -83,6 +83,11 @@ impl BuildRequest {
         self.keyboard_profile()
             .and_then(|profile| profile.profile.as_ref().map(|doc| &doc.document))
     }
+
+    pub fn keyboard_profile_document(&self) -> Option<&super::manifest::KeyboardProfileDocument> {
+        self.keyboard_profile()
+            .and_then(|profile| profile.profile.as_ref())
+    }
 }
 
 /// Builder for [`BuildRequest`].

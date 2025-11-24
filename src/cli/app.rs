@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
-use crate::{adapters::TemplateParseMode, flash::FlashSideSelection, tasks::ConflictPolicy};
+use crate::{flash::FlashSideSelection, tasks::ConflictPolicy};
 
 #[cfg(feature = "ancpp-preprocessor")]
 #[derive(Args, Clone, Default)]
@@ -236,22 +236,9 @@ pub struct LayerExportArgs {
     #[arg(
         long,
         value_enum,
-        help = "Use vendor-specific regex extraction instead of a template"
+        help = "Use vendor-specific regex extraction"
     )]
     pub vendor: Option<VendorExtractionFlag>,
-    #[arg(
-        long,
-        value_name = "FILE",
-        help = "Optional template to extract metadata placeholders"
-    )]
-    pub template: Option<PathBuf>,
-    #[arg(
-        long,
-        value_enum,
-        default_value_t = TemplateModeFlag::Strip,
-        help = "How to parse the DTS when a template is provided"
-    )]
-    pub template_mode: TemplateModeFlag,
     #[cfg(feature = "ancpp-preprocessor")]
     #[command(flatten)]
     pub preprocess: PreprocessorArgs,
@@ -462,21 +449,6 @@ impl From<FlashSideFlag> for FlashSideSelection {
             FlashSideFlag::Left => FlashSideSelection::Left,
             FlashSideFlag::Right => FlashSideSelection::Right,
             FlashSideFlag::Both => FlashSideSelection::Both,
-        }
-    }
-}
-
-#[derive(Copy, Clone, ValueEnum)]
-pub enum TemplateModeFlag {
-    Strip,
-    Full,
-}
-
-impl From<TemplateModeFlag> for TemplateParseMode {
-    fn from(flag: TemplateModeFlag) -> Self {
-        match flag {
-            TemplateModeFlag::Strip => TemplateParseMode::StripPlaceholders,
-            TemplateModeFlag::Full => TemplateParseMode::FullDocument,
         }
     }
 }

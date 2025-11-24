@@ -6,20 +6,19 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    dts::DtsDocument, providers::KeymapDocument, serialization::SerializeError, tasks::TaskFile,
+    dts::DtsDocument,
+    layout_handle::{LayoutHandle, LayoutOrigin},
+    providers::KeymapDocument,
+    serialization::SerializeError,
+    tasks::TaskFile,
     tokenizer::LayoutError,
 };
 
 #[cfg(feature = "ancpp-preprocessor")]
 use crate::preprocessor::{AncppError, PreprocessorConfig, preprocess_layout};
 
-/// Loaded layout with original text and parsed document.
-#[derive(Debug)]
-pub struct LoadedLayout {
-    pub path: PathBuf,
-    pub text: String,
-    pub document: DtsDocument,
-}
+/// Unified layout handle type for IO helpers.
+pub type LoadedLayout = LayoutHandle;
 
 /// Loaded task file with the source text preserved.
 #[derive(Debug)]
@@ -75,10 +74,16 @@ pub fn load_layout(path: impl AsRef<Path>) -> Result<LoadedLayout, IoError> {
         path: path.clone(),
         source,
     })?;
-    Ok(LoadedLayout {
-        path,
-        text,
+    Ok(LayoutHandle {
+        source_path: Some(path),
+        raw_text: Some(text),
+        preprocessed_text: None,
         document,
+        adapter_layout: None,
+        profile: None,
+        template_source: None,
+        template_mode: Default::default(),
+        origin: LayoutOrigin::DtsFile,
     })
 }
 
@@ -89,6 +94,7 @@ pub fn load_layout_preprocessed(
     config: &PreprocessorConfig,
 ) -> Result<LoadedLayout, IoError> {
     let path = path.as_ref().to_path_buf();
+    let raw_text = read_text(&path)?;
     let output = preprocess_layout(&path, config).map_err(|source| IoError::PreprocessLayout {
         path: path.clone(),
         source,
@@ -98,10 +104,16 @@ pub fn load_layout_preprocessed(
             path: path.clone(),
             source,
         })?;
-    Ok(LoadedLayout {
-        path,
-        text: output.expanded,
+    Ok(LayoutHandle {
+        source_path: Some(path),
+        raw_text: Some(raw_text),
+        preprocessed_text: Some(output.expanded),
         document,
+        adapter_layout: None,
+        profile: None,
+        template_source: None,
+        template_mode: Default::default(),
+        origin: LayoutOrigin::DtsFile,
     })
 }
 

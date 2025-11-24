@@ -196,7 +196,12 @@ fn apply_firmware_layout(
         };
         #[cfg(not(feature = "ancpp-preprocessor"))]
         let layout = io::load_layout(path)?;
-        let pipeline = AdapterPipeline::from_dts_text(layout.text)
+        let dts_text = layout
+            .preprocessed_text
+            .clone()
+            .or(layout.raw_text.clone())
+            .unwrap_or_default();
+        let pipeline = AdapterPipeline::from_dts_text(dts_text)
             .template_mode(crate::adapters::standard::TemplateParseMode::FullDocument);
         builder = builder.layout_via_pipeline(pipeline);
         layout_set = true;

@@ -2,9 +2,9 @@
 use crate::cli::preprocess::build_config;
 use crate::{
     adapters::{
-        AdapterError, export_standard_str, import_standard_str_with_template,
-        moergo::export_standard_str_from_moergo_dtsi, pipeline::AdapterPipeline,
-        render_standard_template, template_contains_placeholders,
+        export_standard_str, import_standard_str_with_template,
+        moergo::export_standard_str_from_moergo_dtsi, render_standard_template,
+        template_contains_placeholders,
     },
     cli::{
         app::{LayerExportArgs, LayerImportArgs, VendorExtractionFlag},
@@ -18,7 +18,12 @@ pub fn export(args: &LayerExportArgs) -> Result<i32, CliError> {
     #[cfg(feature = "ancpp-preprocessor")]
     let source = if args.preprocess.preprocess {
         let cfg = build_config(&args.preprocess, &args.dts)?;
-        io::load_layout_preprocessed(&args.dts, &cfg)?.text
+        let handle = io::load_layout_preprocessed(&args.dts, &cfg)?;
+        handle
+            .preprocessed_text
+            .clone()
+            .or(handle.raw_text.clone())
+            .unwrap_or_default()
     } else {
         io::read_text(&args.dts)?
     };
@@ -26,26 +31,10 @@ pub fn export(args: &LayerExportArgs) -> Result<i32, CliError> {
     let source = io::read_text(&args.dts)?;
 
     if let Some(vendor) = args.vendor {
-        if args.template.is_some() {
-            return Err(CliError::InvalidArgument(
-                "choose either --vendor or --template, not both".into(),
-            ));
-        }
         let contents = match vendor {
             VendorExtractionFlag::Moergo => export_standard_str_from_moergo_dtsi(&source)?,
         };
         io::write_text(&args.json, &contents)?;
-    } else if let Some(template_path) = &args.template {
-        let template_source = io::read_text(template_path)?;
-        let pipeline = AdapterPipeline::from_dts_text(source)
-            .template_source(template_source)
-            .template_mode(args.template_mode.into());
-        let layout = pipeline.load()?;
-        let json = layout
-            .to_standard_json()
-            .map_err(AdapterError::from)
-            .map_err(CliError::from)?;
-        io::write_text(&args.json, &json)?;
     } else {
         let document = DtsDocument::parse_str(&source).map_err(|source| CliError::ParseLayout {
             path: args.dts.clone(),

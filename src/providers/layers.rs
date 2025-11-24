@@ -349,7 +349,7 @@ impl KeymapProvider {
     }
 
     fn behavior_node_mut(&mut self, behavior: &str) -> Result<&mut DtNode, ProviderError> {
-        let root_index = ensure_behaviors_root(&mut self.document.items);
+        let root_index = find_behavior_root(&mut self.document.items, behavior);
         let root = match self.document.items.get_mut(root_index) {
             Some(crate::ast::DtItem::Node(node)) => node,
             _ => unreachable!(),
@@ -386,6 +386,22 @@ fn ensure_behaviors_root(document_items: &mut Vec<crate::ast::DtItem>) -> usize 
         "behaviors",
     )));
     document_items.len() - 1
+}
+
+fn find_behavior_root(document_items: &mut Vec<crate::ast::DtItem>, behavior: &str) -> usize {
+    if let Some(idx) = document_items.iter().position(|item| {
+        matches!(item, crate::ast::DtItem::Node(node) if node.name == "macros"
+            && node.children.iter().any(|child| matches!(child, crate::ast::DtItem::Node(n) if n.name == behavior)))
+    }) {
+        return idx;
+    }
+    if let Some(idx) = document_items
+        .iter()
+        .position(|item| matches!(item, crate::ast::DtItem::Node(node) if is_behavior_root(node)))
+    {
+        return idx;
+    }
+    ensure_behaviors_root(document_items)
 }
 
 /// High-level keymap document that reuses the provider stack.
