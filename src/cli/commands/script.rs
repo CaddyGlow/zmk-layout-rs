@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use crate::cli::preprocess::build_config;
 use crate::{
     cli::{app::ScriptArgs, error::CliError},
-    dts::DtsDocument,
     io,
     layout_handle::{LayoutHandle, LayoutOrigin},
     tasks::execute_script,
@@ -90,20 +89,6 @@ keymap {
     };
 };
 "#;
-    let document = DtsDocument::parse_str(source).map_err(|err| CliError::ParseLayout {
-        path: PathBuf::from("<memory>"),
-        source: err,
-    })?;
-    let text = document.to_string().map_err(CliError::Serialize)?;
-    Ok(LayoutHandle {
-        source_path: Some(PathBuf::from("<memory>")),
-        raw_text: Some(text),
-        preprocessed_text: None,
-        document,
-        adapter_layout: None,
-        profile: None,
-        template_source: None,
-        template_mode: Default::default(),
-        origin: LayoutOrigin::Generated,
-    })
+    LayoutHandle::from_dts_text(source, LayoutOrigin::Generated)
+        .map_err(|err| CliError::InvalidArgument(format!("failed to build default layout: {err}")))
 }

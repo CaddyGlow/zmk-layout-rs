@@ -41,7 +41,11 @@ impl AdapterLayout {
                     .into_iter()
                     .map(|binding| binding.to_binding_string())
                     .collect();
-                LayerSpec { name, bindings }
+                LayerSpec {
+                    name,
+                    bindings,
+                    properties: BTreeMap::new(),
+                }
             })
             .collect();
         let combos = ComboProvider::new(document)
@@ -92,14 +96,26 @@ impl AdapterLayout {
                 .map(|binding| binding.as_str())
                 .collect();
             provider.set_layer_bindings(&layer.name, &bindings)?;
+            if !layer.properties.is_empty() {
+                let props: Vec<(String, String)> = layer
+                    .properties
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                provider.set_layer_metadata(&layer.name, &props)?;
+            }
         }
 
         for combo in &self.combos {
-            provider.set_combo_key_positions(&combo.name, &combo.key_positions)?;
-            provider.set_combo_timeout_ms(&combo.name, combo.timeout_ms)?;
-            provider.set_combo_layers(&combo.name, &combo.layers)?;
             if let Some(binding) = combo.binding.as_deref() {
-                provider.set_combo_bindings(&combo.name, &[binding])?;
+                provider.upsert_combo(
+                    &combo.name,
+                    binding,
+                    &combo.key_positions,
+                    combo.timeout_ms,
+                    &combo.layers,
+                    &combo.conditions,
+                )?;
             }
         }
 

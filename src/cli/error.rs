@@ -73,6 +73,7 @@ impl From<IoError> for CliError {
             IoError::ParseLayout { path, source } => CliError::ParseLayout { path, source },
             IoError::ParseTaskFile { source, .. } => CliError::TaskConfig(source),
             IoError::SerializeLayout(err) => CliError::Serialize(err),
+            IoError::Adapter(err) => CliError::Adapter(err),
             #[cfg(feature = "ancpp-preprocessor")]
             IoError::PreprocessLayout { path, source } => {
                 CliError::PreprocessLayout { path, source }

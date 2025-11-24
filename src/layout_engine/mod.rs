@@ -1,12 +1,13 @@
 //! Layout mutation helpers shared across tasks, scripts, and future tooling.
 
 use crate::{
-    ast::{DtItem, DtNode, DtProperty, DtValue},
+    adapters::ComboSpec,
+    adapters::standard::LayerSpec,
     bindings::BindingParser,
-    dts::DtsDocument,
-    providers::{COMBO_CONDITION_COMMENT_PREFIX, ComboProvider, KeymapDocument, ProviderError},
-    tokenizer::TokenSpan,
+    keymap::KeymapDocument,
+    providers::ProviderError,
 };
+use serde_json;
 use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 use toml::Value as TomlValue;
@@ -56,37 +57,19 @@ impl LayoutEngine {
 
     /// Create a minimal, empty layout with keymap + behaviors/macros/combos roots.
     pub fn empty() -> Self {
-        let make_node = |name: &str| DtNode {
-            name: name.to_string(),
-            raw_name: String::new(),
-            span: empty_span(),
-            properties: Vec::new(),
-            children: Vec::new(),
-            leading_comments: Vec::new(),
-            trailing_comments: Vec::new(),
+        let document = KeymapDocument {
+            layers: vec![LayerSpec {
+                name: "base".into(),
+                bindings: vec!["&none".into()],
+                properties: BTreeMap::new(),
+            }],
+            combos: Vec::new(),
+            behaviors: Vec::new(),
+            macros: Vec::new(),
+            input_listeners: Vec::new(),
+            metadata: Default::default(),
         };
-        let root_nodes = vec![
-            DtItem::Node(make_node("behaviors")),
-            DtItem::Node(make_node("macros")),
-            DtItem::Node(make_node("combos")),
-            DtItem::Node({
-                let mut keymap = make_node("keymap");
-                keymap.properties.push(DtProperty {
-                    name: "compatible".to_string(),
-                    raw_name: String::new(),
-                    value: DtValue {
-                        raw: "\"zmk,keymap\"".to_string(),
-                        span: empty_span(),
-                    },
-                    span: empty_span(),
-                    leading_comments: Vec::new(),
-                    trailing_comment: None,
-                });
-                keymap
-            }),
-        ];
-        let doc = DtsDocument::from_items(root_nodes);
-        LayoutEngine::new(KeymapDocument::from_document(doc))
+        LayoutEngine::new(document)
     }
 
     pub fn into_document(self) -> KeymapDocument {
@@ -102,23 +85,34 @@ impl LayoutEngine {
     }
 
     pub fn layer_to_string(&self, layer: &str) -> Option<String> {
-        layer_to_string(self.document.document(), layer)
+        self.document
+            .layers
+            .iter()
+            .find(|entry| entry.name == layer)
+            .map(|layer| format_bindings(&layer.bindings))
     }
 
     pub fn combo_to_string(&self, combo: &str) -> Option<String> {
-        combo_to_string(self.document.document(), combo)
+        self.document
+            .combos
+            .iter()
+            .find(|entry| entry.name == combo)
+            .map(combo_snapshot)
     }
 
     pub fn layer_order_to_string(&self) -> String {
-        layer_order_to_string(self.document.document())
+        self.document
+            .layers
+            .iter()
+            .enumerate()
+            .map(|(idx, layer)| format!("{idx}:{}", layer.name))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     pub fn layer_bindings(&self, layer: &str) -> Result<Vec<String>, LayoutEngineError> {
         let entries = self.document.bindings_for_layer(layer)?;
-        Ok(entries
-            .into_iter()
-            .map(|entry| entry.to_binding_string())
-            .collect())
+        Ok(entries)
     }
 
     pub fn normalize_binding(&mut self, value: &str) -> Result<String, LayoutEngineError> {
@@ -321,11 +315,39 @@ impl LayoutEngine {
     }
 
     pub fn behavior_to_string(&self, behavior: &str) -> Option<String> {
-        behavior_to_string(self.document.document(), behavior)
+        self.document
+            .behaviors
+            .iter()
+            .find(|entry| entry.name == behavior)
+            .map(|behavior| {
+                let mut parts = Vec::new();
+                if !behavior.bindings.is_empty() {
+                    parts.push(format!("bindings=< {} >", behavior.bindings.join(" ")));
+                }
+                if let Some(cells) = behavior.binding_cells {
+                    parts.push(format!("#binding-cells={cells}"));
+                }
+                if let Some(label) = &behavior.label {
+                    parts.push(format!("label=\"{label}\""));
+                }
+                if let Some(compatible) = &behavior.compatible {
+                    parts.push(format!("compatible=\"{compatible}\""));
+                }
+                if !behavior.properties.is_empty() {
+                    for (key, value) in &behavior.properties {
+                        parts.push(format!("{key}={value}"));
+                    }
+                }
+                parts.join("; ")
+            })
     }
 
     pub fn meta_to_string(&self, key: &str) -> Option<String> {
-        meta_to_string(self.document.document(), key)
+        self.document
+            .metadata
+            .extras
+            .get(key)
+            .and_then(|value| value.as_str().map(|s| s.to_string()))
     }
 
     pub fn set_meta_entry(
@@ -334,7 +356,10 @@ impl LayoutEngine {
         value: &TomlValue,
     ) -> Result<(), LayoutEngineError> {
         let formatted = format_metadata_value(value);
-        set_meta_property(self.document.document_mut(), key, formatted);
+        self.document
+            .metadata
+            .extras
+            .insert(key.to_string(), serde_json::Value::String(formatted));
         Ok(())
     }
 
@@ -443,20 +468,14 @@ impl LayoutEngine {
     }
 
     pub fn combo_state(&self, name: &str) -> Option<ComboState> {
-        let def = ComboProvider::new(self.document.document())
-            .combos()
-            .into_iter()
-            .find(|combo| combo.name == name)?;
+        let def = self.document.combos.iter().find(|combo| combo.name == name)?;
         Some(ComboState {
-            name: def.name,
-            key_positions: def.key_positions,
+            name: def.name.clone(),
+            key_positions: def.key_positions.clone(),
             timeout_ms: def.timeout_ms,
-            binding: def
-                .bindings
-                .get(0)
-                .map(|binding| binding.to_binding_string()),
-            layers: def.layers,
-            conditions: combo_conditions(self.document.document(), name),
+            binding: def.binding.clone(),
+            layers: def.layers.clone(),
+            conditions: def.conditions.clone(),
         })
     }
 }
@@ -485,166 +504,44 @@ pub struct ComboState {
     pub conditions: Vec<String>,
 }
 
-fn layer_to_string(document: &DtsDocument, layer: &str) -> Option<String> {
-    let node = find_layer_node(&document.items, layer)?;
-    let prop = find_bindings_property(node)?;
-    let bindings = parse_binding_list(&prop.value.raw);
-    if bindings.is_empty() {
-        None
-    } else {
-        Some(bindings.join(" "))
-    }
-}
-
-fn combo_to_string(document: &DtsDocument, combo: &str) -> Option<String> {
-    let combos_root = find_layer_node(&document.items, "combos")?;
-    let combo_node = find_child_node(combos_root, combo)?;
+fn combo_snapshot(combo: &ComboSpec) -> String {
     let mut parts = Vec::new();
-    if let Some(prop) = combo_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "key-positions")
-    {
-        parts.push(format!("key-positions={}", prop.value.raw.trim()));
+    if !combo.key_positions.is_empty() {
+        parts.push(format!(
+            "key-positions=< {} >",
+            combo
+                .key_positions
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
-    if let Some(prop) = combo_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "bindings")
-    {
-        parts.push(format!("bindings={}", prop.value.raw.trim()));
+    if let Some(binding) = &combo.binding {
+        parts.push(format!("bindings=< {} >", binding));
     }
-    if let Some(prop) = combo_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "timeout-ms")
-    {
-        parts.push(format!("timeout-ms={}", prop.value.raw.trim()));
+    if let Some(timeout) = combo.timeout_ms {
+        parts.push(format!("timeout-ms={timeout}"));
     }
-    if let Some(prop) = combo_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "layers")
-    {
-        parts.push(format!("layers={}", prop.value.raw.trim()));
+    if !combo.layers.is_empty() {
+        parts.push(format!(
+            "layers=< {} >",
+            combo
+                .layers
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
-    let conditions = combo_condition_comments(combo_node);
-    if !conditions.is_empty() {
-        parts.push(format!("conditions={}", conditions.join(" && ")));
+    if !combo.conditions.is_empty() {
+        parts.push(format!("conditions={}", combo.conditions.join(" && ")));
     }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(format!("combo:{}:{}", combo, parts.join(";")))
-    }
+    parts.join("; ")
 }
 
-fn layer_order_to_string(document: &DtsDocument) -> String {
-    if let Some(keymap) = find_layer_node(&document.items, "keymap") {
-        let mut names = Vec::new();
-        for item in &keymap.children {
-            if let DtItem::Node(node) = item {
-                if find_bindings_property(node).is_some() {
-                    names.push(node.name.clone());
-                }
-            }
-        }
-        names.join(",")
-    } else {
-        String::new()
-    }
-}
-
-fn combo_conditions(document: &DtsDocument, combo: &str) -> Vec<String> {
-    find_layer_node(&document.items, "combos")
-        .and_then(|combos| find_child_node(combos, combo))
-        .map(combo_condition_comments)
-        .unwrap_or_default()
-}
-
-fn combo_condition_comments(node: &DtNode) -> Vec<String> {
-    node.leading_comments
-        .iter()
-        .filter_map(|comment| extract_condition_comment(&comment.text))
-        .collect()
-}
-
-fn extract_condition_comment(text: &str) -> Option<String> {
-    let trimmed = text.trim_start();
-    if !trimmed.starts_with(COMBO_CONDITION_COMMENT_PREFIX) {
-        return None;
-    }
-    let body = trimmed[COMBO_CONDITION_COMMENT_PREFIX.len()..].trim();
-    if body.is_empty() {
-        None
-    } else {
-        Some(body.to_string())
-    }
-}
-
-fn find_layer_node<'a>(items: &'a [DtItem], name: &str) -> Option<&'a DtNode> {
-    for item in items {
-        match item {
-            DtItem::Node(node) => {
-                if node.name == name {
-                    return Some(node);
-                }
-                if let Some(found) = find_layer_node(&node.children, name) {
-                    return Some(found);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn find_child_node<'a>(parent: &'a DtNode, name: &str) -> Option<&'a DtNode> {
-    for item in &parent.children {
-        if let DtItem::Node(node) = item {
-            if node.name == name {
-                return Some(node);
-            }
-        }
-    }
-    None
-}
-
-fn behavior_to_string(document: &DtsDocument, behavior: &str) -> Option<String> {
-    let node = find_behavior_node(&document.items, behavior)?;
-    let mut parts = Vec::new();
-    for prop in &node.properties {
-        let value = prop.value.raw.trim();
-        if value.is_empty() {
-            parts.push(format!("{};", prop.name));
-        } else {
-            parts.push(format!("{}={}", prop.name, value));
-        }
-    }
-    if parts.is_empty() {
-        None
-    } else {
-        Some(format!("behavior:{}:{}", behavior, parts.join(";")))
-    }
-}
-
-fn find_behavior_node<'a>(items: &'a [DtItem], behavior: &str) -> Option<&'a DtNode> {
-    for item in items {
-        if let DtItem::Node(node) = item {
-            if node.name == "behaviors" || node.name == "macros" {
-                if let Some(found) = node.children.iter().find_map(|child| match child {
-                    DtItem::Node(child) if child.name == behavior => Some(child),
-                    _ => None,
-                }) {
-                    return Some(found);
-                }
-            }
-            if let Some(found) = find_behavior_node(&node.children, behavior) {
-                return Some(found);
-            }
-        }
-    }
-    None
+fn format_bindings(bindings: &[String]) -> String {
+    format!("< {} >", bindings.join(" "))
 }
 
 fn array_to_binding_strings(array: &[TomlValue]) -> Result<Vec<String>, LayoutEngineError> {
@@ -667,82 +564,6 @@ fn array_to_binding_strings(array: &[TomlValue]) -> Result<Vec<String>, LayoutEn
         }
     }
     Ok(result)
-}
-
-fn meta_to_string(document: &DtsDocument, key: &str) -> Option<String> {
-    let node = find_meta_node(&document.items)?;
-    node.properties
-        .iter()
-        .find(|prop| prop.name == key)
-        .map(|prop| prop.value.raw.trim().to_string())
-}
-
-fn set_meta_property(document: &mut DtsDocument, key: &str, value: String) {
-    let node = ensure_meta_node(document);
-    let property = ensure_property(node, key);
-    property.value.raw = value;
-}
-
-fn ensure_meta_node(document: &mut DtsDocument) -> &mut DtNode {
-    let items = document.items_mut();
-    if let Some(index) = items
-        .iter()
-        .position(|item| matches!(item, DtItem::Node(node) if node.name == "meta"))
-    {
-        match items.get_mut(index) {
-            Some(DtItem::Node(node)) => return node,
-            _ => unreachable!(),
-        }
-    }
-    items.push(DtItem::Node(DtNode {
-        name: "meta".to_string(),
-        raw_name: String::new(),
-        span: empty_span(),
-        properties: Vec::new(),
-        children: Vec::new(),
-        leading_comments: Vec::new(),
-        trailing_comments: Vec::new(),
-    }));
-    match items.last_mut() {
-        Some(DtItem::Node(node)) => node,
-        _ => unreachable!(),
-    }
-}
-
-fn find_meta_node(items: &[DtItem]) -> Option<&DtNode> {
-    items.iter().find_map(|item| match item {
-        DtItem::Node(node) if node.name == "meta" => Some(node),
-        _ => None,
-    })
-}
-
-fn ensure_property<'a>(node: &'a mut DtNode, name: &str) -> &'a mut DtProperty {
-    if let Some(index) = node.properties.iter().position(|prop| prop.name == name) {
-        return node
-            .properties
-            .get_mut(index)
-            .expect("property index valid");
-    }
-    node.properties.push(DtProperty {
-        name: name.to_string(),
-        raw_name: String::new(),
-        value: DtValue {
-            raw: String::new(),
-            span: empty_span(),
-        },
-        span: empty_span(),
-        leading_comments: Vec::new(),
-        trailing_comment: None,
-    });
-    node.properties.last_mut().expect("inserted property")
-}
-
-fn empty_span() -> TokenSpan {
-    TokenSpan::new(0, 0, 1, 1, 1, 1)
-}
-
-fn find_bindings_property(node: &DtNode) -> Option<&DtProperty> {
-    node.properties.iter().find(|prop| prop.name == "bindings")
 }
 
 fn format_metadata_value(value: &TomlValue) -> String {

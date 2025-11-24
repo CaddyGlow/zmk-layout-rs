@@ -1,6 +1,7 @@
 use zmk_layout_rs::{
+    adapters::standard::AdapterLayout,
     dts::DtsDocument,
-    providers::KeymapDocument,
+    keymap::KeymapDocument,
     tasks::{TaskConfigError, TaskFile, TaskStatus, apply_tasks},
 };
 
@@ -51,7 +52,8 @@ fn task_expected_state_conflict_reports_mismatch() {
         .expect("parse conflict fixture");
     let base = include_str!("fixtures/tasks_regression_base.dts");
     let dts = DtsDocument::parse_str(base).expect("parse base layout");
-    let document = KeymapDocument::from_document(dts);
+    let adapter = AdapterLayout::from_document(&dts);
+    let document = KeymapDocument::from(adapter);
 
     let exec = apply_tasks(document, &file);
     assert_eq!(exec.results.len(), 1);

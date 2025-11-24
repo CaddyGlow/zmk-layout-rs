@@ -15,7 +15,7 @@ use toml::{Value as TomlValue, map::Map as TomlMap};
 use crate::{
     layout_engine::{LayoutEngine, MetadataMap},
     lua_api::api::install_layout_api,
-    providers::KeymapDocument,
+    keymap::KeymapDocument,
 };
 
 use super::config::{ScriptSource, Task, TaskFile};

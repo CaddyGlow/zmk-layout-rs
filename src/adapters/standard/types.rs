@@ -31,6 +31,8 @@ pub struct ComboSpec {
     pub behavior: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub properties: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<String>,
     #[serde(
         default,
         rename = "propertyOrder",
@@ -67,6 +69,7 @@ impl From<ComboDefinition> for ComboSpec {
             binding,
             behavior: None,
             properties: extras,
+            conditions: value.conditions,
             property_order,
         }
     }
@@ -445,6 +448,8 @@ impl InputListenerNodeSpec {
 pub struct LayerSpec {
     pub name: String,
     pub bindings: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub properties: BTreeMap<String, String>,
 }
 
 /// Metadata describing the layout when exported to other formats.

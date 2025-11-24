@@ -6,7 +6,7 @@ use mlua::{
 };
 use toml::Value as TomlValue;
 
-use crate::providers::BehaviorDefinition;
+use crate::adapters::BehaviorSpec;
 
 use super::util::{
     SharedLayout, create_read_only_table, ensure_staged, lua_table_to_strings, script_error,
@@ -57,13 +57,14 @@ impl BehaviorObject {
         Ok(())
     }
 
-    fn behavior_definition(&self) -> Option<BehaviorDefinition> {
+    fn behavior_definition(&self) -> Option<BehaviorSpec> {
         let engine = self.layout.borrow();
         engine
             .document()
-            .behaviors()
-            .into_iter()
+            .behaviors
+            .iter()
             .find(|behavior| behavior.name == self.name)
+            .cloned()
     }
 
     fn seed_from_layout(&self) {
@@ -108,13 +109,8 @@ impl UserData for BehaviorObject {
                 return toml_to_lua_value(lua, value);
             }
             if let Some(def) = this.behavior_definition() {
-                for prop in def.properties {
-                    if prop.name == key {
-                        return Ok(match prop.raw_value {
-                            Some(value) => LuaValue::String(lua.create_string(&value)?),
-                            None => LuaValue::Nil,
-                        });
-                    }
+                if let Some(value) = def.properties.get(&key) {
+                    return Ok(LuaValue::String(lua.create_string(value)?));
                 }
             }
             Ok(LuaValue::Nil)

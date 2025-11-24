@@ -1,11 +1,8 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::{fs, path::PathBuf};
 
 use crate::{
-    layout_handle::{LayoutHandle, LayoutHandleError, LayoutOrigin, TemplateContext},
-    profiles::KeyboardProfileDoc,
+    layout_handle::{LayoutHandle, LayoutHandleError, LayoutOrigin},
+    keymap::KeymapDocument,
 };
 
 use super::{error::BuildError, request::LayoutSource, workspace::WorkspaceHandle};
@@ -33,30 +30,16 @@ impl LayoutStager {
     ) -> Result<KeymapArtifacts, BuildError> {
         match source {
             LayoutSource::JsonPath(path) => {
-                let template = self.require_template(profile)?;
-                let mut handle = LayoutHandle::from_json_path(
-                    path,
-                    TemplateContext {
-                        source: Some(template),
-                        mode: Default::default(),
-                    },
-                )
-                .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+                let mut handle = LayoutHandle::from_json_path(path, LayoutOrigin::JsonFile)
+                    .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
                 self.write_handle(&mut handle, workspace, true)
             }
             LayoutSource::JsonValue(value) => {
-                let template = self.require_template(profile)?;
                 let json_text = serde_json::to_string(value)
                     .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
-                let mut handle = LayoutHandle::from_json_text(
-                    json_text,
-                    TemplateContext {
-                        source: Some(template),
-                        mode: Default::default(),
-                    },
-                    LayoutOrigin::JsonText,
-                )
-                .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+                let mut handle =
+                    LayoutHandle::from_json_text(json_text, LayoutOrigin::JsonText)
+                        .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
                 self.write_handle(&mut handle, workspace, true)
             }
             LayoutSource::Document(document) => {
@@ -64,11 +47,8 @@ impl LayoutStager {
                     source_path: None,
                     raw_text: None,
                     preprocessed_text: None,
-                    document: document.clone(),
-                    adapter_layout: None,
+                    keymap: KeymapDocument::from(crate::adapters::standard::AdapterLayout::from_document(&document)),
                     profile: profile.map(|p| p.document.clone()),
-                    template_source: None,
-                    template_mode: Default::default(),
                     origin: LayoutOrigin::Document,
                 };
                 self.write_handle(&mut handle, workspace, true)
@@ -81,23 +61,14 @@ impl LayoutStager {
                     .clone()
                     .load()
                     .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
-                let template_source = pipeline.template_source_ref().cloned().or_else(|| {
-                    profile.and_then(|p| self.load_profile_template(&p.document, Some(&p.path)))
-                });
-                let template_mode = pipeline.template_mode_value();
-                let template = template_source.ok_or_else(|| {
-                    BuildError::InvalidRequest("template required for pipeline input".into())
-                })?;
-                let mut handle = LayoutHandle::from_adapter_layout(
-                    layout,
-                    TemplateContext {
-                        source: Some(template),
-                        mode: template_mode,
-                    },
-                    None,
-                    LayoutOrigin::Pipeline,
-                )
-                .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+                let mut handle = LayoutHandle {
+                    source_path: None,
+                    raw_text: None,
+                    preprocessed_text: None,
+                    keymap: KeymapDocument::from(layout),
+                    profile: profile.map(|p| p.document.clone()),
+                    origin: LayoutOrigin::Pipeline,
+                };
                 self.write_handle(&mut handle, workspace, true)
             }
         }
@@ -153,33 +124,6 @@ impl LayoutStager {
         Ok(artifacts)
     }
 
-    fn require_template(
-        &self,
-        profile: Option<&crate::build::manifest::KeyboardProfileDocument>,
-    ) -> Result<String, BuildError> {
-        profile
-            .and_then(|p| self.load_profile_template(&p.document, Some(&p.path)))
-            .ok_or_else(|| {
-                BuildError::InvalidRequest("template required for JSON layout input".into())
-            })
-    }
-
-    fn load_profile_template(
-        &self,
-        profile: &KeyboardProfileDoc,
-        profile_path: Option<&Path>,
-    ) -> Option<String> {
-        let template = PathBuf::from(&profile.layout.template);
-        let resolved = if template.is_absolute() {
-            template
-        } else if let Some(path) = profile_path {
-            let base = path.parent().unwrap_or_else(|| Path::new("."));
-            base.join(template)
-        } else {
-            template
-        };
-        fs::read_to_string(resolved).ok()
-    }
 }
 
 #[cfg(test)]

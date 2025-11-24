@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use crate::cli::preprocess::build_config;
 use crate::{
     io::{self, LoadedLayout},
-    providers::KeymapDocument,
+    keymap::KeymapDocument,
     tasks::{
         ConflictPolicy, ExecutionMode, TaskAction, TaskEngineOptions, TaskExecution, TaskFile,
         TaskOutcome, TaskStatus, apply_tasks_with_options,
@@ -45,7 +45,7 @@ pub fn prepare(args: &SharedArgs) -> Result<PreparedContext, CliError> {
     };
     #[cfg(not(feature = "ancpp-preprocessor"))]
     let layout = io::load_layout(&args.base_layout)?;
-    let document = KeymapDocument::from_document(layout.document.clone());
+    let document = layout.as_keymap_document();
     Ok(PreparedContext {
         file,
         layout,

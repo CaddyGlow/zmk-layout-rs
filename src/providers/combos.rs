@@ -41,6 +41,7 @@ pub struct ComboDefinition {
     pub bindings: Vec<LayoutBinding>,
     pub layers: Vec<u32>,
     pub description: Option<String>,
+    pub conditions: Vec<String>,
     pub properties: Vec<NodeProperty>,
 }
 
@@ -70,6 +71,7 @@ fn collect_combos(item: &DtItem, parser: &BindingParser, acc: &mut Vec<ComboDefi
                     .collect();
                 let layers = parse_layers(node);
                 let description = combo_description(node);
+                let conditions = super::util::combo_condition_comments(&node.leading_comments);
                 acc.push(ComboDefinition {
                     name: node.name.clone(),
                     key_positions,
@@ -77,6 +79,7 @@ fn collect_combos(item: &DtItem, parser: &BindingParser, acc: &mut Vec<ComboDefi
                     bindings,
                     layers,
                     description,
+                    conditions,
                     properties: capture_node_properties(node),
                 });
             }

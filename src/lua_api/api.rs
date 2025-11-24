@@ -20,9 +20,9 @@ use crate::{
     adapters::{
         pipeline::AdapterPipeline,
         standard::{
-            TemplateParseMode, export_standard_file, export_standard_str,
-            export_standard_str_with_template_mode, import_standard_file_with_template,
-            import_standard_str_with_template, render_standard_template,
+            AdapterLayout, TemplateParseMode, export_standard_str_with_template_mode,
+            import_standard_file_with_template, import_standard_str_with_template,
+            render_standard_template,
         },
     },
     build::{
@@ -30,8 +30,9 @@ use crate::{
         NoopProgressReporter,
     },
     dts::DtsDocument,
+    io::serialize_keymap,
     layout_engine::LayoutEngine,
-    providers::KeymapDocument,
+    keymap::KeymapDocument,
 };
 use serde_json;
 
@@ -153,15 +154,17 @@ impl UserData for LayoutApi {
         );
 
         methods.add_method("save_dtsi", |_, this, path: String| {
-            let document = this.layout.borrow().document().document().clone();
-            document
-                .write_to_file(&path)
+            let keymap = this.layout.borrow().document().clone();
+            let rendered = serialize_keymap(keymap)
+                .map_err(|err| script_error(format!("failed to render DTS: {err}")))?;
+            fs::write(&path, rendered)
                 .map_err(|err| script_error(format!("failed to write {path}: {err}")))
         });
         methods.add_method("save_dts", |_, this, path: String| {
-            let document = this.layout.borrow().document().document().clone();
-            document
-                .write_to_file(&path)
+            let keymap = this.layout.borrow().document().clone();
+            let rendered = serialize_keymap(keymap)
+                .map_err(|err| script_error(format!("failed to render DTS: {err}")))?;
+            fs::write(&path, rendered)
                 .map_err(|err| script_error(format!("failed to write {path}: {err}")))
         });
 
@@ -169,10 +172,9 @@ impl UserData for LayoutApi {
             "save_json",
             |_, this, (path, template_path): (String, Option<String>)| {
                 let document = this.layout.borrow();
-                let doc = document.document().document().clone();
+                let keymap = document.document().clone();
                 if let Some(template_path) = template_path {
-                    let rendered = doc
-                        .to_string()
+                    let rendered = serialize_keymap(keymap.clone())
                         .map_err(|err| script_error(format!("failed to render DTS: {err}")))?;
                     let template = fs::read_to_string(&template_path).map_err(|err| {
                         script_error(format!("failed to read {template_path}: {err}"))
@@ -185,11 +187,16 @@ impl UserData for LayoutApi {
                     .map_err(|err| script_error(format!("failed to export JSON: {err}")))?;
                     fs::write(&path, json)
                         .map_err(|err| script_error(format!("failed to write {path}: {err}")))?;
+                    Ok(())
                 } else {
-                    export_standard_file(&doc, &path)
-                        .map_err(|err| script_error(format!("failed to export {path}: {err}")))?;
+                    let adapter: AdapterLayout = keymap.into();
+                    let json = adapter
+                        .to_standard_json()
+                        .map_err(|err| script_error(format!("failed to export JSON: {err}")))?;
+                    fs::write(&path, json)
+                        .map_err(|err| script_error(format!("failed to write {path}: {err}")))?;
+                    Ok(())
                 }
-                Ok(())
             },
         );
 
@@ -215,9 +222,8 @@ impl UserData for LayoutApi {
         );
 
         methods.add_method("to_dts_string", |_, this, ()| {
-            let document = this.layout.borrow().document().document().clone();
-            document
-                .to_string()
+            let keymap = this.layout.borrow().document().clone();
+            serialize_keymap(keymap)
                 .map_err(|err| script_error(format!("failed to serialize DTS: {err}")))
         });
 
@@ -225,11 +231,10 @@ impl UserData for LayoutApi {
             "to_json_string",
             |_, this, template_path: Option<String>| {
                 let document = this.layout.borrow();
-                let doc = document.document().document().clone();
+                let keymap = document.document().clone();
+                let rendered = serialize_keymap(keymap.clone())
+                    .map_err(|err| script_error(format!("failed to render DTS: {err}")))?;
                 if let Some(template_path) = template_path {
-                    let rendered = doc
-                        .to_string()
-                        .map_err(|err| script_error(format!("failed to render DTS: {err}")))?;
                     let template = fs::read_to_string(&template_path).map_err(|err| {
                         script_error(format!("failed to read {template_path}: {err}"))
                     })?;
@@ -240,7 +245,9 @@ impl UserData for LayoutApi {
                     )
                     .map_err(|err| script_error(format!("failed to export JSON: {err}")))
                 } else {
-                    export_standard_str(&doc)
+                    let adapter: AdapterLayout = keymap.into();
+                    adapter
+                        .to_standard_json()
                         .map_err(|err| script_error(format!("failed to export JSON: {err}")))
                 }
             },
@@ -421,7 +428,10 @@ fn build_request_from_table(
         req = req.layout_files(keymap_path, extra);
         layout_kind = Some("keymap".to_string());
     } else if use_current {
-        let doc = layout.borrow().document().document().clone();
+        let rendered = serialize_keymap(layout.borrow().document().clone())
+            .map_err(|err| script_error(format!("failed to render current layout: {err}")))?;
+        let doc = DtsDocument::parse_str(&rendered)
+            .map_err(|err| script_error(format!("failed to parse rendered layout: {err}")))?;
         req = req.layout_document(doc);
         layout_kind = Some("current_layout".to_string());
     }

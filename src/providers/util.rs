@@ -127,6 +127,25 @@ pub fn apply_combo_conditions(node: &mut DtNode, conditions: &[String]) {
         }));
 }
 
+pub fn combo_condition_comments(comments: &[DtComment]) -> Vec<String> {
+    comments
+        .iter()
+        .filter_map(|comment| {
+            let text = comment.text.trim();
+            if let Some(stripped) = text.strip_prefix(COMBO_CONDITION_COMMENT_PREFIX) {
+                let trimmed = stripped.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 pub fn is_behavior_root(node: &DtNode) -> bool {
     node.name == "behaviors" || node.name == "macros"
 }

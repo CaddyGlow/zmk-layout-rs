@@ -6,9 +6,11 @@ use std::{
 use thiserror::Error;
 
 use crate::{
+    adapters::standard::AdapterLayout,
     dts::DtsDocument,
+    adapters::AdapterError,
+    keymap::KeymapDocument,
     layout_handle::{LayoutHandle, LayoutOrigin},
-    providers::KeymapDocument,
     serialization::SerializeError,
     tasks::TaskFile,
     tokenizer::LayoutError,
@@ -49,6 +51,8 @@ pub enum IoError {
     },
     #[error("failed to serialize layout: {0}")]
     SerializeLayout(#[from] SerializeError),
+    #[error("adapter error: {0}")]
+    Adapter(#[from] AdapterError),
     #[cfg(feature = "ancpp-preprocessor")]
     #[error("failed to preprocess layout {path}: {source}")]
     PreprocessLayout { path: PathBuf, source: AncppError },
@@ -74,15 +78,14 @@ pub fn load_layout(path: impl AsRef<Path>) -> Result<LoadedLayout, IoError> {
         path: path.clone(),
         source,
     })?;
+    let adapter = AdapterLayout::from_document(&document);
+    let keymap = KeymapDocument::from(adapter);
     Ok(LayoutHandle {
         source_path: Some(path),
         raw_text: Some(text),
         preprocessed_text: None,
-        document,
-        adapter_layout: None,
+        keymap,
         profile: None,
-        template_source: None,
-        template_mode: Default::default(),
         origin: LayoutOrigin::DtsFile,
     })
 }
@@ -99,28 +102,28 @@ pub fn load_layout_preprocessed(
         path: path.clone(),
         source,
     })?;
-    let document =
-        DtsDocument::parse_str(&output.expanded).map_err(|source| IoError::ParseLayout {
-            path: path.clone(),
-            source,
-        })?;
+    let document = DtsDocument::parse_str(&output.expanded).map_err(|source| IoError::ParseLayout {
+        path: path.clone(),
+        source,
+    })?;
+    let adapter = AdapterLayout::from_document(&document);
+    let keymap = KeymapDocument::from(adapter);
     Ok(LayoutHandle {
         source_path: Some(path),
         raw_text: Some(raw_text),
         preprocessed_text: Some(output.expanded),
-        document,
-        adapter_layout: None,
+        keymap,
         profile: None,
-        template_source: None,
-        template_mode: Default::default(),
         origin: LayoutOrigin::DtsFile,
     })
 }
 
 /// Serialize a keymap back to text.
 pub fn serialize_keymap(document: KeymapDocument) -> Result<String, IoError> {
-    let dts = document.into_document();
-    dts.to_string().map_err(IoError::SerializeLayout)
+    let adapter: AdapterLayout = document.into();
+    let base = minimal_dts_document();
+    let updated = adapter.apply_to_document(base).map_err(AdapterError::from)?;
+    Ok(updated.to_string()?)
 }
 
 /// Load and parse a task file from disk.
@@ -153,6 +156,64 @@ pub fn render_diff(base: &str, updated: &str, base_path: impl AsRef<Path>) -> St
         }
     }
     output
+}
+
+fn minimal_dts_document() -> DtsDocument {
+    use crate::ast::{DtItem, DtNode, DtProperty, DtValue};
+    use crate::tokenizer::TokenSpan;
+    let empty_span = || TokenSpan::new(0, 0, 1, 1, 1, 1);
+    let keymap = DtNode {
+        name: "keymap".to_string(),
+        raw_name: String::new(),
+        span: empty_span(),
+        properties: vec![DtProperty {
+            name: "compatible".to_string(),
+            raw_name: String::new(),
+            value: DtValue {
+                raw: "\"zmk,keymap\"".to_string(),
+                span: empty_span(),
+            },
+            span: empty_span(),
+            leading_comments: Vec::new(),
+            trailing_comment: None,
+        }],
+        children: Vec::new(),
+        leading_comments: Vec::new(),
+        trailing_comments: Vec::new(),
+    };
+    let behaviors = DtNode {
+        name: "behaviors".to_string(),
+        raw_name: String::new(),
+        span: empty_span(),
+        properties: Vec::new(),
+        children: Vec::new(),
+        leading_comments: Vec::new(),
+        trailing_comments: Vec::new(),
+    };
+    let macros = DtNode {
+        name: "macros".to_string(),
+        raw_name: String::new(),
+        span: empty_span(),
+        properties: Vec::new(),
+        children: Vec::new(),
+        leading_comments: Vec::new(),
+        trailing_comments: Vec::new(),
+    };
+    let combos = DtNode {
+        name: "combos".to_string(),
+        raw_name: String::new(),
+        span: empty_span(),
+        properties: Vec::new(),
+        children: Vec::new(),
+        leading_comments: Vec::new(),
+        trailing_comments: Vec::new(),
+    };
+    DtsDocument::from_items(vec![
+        DtItem::Node(behaviors),
+        DtItem::Node(macros),
+        DtItem::Node(combos),
+        DtItem::Node(keymap),
+    ])
 }
 
 #[cfg(test)]

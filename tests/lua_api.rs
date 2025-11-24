@@ -6,12 +6,14 @@ use tempfile::tempdir;
 
 use zmk_layout_rs::{
     adapters::standard::export_standard_str, dts::DtsDocument, layout_engine::LayoutEngine,
-    lua_api::api::install_layout_api, providers::KeymapDocument,
+    lua_api::api::install_layout_api, keymap::KeymapDocument,
 };
 
 fn make_engine() -> LayoutEngine {
-    let doc = KeymapDocument::parse_str(include_str!("fixtures/sample_keymap.dtsi")).unwrap();
-    LayoutEngine::new(doc)
+    let dts =
+        DtsDocument::parse_str(include_str!("fixtures/sample_keymap.dtsi")).expect("parse dts");
+    let adapter = zmk_layout_rs::adapters::standard::AdapterLayout::from_document(&dts);
+    LayoutEngine::new(KeymapDocument::from(adapter))
 }
 
 fn make_engine_from_str(source: &str) -> LayoutEngine {

@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use mlua::{Result as LuaResult, UserData, UserDataMethods};
 
+use crate::adapters::{BehaviorSpec, ComboSpec};
 use crate::layout_engine::LayoutEngine;
-use crate::providers::{BehaviorDefinition, ComboDefinition};
 
 use super::util::create_read_only_table;
 
@@ -26,7 +26,7 @@ pub struct ComboInfoObject {
 pub struct BehaviorInfoObject {
     name: String,
     bindings: Vec<String>,
-    properties: BTreeMap<String, Option<String>>,
+    properties: BTreeMap<String, String>,
 }
 
 impl LayerInfoObject {
@@ -64,11 +64,8 @@ impl UserData for LayerInfoObject {
 }
 
 impl ComboInfoObject {
-    pub fn from_definition(def: ComboDefinition) -> Self {
-        let binding = def
-            .bindings
-            .get(0)
-            .map(|binding| binding.to_binding_string());
+    pub fn from_definition(def: ComboSpec) -> Self {
+        let binding = def.binding.clone();
         Self {
             name: def.name,
             keys: def.key_positions,
@@ -94,11 +91,8 @@ impl UserData for ComboInfoObject {
 }
 
 impl BehaviorInfoObject {
-    pub fn from_definition(def: BehaviorDefinition) -> Self {
-        let mut properties = BTreeMap::new();
-        for prop in def.properties {
-            properties.insert(prop.name, prop.raw_value);
-        }
+    pub fn from_definition(def: BehaviorSpec) -> Self {
+        let properties = def.properties.clone();
         Self {
             name: def.name,
             bindings: def.bindings,
@@ -117,16 +111,16 @@ impl UserData for BehaviorInfoObject {
             create_read_only_table(lua, table)
         });
         methods.add_method("get", |_, this, key: String| {
-            Ok(this.properties.get(&key).cloned().flatten())
+            Ok(this.properties.get(&key).cloned())
         });
         methods.add_method("name", |_, this, ()| Ok(this.name.clone()));
     }
 }
 
-pub fn list_combo_definitions(engine: &LayoutEngine) -> Vec<ComboDefinition> {
-    engine.document().combos()
+pub fn list_combo_definitions(engine: &LayoutEngine) -> Vec<ComboSpec> {
+    engine.document().combos.clone()
 }
 
-pub fn list_behavior_definitions(engine: &LayoutEngine) -> Vec<BehaviorDefinition> {
-    engine.document().behaviors()
+pub fn list_behavior_definitions(engine: &LayoutEngine) -> Vec<BehaviorSpec> {
+    engine.document().behaviors.clone()
 }

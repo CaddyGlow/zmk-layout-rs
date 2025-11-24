@@ -6,7 +6,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     layout_engine::{LayoutEngine, LayoutEngineError},
-    providers::KeymapDocument,
+    keymap::KeymapDocument,
     tasks::{
         config::{
             BehaviorTask, ComboTask, ConflictPolicy, LayerOrderMovement, LayerOrderTask, LayerTask,

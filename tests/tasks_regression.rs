@@ -1,6 +1,7 @@
 use zmk_layout_rs::{
+    adapters::standard::AdapterLayout,
     dts::DtsDocument,
-    providers::KeymapDocument,
+    keymap::KeymapDocument,
     tasks::{TaskFile, TaskStatus, apply_tasks},
 };
 
@@ -21,80 +22,37 @@ fn regression_config_applies_all_tasks() {
             .all(|result| matches!(result.status, TaskStatus::Applied))
     );
 
-    let doc = execution.document.document();
-    let base_layer = doc
-        .items
+    let layers = &execution.document.layers;
+    let base_layer = layers
         .iter()
-        .find_map(|item| match item {
-            zmk_layout_rs::ast::DtItem::Node(node) if node.name == "keymap" => Some(node),
-            _ => None,
-        })
-        .expect("keymap node");
-
-    // base layer should now start with &kp ESC
-    let base_node = base_layer
-        .children
-        .iter()
-        .find_map(|item| match item {
-            zmk_layout_rs::ast::DtItem::Node(node) if node.name == "base" => Some(node),
-            _ => None,
-        })
-        .expect("base node");
-    let base_bindings = base_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "bindings")
-        .expect("base bindings");
-    assert!(base_bindings.value.raw.contains("&kp ESC"));
-
-    // confirm nav bindings replaced
-    let nav_node = base_layer
-        .children
-        .iter()
-        .find_map(|item| match item {
-            zmk_layout_rs::ast::DtItem::Node(node) if node.name == "nav" => Some(node),
-            _ => None,
-        })
-        .expect("nav node");
-    let nav_bindings = nav_node
-        .properties
-        .iter()
-        .find(|prop| prop.name == "bindings")
-        .expect("nav bindings");
-    assert!(nav_bindings.value.raw.contains("&kp LEFT"));
-
-    // combo added
-    let combos_root = doc
-        .items
-        .iter()
-        .find_map(|item| match item {
-            zmk_layout_rs::ast::DtItem::Node(node) if node.name == "combos" => Some(node),
-            _ => None,
-        })
-        .expect("combos node");
-    assert!(combos_root.children.iter().any(
-        |item| matches!(item, zmk_layout_rs::ast::DtItem::Node(node) if node.name == "combo_enter")
-    ));
-
-    // nav layer moved before num
-    let order: Vec<String> = base_layer
-        .children
-        .iter()
-        .filter_map(|item| match item {
-            zmk_layout_rs::ast::DtItem::Node(node)
-                if node.properties.iter().any(|prop| prop.name == "bindings") =>
-            {
-                Some(node.name.clone())
-            }
-            _ => None,
-        })
-        .collect();
-    let expected = vec!["base".to_string(), "nav".to_string(), "num".to_string()];
-    assert_eq!(
-        order
-            .into_iter()
-            .filter(|name| name == "base" || name == "nav" || name == "num")
-            .collect::<Vec<_>>(),
-        expected
+        .find(|layer| layer.name == "base")
+        .expect("base layer");
+    assert!(
+        base_layer.bindings.iter().any(|b| b.contains("&kp ESC")),
+        "base bindings should contain ESC: {:?}",
+        base_layer.bindings
     );
+
+    let nav_layer = layers
+        .iter()
+        .find(|layer| layer.name == "nav")
+        .expect("nav layer");
+    assert!(
+        nav_layer.bindings.iter().any(|b| b.contains("&kp LEFT")),
+        "nav bindings should contain LEFT: {:?}",
+        nav_layer.bindings
+    );
+
+    assert!(
+        execution
+            .document
+            .combos
+            .iter()
+            .any(|combo| combo.name == "combo_enter"),
+        "combo_enter should exist"
+    );
+
+    let expected = vec!["base".to_string(), "nav".to_string(), "num".to_string()];
+    let order: Vec<String> = layers.iter().map(|layer| layer.name.clone()).collect();
+    assert_eq!(order, expected);
 }
