@@ -58,8 +58,6 @@ pub enum CliError {
     Flash(#[from] FlashError),
     #[error("adapter error: {0}")]
     Adapter(#[from] AdapterError),
-    #[error("bundle error: {0}")]
-    Bundle(#[from] crate::adapters::bundle::BundleError),
     #[error("invalid arguments: {0}")]
     InvalidArgument(String),
     #[cfg(feature = "ancpp-preprocessor")]

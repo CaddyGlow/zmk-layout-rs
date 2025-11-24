@@ -4,7 +4,7 @@ This document summarizes the main modules and how they fit together for contribu
 
 - `src/cli/`
   - `app.rs` defines the clap surface.
-  - `commands/*` hold thin handlers that wire arguments to library calls (tasks, script, layer, bundle, firmware, profiles).
+  - `commands/*` hold thin handlers that wire arguments to library calls (tasks, script, layer, firmware, profiles).
   - `context.rs` and `error.rs` centralize shared prep/printing logic; `preprocess.rs` is feature-gated behind `ancpp-preprocessor`.
 - `src/io/`
   - Small helpers for reading/writing text, loading layouts/task files (with optional preprocessing), serializing keymaps, and rendering unified diffs.
@@ -22,7 +22,6 @@ This document summarizes the main modules and how they fit together for contribu
 - `src/adapters/`
   - `standard/` exposes the JSON <-> Devicetree adapter, template renderers, and property-order helpers.
   - `pipeline.rs` offers a unified loader for JSON/DTS inputs with optional template capture.
-  - `bundle.rs` models layout bundles and rendering across targets; MoErgo-specific pieces live under `moergo/`.
 - `src/build/`
   - Builder/toolchain/workspace layers for firmware builds plus layout staging in `layout.rs`.
   - `BuildRequest` supports multiple layout sources, including adapter pipelines and DTS documents.

@@ -1,4 +1,3 @@
-mod bundle;
 mod firmware;
 mod layer;
 mod profiles;
@@ -6,7 +5,7 @@ mod script;
 mod tasks;
 
 use crate::cli::{
-    app::{BundleCommand, Command, FirmwareCommand, LayerCommand, ProfilesCommand},
+    app::{Command, FirmwareCommand, LayerCommand, ProfilesCommand},
     error::CliError,
 };
 
@@ -21,7 +20,6 @@ pub fn dispatch(cli: Cli) -> Result<i32, CliError> {
         Command::Firmware(cmd) => run_firmware(cmd),
         Command::Profiles(cmd) => run_profiles(cmd),
         Command::Layer(cmd) => run_layer(cmd),
-        Command::Bundle(cmd) => run_bundle(cmd),
     }
 }
 
@@ -43,13 +41,5 @@ fn run_layer(command: LayerCommand) -> Result<i32, CliError> {
     match command {
         LayerCommand::Export(args) => layer::export(&args),
         LayerCommand::Import(args) => layer::import(&args),
-    }
-}
-
-fn run_bundle(command: BundleCommand) -> Result<i32, CliError> {
-    match command {
-        BundleCommand::Import(args) => bundle::import(&args),
-        BundleCommand::Export(args) => bundle::export(&args),
-        BundleCommand::Render(args) => bundle::render(&args),
     }
 }

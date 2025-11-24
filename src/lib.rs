@@ -11,6 +11,7 @@ pub mod build;
 pub mod cli;
 pub mod dts;
 pub mod flash;
+pub mod keymap;
 pub mod io;
 pub mod layout_engine;
 pub mod layout_handle;

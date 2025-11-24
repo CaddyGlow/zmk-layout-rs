@@ -226,7 +226,6 @@ Build with `--features ancpp-preprocessor` to enable C-preprocessing before pars
 - Tasks/Script: `zmk-layout apply/validate/diff` and `zmk-layout script` accept the flags and preprocess `--base-layout` / `--layout` first.
 - Layer export: `zmk-layout layer export --preprocess ... --dts config/keymap.dts --json layout.json` expands macros before exporting JSON.
 - Firmware build: `zmk-layout firmware build --preprocess ... --layout-dts config/keymap.dts ...` preprocesses the DTS before feeding the build pipeline.
-- Bundle commands operate on JSON bundles and don’t need preprocessing; preprocess when generating the bundle upstream if your source DTS relies on macros.
 
 The ancpp crate is MPL-2.0 with additional terms; keep it feature-gated if your project requires MIT/Apache-only dependencies.
 

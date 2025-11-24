@@ -1,7 +1,6 @@
 //! Adapter-facing helpers that translate between structured layout data and
 //! the DTS providers.
 
-pub mod bundle;
 pub mod moergo;
 pub mod pipeline;
 pub mod standard;

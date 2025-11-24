@@ -61,8 +61,6 @@ pub enum Command {
     Profiles(ProfilesCommand),
     #[command(subcommand)]
     Layer(LayerCommand),
-    #[command(subcommand)]
-    Bundle(BundleCommand),
 }
 
 #[derive(Args, Clone)]
@@ -158,54 +156,6 @@ pub enum ProfilesCommand {
 pub enum LayerCommand {
     Export(LayerExportArgs),
     Import(LayerImportArgs),
-}
-
-#[derive(Subcommand)]
-pub enum BundleCommand {
-    Import(BundleImportArgs),
-    Export(BundleExportArgs),
-    Render(BundleRenderArgs),
-}
-
-#[derive(Args, Clone)]
-pub struct BundleImportArgs {
-    #[arg(value_enum, long, default_value_t = BundleFormat::Moergo, help = "Source layout format")]
-    pub format: BundleFormat,
-    #[arg(long, value_name = "FILE", help = "Input layout file")]
-    pub input: PathBuf,
-    #[arg(long, value_name = "FILE", help = "Destination bundle JSON")]
-    pub output: PathBuf,
-}
-
-#[derive(Args, Clone)]
-pub struct BundleExportArgs {
-    #[arg(value_enum, long, default_value_t = BundleFormat::Moergo, help = "Export layout format")]
-    pub format: BundleFormat,
-    #[arg(long, value_name = "FILE", help = "Layout bundle JSON")]
-    pub bundle: PathBuf,
-    #[arg(long, value_name = "FILE", help = "Destination file to write")]
-    pub output: PathBuf,
-}
-
-#[derive(Args, Clone)]
-pub struct BundleRenderArgs {
-    #[arg(long, value_name = "FILE", help = "Layout bundle JSON")]
-    pub bundle: PathBuf,
-    #[arg(long, value_name = "TARGET", help = "Target id inside the bundle")]
-    pub target: String,
-    #[arg(long, value_name = "FILE", help = "Override template path")]
-    pub template: Option<PathBuf>,
-    #[arg(
-        long,
-        value_name = "FILE",
-        help = "Write rendered DTS to this file; prints to stdout when omitted"
-    )]
-    pub output: Option<PathBuf>,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
-pub enum BundleFormat {
-    Moergo,
 }
 
 #[derive(Args, Clone)]

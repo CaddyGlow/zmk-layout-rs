@@ -359,63 +359,6 @@ fn cli_script_output_writes_expected_layout() {
 }
 
 #[test]
-fn cli_bundle_import_render_export_match_snapshots() {
-    let dir = tempdir().expect("tempdir");
-    let bundle_path = dir.path().join("bundle.json");
-    let render_path = dir.path().join("render.dts");
-    let export_path = dir.path().join("moergo.json");
-
-    let mut import_cmd = cargo_bin_cmd!("zmk-layout");
-    import_cmd
-        .arg("bundle")
-        .arg("import")
-        .arg("--input")
-        .arg("examples/moergo_factory.json")
-        .arg("--output")
-        .arg(&bundle_path);
-    import_cmd.assert().success();
-
-    let imported = fs::read_to_string(&bundle_path).expect("read imported bundle");
-    let expected_bundle =
-        fs::read_to_string(fixture("cli_bundle_import.json")).expect("bundle fixture");
-    assert_eq!(imported, expected_bundle, "bundle import snapshot");
-
-    let mut render_cmd = cargo_bin_cmd!("zmk-layout");
-    render_cmd
-        .arg("bundle")
-        .arg("render")
-        .arg("--bundle")
-        .arg(&bundle_path)
-        .arg("--target")
-        .arg("moergo")
-        .arg("--output")
-        .arg(&render_path);
-    render_cmd.assert().success();
-
-    let rendered = fs::read_to_string(&render_path).expect("read rendered bundle");
-    let expected_render =
-        fs::read_to_string(fixture("cli_bundle_render.dts")).expect("render fixture");
-    assert_eq!(rendered, expected_render, "bundle render snapshot");
-
-    let mut export_cmd = cargo_bin_cmd!("zmk-layout");
-    export_cmd
-        .arg("bundle")
-        .arg("export")
-        .arg("--bundle")
-        .arg(&bundle_path)
-        .arg("--format")
-        .arg("moergo")
-        .arg("--output")
-        .arg(&export_path);
-    export_cmd.assert().success();
-
-    let exported = fs::read_to_string(&export_path).expect("read exported moergo json");
-    let expected_export =
-        fs::read_to_string(fixture("cli_bundle_export.json")).expect("export fixture");
-    assert_eq!(exported, expected_export, "bundle export snapshot");
-}
-
-#[test]
 fn cli_firmware_devices_respects_query() {
     let mut cmd = cargo_bin_cmd!("zmk-layout");
     cmd.arg("firmware")
