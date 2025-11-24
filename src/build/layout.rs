@@ -2,10 +2,7 @@ use std::{fs, io::Write, path::PathBuf};
 
 use serde_json::Value as JsonValue;
 
-use crate::{
-    adapters::AdapterPipeline,
-    dts::DtsDocument,
-};
+use crate::{adapters::AdapterPipeline, dts::DtsDocument};
 
 use super::{error::BuildError, request::LayoutSource, workspace::WorkspaceHandle};
 

@@ -9,7 +9,9 @@ use super::{
     behavior::BehaviorObject,
     combo::ComboObject,
     macro_builder::MacroObject,
-    util::{SharedLayout, create_read_only_table, require_positive_index, script_error},
+    util::{
+        SharedLayout, create_read_only_table, ensure_staged, require_positive_index, script_error,
+    },
 };
 
 #[derive(Clone)]
@@ -34,6 +36,10 @@ impl LayerBuilder {
         }
     }
 
+    fn ensure_staged(&self) -> LuaResult<()> {
+        ensure_staged(&self.applied, &format!("layer '{}'", self.name))
+    }
+
     fn coerce_binding(&self, _: &Lua, value: LuaValue) -> LuaResult<String> {
         match value {
             LuaValue::String(s) => Ok(s.to_str()?.to_string()),
@@ -45,7 +51,7 @@ impl LayerBuilder {
                     return mac.as_binding_string();
                 }
                 if let Ok(behavior) = data.borrow::<BehaviorObject>() {
-                    return Ok(behavior.as_binding_string());
+                    return behavior.as_binding_string();
                 }
                 Err(script_error("unsupported binding object type"))
             }
@@ -57,11 +63,7 @@ impl LayerBuilder {
     }
 
     fn apply_internal(&self) -> LuaResult<()> {
-        if self.applied.get() {
-            return Err(script_error(
-                "layer already applied; re-acquire builder to edit",
-            ));
-        }
+        self.ensure_staged()?;
 
         let mut engine = self.layout.borrow_mut();
 
@@ -122,6 +124,7 @@ impl LayerBuilder {
 impl UserData for LayerBuilder {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("bind", |lua, this, (index, binding): (i64, LuaValue)| {
+            this.ensure_staged()?;
             let normalized_index = require_positive_index(index, "binding")?;
             let binding_text = this.coerce_binding(lua, binding)?;
             this.replace_all.borrow_mut().take(); // switch to partial mode
@@ -132,6 +135,7 @@ impl UserData for LayerBuilder {
         });
 
         methods.add_method("bindings", |lua, this, table: LuaTable| {
+            this.ensure_staged()?;
             let mut result = Vec::new();
             for value in table.sequence_values::<LuaValue>() {
                 let value = value?;
@@ -144,6 +148,7 @@ impl UserData for LayerBuilder {
         });
 
         methods.add_method("meta", |_, this, (key, value): (String, LuaValue)| {
+            this.ensure_staged()?;
             let rendered = match value {
                 LuaValue::Boolean(flag) => flag.to_string(),
                 LuaValue::Integer(num) => num.to_string(),

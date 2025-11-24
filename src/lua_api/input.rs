@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 
 use mlua::{Result as LuaResult, UserData, UserDataMethods};
 
-use super::util::{SharedLayout, script_error};
+use super::util::{SharedLayout, ensure_staged, script_error};
 
 #[derive(Clone)]
 pub struct InputObject {
@@ -32,30 +32,36 @@ impl InputObject {
     }
 
     fn apply_internal(&self) -> LuaResult<()> {
-        if self.applied.get() {
-            return Ok(());
-        }
+        self.ensure_staged()?;
         // No-op placeholder until encoder/sensor plumbing exists.
         self.applied.set(true);
         Ok(())
+    }
+
+    fn ensure_staged(&self) -> LuaResult<()> {
+        ensure_staged(&self.applied, &format!("input '{}'", self.name))
     }
 }
 
 impl UserData for InputObject {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("type", |_, this, value: String| {
+            this.ensure_staged()?;
             this.input_type.borrow_mut().replace(value);
             Ok(this.clone())
         });
         methods.add_method("on_turn_cw", |_, this, binding: String| {
+            this.ensure_staged()?;
             this.cw.borrow_mut().replace(binding);
             Ok(this.clone())
         });
         methods.add_method("on_turn_ccw", |_, this, binding: String| {
+            this.ensure_staged()?;
             this.ccw.borrow_mut().replace(binding);
             Ok(this.clone())
         });
         methods.add_method("on_press", |_, this, binding: String| {
+            this.ensure_staged()?;
             this.press.borrow_mut().replace(binding);
             Ok(this.clone())
         });
@@ -63,6 +69,7 @@ impl UserData for InputObject {
             if value < 0 {
                 return Err(script_error("resolution must be non-negative"));
             }
+            this.ensure_staged()?;
             this.resolution.borrow_mut().replace(value);
             Ok(this.clone())
         });

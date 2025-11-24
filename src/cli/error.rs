@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::preprocessor::AncppError;
 use crate::{
     adapters::AdapterError,
     build::{BuildError, BuildRequestError, ManifestError},
@@ -10,8 +12,6 @@ use crate::{
     serialization::SerializeError,
     tasks::{ScriptExecutionError, TaskConfigError},
 };
-#[cfg(feature = "ancpp-preprocessor")]
-use crate::preprocessor::AncppError;
 
 #[derive(Debug, Error)]
 pub enum CliError {
@@ -74,7 +74,9 @@ impl From<IoError> for CliError {
             IoError::ParseTaskFile { source, .. } => CliError::TaskConfig(source),
             IoError::SerializeLayout(err) => CliError::Serialize(err),
             #[cfg(feature = "ancpp-preprocessor")]
-            IoError::PreprocessLayout { path, source } => CliError::PreprocessLayout { path, source },
+            IoError::PreprocessLayout { path, source } => {
+                CliError::PreprocessLayout { path, source }
+            }
         }
     }
 }

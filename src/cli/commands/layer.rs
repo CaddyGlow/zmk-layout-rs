@@ -1,8 +1,10 @@
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::cli::preprocess::build_config;
 use crate::{
     adapters::{
-        export_standard_str, import_standard_str_with_template,
+        AdapterError, export_standard_str, import_standard_str_with_template,
         moergo::export_standard_str_from_moergo_dtsi, pipeline::AdapterPipeline,
-        render_standard_template, template_contains_placeholders, AdapterError,
+        render_standard_template, template_contains_placeholders,
     },
     cli::{
         app::{LayerExportArgs, LayerImportArgs, VendorExtractionFlag},
@@ -11,8 +13,6 @@ use crate::{
     dts::DtsDocument,
     io,
 };
-#[cfg(feature = "ancpp-preprocessor")]
-use crate::cli::preprocess::build_config;
 
 pub fn export(args: &LayerExportArgs) -> Result<i32, CliError> {
     #[cfg(feature = "ancpp-preprocessor")]

@@ -4,7 +4,7 @@ use crate::{
     ast::{DtItem, DtNode, DtProperty, DtValue},
     bindings::BindingParser,
     dts::DtsDocument,
-    providers::{COMBO_CONDITION_COMMENT_PREFIX, KeymapDocument, ProviderError},
+    providers::{COMBO_CONDITION_COMMENT_PREFIX, ComboProvider, KeymapDocument, ProviderError},
     tokenizer::TokenSpan,
 };
 use std::collections::{BTreeMap, HashMap};
@@ -406,6 +406,24 @@ impl LayoutEngine {
             })
             .collect()
     }
+
+    pub fn combo_state(&self, name: &str) -> Option<ComboState> {
+        let def = ComboProvider::new(self.document.document())
+            .combos()
+            .into_iter()
+            .find(|combo| combo.name == name)?;
+        Some(ComboState {
+            name: def.name,
+            key_positions: def.key_positions,
+            timeout_ms: def.timeout_ms,
+            binding: def
+                .bindings
+                .get(0)
+                .map(|binding| binding.to_binding_string()),
+            layers: def.layers,
+            conditions: combo_conditions(self.document.document(), name),
+        })
+    }
 }
 
 /// Information about a layer in the keymap.
@@ -419,6 +437,17 @@ pub struct LayerInfo {
     pub binding_count: usize,
     /// The actual bindings
     pub bindings: Vec<String>,
+}
+
+/// Snapshot of a combo definition with layout-resolved metadata.
+#[derive(Debug, Clone)]
+pub struct ComboState {
+    pub name: String,
+    pub key_positions: Vec<u32>,
+    pub timeout_ms: Option<u32>,
+    pub binding: Option<String>,
+    pub layers: Vec<u32>,
+    pub conditions: Vec<String>,
 }
 
 fn layer_to_string(document: &DtsDocument, layer: &str) -> Option<String> {
@@ -489,6 +518,13 @@ fn layer_order_to_string(document: &DtsDocument) -> String {
     } else {
         String::new()
     }
+}
+
+fn combo_conditions(document: &DtsDocument, combo: &str) -> Vec<String> {
+    find_layer_node(&document.items, "combos")
+        .and_then(|combos| find_child_node(combos, combo))
+        .map(combo_condition_comments)
+        .unwrap_or_default()
 }
 
 fn combo_condition_comments(node: &DtNode) -> Vec<String> {

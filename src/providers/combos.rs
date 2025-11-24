@@ -5,9 +5,9 @@ use crate::{
 };
 
 use super::{
-    format::{parse_binding_groups, parse_numeric_list, parse_numeric_value},
-    util::{apply_combo_conditions, find_layer_node_mut, find_child_node_mut, ensure_property},
     ProviderError,
+    format::{parse_binding_groups, parse_numeric_list, parse_numeric_value},
+    util::{apply_combo_conditions, ensure_property, find_child_node_mut, find_layer_node_mut},
 };
 
 /// Provider that enumerates combos and exposes their metadata.
@@ -230,8 +230,8 @@ pub fn combo_node_mut<'a>(
     document_items: &'a mut [DtItem],
     combo: &str,
 ) -> Result<&'a mut DtNode, ProviderError> {
-    let combos_root = find_layer_node_mut(document_items, "combos")
-        .ok_or(ProviderError::CombosMissing)?;
+    let combos_root =
+        find_layer_node_mut(document_items, "combos").ok_or(ProviderError::CombosMissing)?;
     find_child_node_mut(combos_root, combo)
         .ok_or_else(|| ProviderError::ComboNotFound(combo.to_string()))
 }
@@ -303,7 +303,8 @@ pub fn apply_combo_metadata(
                     _ => unreachable!(),
                 }
             } else {
-                node.children.push(DtItem::Node(super::util::empty_node(combo)));
+                node.children
+                    .push(DtItem::Node(super::util::empty_node(combo)));
                 match node.children.last_mut() {
                     Some(DtItem::Node(child)) => child,
                     _ => unreachable!(),
@@ -324,7 +325,9 @@ pub fn apply_combo_metadata(
         let timeout_prop = ensure_property(combo_node, "timeout-ms");
         timeout_prop.value.raw = super::format::format_u32_list(&[value]);
     } else {
-        combo_node.properties.retain(|prop| prop.name != "timeout-ms");
+        combo_node
+            .properties
+            .retain(|prop| prop.name != "timeout-ms");
     }
 
     if layers.is_empty() {

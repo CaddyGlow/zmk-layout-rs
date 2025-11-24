@@ -13,6 +13,11 @@ fn make_engine() -> LayoutEngine {
     LayoutEngine::new(doc)
 }
 
+fn make_engine_from_str(source: &str) -> LayoutEngine {
+    let doc = KeymapDocument::parse_str(source).unwrap();
+    LayoutEngine::new(doc)
+}
+
 fn with_lua<F>(engine: Rc<RefCell<LayoutEngine>>, f: F)
 where
     F: FnOnce(&Lua) -> (),
@@ -219,4 +224,92 @@ keymap {
         saved.contains("&kp B"),
         "expected saved JSON to include updated binding"
     );
+}
+
+#[test]
+fn combo_edits_preserve_existing_fields() {
+    let source = r#"
+keymap {
+    compatible = "zmk,keymap";
+    default_layer {
+        bindings = < &kp A &kp B >;
+    };
+    layer_1 {
+        bindings = < &kp C &kp D >;
+    };
+};
+
+combos {
+    // zmk-task:condition COND_ACTIVE
+    esc_combo {
+        key-positions = <0 1>;
+        bindings = <&kp ESC>;
+        timeout-ms = <50>;
+        layers = <1>;
+    };
+};
+"#;
+
+    let engine = Rc::new(RefCell::new(make_engine_from_str(source)));
+    with_lua(Rc::clone(&engine), |lua| {
+        lua.load(
+            r#"
+            layout:combo("esc_combo")
+                :timeout(100)
+                :apply()
+            "#,
+        )
+        .exec()
+        .unwrap();
+    });
+
+    let (def, combo_text) = {
+        let engine_ref = engine.borrow();
+        let mut combos = engine_ref.document().combos().into_iter();
+        let def = combos
+            .find(|combo| combo.name == "esc_combo")
+            .expect("combo is present");
+        let combo_text = engine_ref.combo_to_string("esc_combo").unwrap();
+        (def, combo_text)
+    };
+
+    assert_eq!(def.key_positions, vec![0, 1], "keys preserved after edit");
+    assert_eq!(def.timeout_ms, Some(100), "timeout updated");
+    assert_eq!(def.layers, vec![1], "layers preserved");
+    assert_eq!(
+        def.bindings
+            .get(0)
+            .expect("binding exists")
+            .to_binding_string(),
+        "&kp ESC",
+        "binding preserved"
+    );
+    assert!(
+        combo_text.contains("conditions=COND_ACTIVE"),
+        "conditions preserved: {combo_text}"
+    );
+}
+
+#[test]
+fn double_apply_throws_error() {
+    let engine = Rc::new(RefCell::new(make_engine()));
+    with_lua(Rc::clone(&engine), |lua| {
+        let err = lua
+            .load(
+                r#"
+                local combo = layout:combo("reapply")
+                    :keys({1})
+                    :binding("&kp A")
+                    :apply()
+                combo:apply()
+                "#,
+            )
+            .exec()
+            .unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("already applied"),
+            "expected double-apply error, got {message}"
+        );
+    });
 }

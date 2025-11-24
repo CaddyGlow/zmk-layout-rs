@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mlua::{Error as LuaError, Lua, Result as LuaResult, Table as LuaTable, Value as LuaValue};
@@ -10,6 +10,16 @@ pub type SharedLogs = Rc<RefCell<Vec<String>>>;
 
 pub fn script_error(message: impl Into<String>) -> LuaError {
     LuaError::RuntimeError(message.into())
+}
+
+pub fn ensure_staged(applied: &Cell<bool>, context: &str) -> LuaResult<()> {
+    if applied.get() {
+        Err(script_error(format!(
+            "{context} already applied; re-acquire builder to edit"
+        )))
+    } else {
+        Ok(())
+    }
 }
 
 pub fn require_positive_index(index: i64, context: &str) -> LuaResult<usize> {

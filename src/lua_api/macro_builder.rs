@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 
 use mlua::{Result as LuaResult, UserData, UserDataMethods, Value as LuaValue};
 
-use super::util::{SharedLayout, create_read_only_table, script_error};
+use super::util::{SharedLayout, create_read_only_table, ensure_staged, script_error};
 
 #[derive(Clone)]
 pub struct MacroObject {
@@ -23,52 +23,64 @@ impl MacroObject {
         }
     }
 
-    fn push_action(&self, action: String) {
+    fn push_action(&self, action: String) -> LuaResult<()> {
+        self.ensure_staged()?;
         self.actions.borrow_mut().push(action);
+        Ok(())
     }
 
     pub fn as_binding_string(&self) -> LuaResult<String> {
-        self.apply_internal()?;
+        self.ensure_applied()?;
         Ok(format!("&{}", self.name))
     }
 
     fn apply_internal(&self) -> LuaResult<()> {
-        if self.applied.get() {
-            return Ok(());
-        }
+        self.ensure_staged()?;
         // Macro application is a no-op for now; assumes underlying DTS already defines behavior.
         self.applied.set(true);
         Ok(())
+    }
+
+    fn ensure_staged(&self) -> LuaResult<()> {
+        ensure_staged(&self.applied, &format!("macro '{}'", self.name))
+    }
+
+    fn ensure_applied(&self) -> LuaResult<()> {
+        if self.applied.get() {
+            Ok(())
+        } else {
+            self.apply_internal()
+        }
     }
 }
 
 impl UserData for MacroObject {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("press", |_, this, keys: LuaValue| {
-            this.push_action(format!("press:{:?}", keys));
+            this.push_action(format!("press:{:?}", keys))?;
             Ok(this.clone())
         });
         methods.add_method("release", |_, this, keys: LuaValue| {
-            this.push_action(format!("release:{:?}", keys));
+            this.push_action(format!("release:{:?}", keys))?;
             Ok(this.clone())
         });
         methods.add_method("tap", |_, this, keys: LuaValue| {
-            this.push_action(format!("tap:{:?}", keys));
+            this.push_action(format!("tap:{:?}", keys))?;
             Ok(this.clone())
         });
         methods.add_method("wait", |_, this, ms: i64| {
             if ms < 0 {
                 return Err(script_error("wait duration must be non-negative"));
             }
-            this.push_action(format!("wait:{ms}"));
+            this.push_action(format!("wait:{ms}"))?;
             Ok(this.clone())
         });
         methods.add_method("wait_release", |_, this, ()| {
-            this.push_action("wait_release".into());
+            this.push_action("wait_release".into())?;
             Ok(this.clone())
         });
         methods.add_method("wait_tap", |_, this, ()| {
-            this.push_action("wait_tap".into());
+            this.push_action("wait_tap".into())?;
             Ok(this.clone())
         });
         methods.add_method("get_actions", |lua, this, ()| {

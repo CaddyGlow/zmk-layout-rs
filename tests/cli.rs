@@ -500,12 +500,10 @@ fn cli_firmware_flash_with_fake_backend() {
         .arg("--side")
         .arg("left");
 
-    cmd.assert()
-        .success()
-        .stderr(
-            predicates::str::contains("flashed left using")
-                .and(predicates::str::contains("GLV80-FAKE")),
-        );
+    cmd.assert().success().stderr(
+        predicates::str::contains("flashed left using")
+            .and(predicates::str::contains("GLV80-FAKE")),
+    );
     let copied = mount.join("firmware.uf2");
     assert!(copied.exists(), "artifact should be copied to mountpoint");
     let data = fs::read(&copied).expect("copied artifact");

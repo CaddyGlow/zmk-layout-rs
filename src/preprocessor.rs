@@ -1,16 +1,14 @@
 #![cfg(feature = "ancpp-preprocessor")]
 
-use std::{collections::HashMap, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use ancpp::{
-    PreprocessFileError,
-    FILE_NUMBER_SOURCE_FILE_BEGIN,
-    header_file_cache::HeaderFileCache,
-    native_file_provider::NativeFileProvider,
-    process_source_file,
-    prompt::Prompt,
-    token::Token,
-    TokenWithLocation,
+    FILE_NUMBER_SOURCE_FILE_BEGIN, PreprocessFileError, TokenWithLocation,
+    header_file_cache::HeaderFileCache, native_file_provider::NativeFileProvider,
+    process_source_file, prompt::Prompt, token::Token,
 };
 use thiserror::Error;
 
@@ -190,7 +188,10 @@ fn sanitize_non_directive_hashes(text: &str) -> String {
     // placeholder remains a valid identifier for ancpp's lexer.
     // This is a conservative line-based transform: if the first non-space character is `#`
     // and the token is not a known directive keyword, rewrite that leading `#` segment.
-    let directive_re = Regex::new(r"^(include|define|if|ifdef|ifndef|elif|else|endif|undef|pragma|error|warning|embed)(\s|$)").expect("regex");
+    let directive_re = Regex::new(
+        r"^(include|define|if|ifdef|ifndef|elif|else|endif|undef|pragma|error|warning|embed)(\s|$)",
+    )
+    .expect("regex");
     let mut output = String::with_capacity(text.len());
     for line in text.lines() {
         let trimmed = line.trim_start();
@@ -198,11 +199,7 @@ fn sanitize_non_directive_hashes(text: &str) -> String {
             let rest = trimmed[1..].trim_start();
             if !directive_re.is_match(rest) {
                 // Rewrite the first `#<token>` occurrence on the line.
-                let replaced = line.replacen(
-                    '#',
-                    "__ZMK_HASH__",
-                    1,
-                );
+                let replaced = line.replacen('#', "__ZMK_HASH__", 1);
                 let replaced = replaced.replace("-", "__ZMK_DASH__");
                 output.push_str(&replaced);
                 output.push('\n');
@@ -216,8 +213,7 @@ fn sanitize_non_directive_hashes(text: &str) -> String {
 }
 
 fn restore_non_directive_hashes(text: &str) -> String {
-    text
-        .replace("__ZMK_DASH__", "-")
+    text.replace("__ZMK_DASH__", "-")
         .replace("__ZMK_HASH__", "#")
 }
 
@@ -235,7 +231,8 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn preprocesses_macros_with_varargs_and_token_pasting() -> Result<(), Box<dyn std::error::Error>> {
+    fn preprocesses_macros_with_varargs_and_token_pasting() -> Result<(), Box<dyn std::error::Error>>
+    {
         let tmp = tempdir()?;
         let include_dir = tmp.path().join("include");
         let src_dir = tmp.path().join("src");

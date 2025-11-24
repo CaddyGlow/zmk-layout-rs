@@ -1,10 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use tempfile::tempdir;
-use zmk_layout_rs::adapters::{
-    pipeline::AdapterPipeline,
-    standard::TemplateParseMode,
-};
+use zmk_layout_rs::adapters::{pipeline::AdapterPipeline, standard::TemplateParseMode};
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from("tests/fixtures").join(name)
@@ -45,7 +42,9 @@ fn pipeline_accepts_json_text_directly() {
 #[test]
 fn pipeline_handles_dts_without_template() {
     let rendered = fs::read_to_string(fixture("cli_base.dts")).expect("fixture");
-    let layout = AdapterPipeline::from_dts_text(rendered).load().expect("load");
+    let layout = AdapterPipeline::from_dts_text(rendered)
+        .load()
+        .expect("load");
     assert!(
         !layout.layers.is_empty(),
         "expected at least one layer from DTS parse"

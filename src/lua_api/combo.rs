@@ -4,7 +4,8 @@ use std::cell::{Cell, RefCell};
 use crate::layout_engine::LayerSelector;
 
 use super::util::{
-    SharedLayout, lua_table_to_strings, lua_table_to_u32, lua_value_to_optional_u32, script_error,
+    SharedLayout, ensure_staged, lua_table_to_strings, lua_table_to_u32, lua_value_to_optional_u32,
+    script_error,
 };
 
 #[derive(Clone)]
@@ -21,7 +22,7 @@ pub struct ComboObject {
 
 impl ComboObject {
     pub fn new(name: String, layout: SharedLayout) -> Self {
-        Self {
+        let combo = Self {
             name,
             layout,
             keys: RefCell::new(None),
@@ -30,11 +31,13 @@ impl ComboObject {
             layers: RefCell::new(Vec::new()),
             conditions: RefCell::new(Vec::new()),
             applied: Cell::new(false),
-        }
+        };
+        combo.seed_from_layout();
+        combo
     }
 
     pub fn as_binding_string(&self) -> LuaResult<String> {
-        self.apply()?;
+        self.ensure_applied()?;
         match &*self.binding.borrow() {
             Some(binding) => Ok(binding.clone()),
             None => Err(script_error(format!(
@@ -45,9 +48,7 @@ impl ComboObject {
     }
 
     fn apply_internal(&self) -> LuaResult<()> {
-        if self.applied.get() {
-            return Ok(());
-        }
+        self.ensure_staged()?;
 
         let keys = self
             .keys
@@ -84,34 +85,71 @@ impl ComboObject {
         self.applied.set(true);
         Ok(())
     }
+
+    fn seed_from_layout(&self) {
+        let engine = self.layout.borrow();
+        if let Some(state) = engine.combo_state(&self.name) {
+            self.keys.borrow_mut().replace(state.key_positions);
+            *self.binding.borrow_mut() = state.binding;
+            *self.timeout.borrow_mut() = Some(state.timeout_ms);
+
+            let layer_names = {
+                let names = engine.layer_names();
+                state
+                    .layers
+                    .iter()
+                    .filter_map(|idx| names.get(*idx as usize).cloned())
+                    .collect()
+            };
+            *self.layers.borrow_mut() = layer_names;
+            *self.conditions.borrow_mut() = state.conditions;
+        }
+    }
+
+    fn ensure_staged(&self) -> LuaResult<()> {
+        ensure_staged(&self.applied, &format!("combo '{}'", self.name))
+    }
+
+    fn ensure_applied(&self) -> LuaResult<()> {
+        if self.applied.get() {
+            Ok(())
+        } else {
+            self.apply_internal()
+        }
+    }
 }
 
 impl UserData for ComboObject {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("keys", |_, this, table: LuaTable| {
+            this.ensure_staged()?;
             let keys = lua_table_to_u32(table)?;
             *this.keys.borrow_mut() = Some(keys);
             Ok(this.clone())
         });
 
         methods.add_method("binding", |_, this, binding: String| {
+            this.ensure_staged()?;
             *this.binding.borrow_mut() = Some(binding);
             Ok(this.clone())
         });
 
         methods.add_method("timeout", |_, this, value: LuaValue| {
+            this.ensure_staged()?;
             let timeout = lua_value_to_optional_u32(value)?;
             *this.timeout.borrow_mut() = Some(timeout);
             Ok(this.clone())
         });
 
         methods.add_method("on_layers", |_, this, layers: LuaTable| {
+            this.ensure_staged()?;
             let list = lua_table_to_strings(layers)?;
             *this.layers.borrow_mut() = list;
             Ok(this.clone())
         });
 
         methods.add_method("when", |_, this, condition: String| {
+            this.ensure_staged()?;
             this.conditions.borrow_mut().push(condition);
             Ok(this.clone())
         });

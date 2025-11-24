@@ -1,10 +1,8 @@
 use crate::{ast::DtItem, dts::DtsDocument};
 
-use super::{
-    combos::{
-        behavior_description, binding_cells_value, binding_list_from_node, capture_node_properties,
-        compatible_value, parse_optional_numeric_property,
-    },
+use super::combos::{
+    behavior_description, binding_cells_value, binding_list_from_node, capture_node_properties,
+    compatible_value, parse_optional_numeric_property,
 };
 
 /// Read-only provider that lists behavior definitions.

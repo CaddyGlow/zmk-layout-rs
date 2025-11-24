@@ -1,6 +1,9 @@
 use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::cli::preprocess::build_config;
 use crate::{
+    adapters::AdapterPipeline,
     build::{
         BuildError, BuildReport, BuildRequest, BuildRequestBuilder, CliDockerBackend,
         CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
@@ -14,10 +17,7 @@ use crate::{
         render_device, render_flash_outcome, render_flash_warning, resolve_flash_source,
     },
     io,
-    adapters::AdapterPipeline,
 };
-#[cfg(feature = "ancpp-preprocessor")]
-use crate::cli::preprocess::build_config;
 
 pub fn build(args: &FirmwareBuildArgs) -> Result<i32, CliError> {
     let manifest = load_manifest_flexible(&args.manifest)?;
@@ -192,8 +192,8 @@ fn apply_firmware_layout(
         };
         #[cfg(not(feature = "ancpp-preprocessor"))]
         let layout = io::load_layout(path)?;
-        let pipeline =
-            AdapterPipeline::from_dts_text(layout.text).template_mode(crate::adapters::standard::TemplateParseMode::FullDocument);
+        let pipeline = AdapterPipeline::from_dts_text(layout.text)
+            .template_mode(crate::adapters::standard::TemplateParseMode::FullDocument);
         builder = builder.layout_via_pipeline(pipeline);
         layout_set = true;
     }

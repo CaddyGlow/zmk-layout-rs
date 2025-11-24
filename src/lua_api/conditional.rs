@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 
 use mlua::{Result as LuaResult, UserData, UserDataMethods};
 
-use super::util::SharedLayout;
+use super::util::{SharedLayout, ensure_staged};
 
 #[derive(Clone)]
 pub struct ConditionalObject {
@@ -28,26 +28,31 @@ impl ConditionalObject {
     }
 
     fn apply_internal(&self) -> LuaResult<()> {
-        if self.applied.get() {
-            return Ok(());
-        }
+        self.ensure_staged()?;
         // No-op placeholder until conditional support is wired into the engine.
         self.applied.set(true);
         Ok(())
+    }
+
+    fn ensure_staged(&self) -> LuaResult<()> {
+        ensure_staged(&self.applied, &format!("conditional '{}'", self.name))
     }
 }
 
 impl UserData for ConditionalObject {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("condition", |_, this, expr: String| {
+            this.ensure_staged()?;
             this.condition.borrow_mut().replace(expr);
             Ok(this.clone())
         });
         methods.add_method("then_layer", |_, this, layer: String| {
+            this.ensure_staged()?;
             this.then_layer.borrow_mut().replace(layer);
             Ok(this.clone())
         });
         methods.add_method("else_layer", |_, this, layer: String| {
+            this.ensure_staged()?;
             this.else_layer.borrow_mut().replace(layer);
             Ok(this.clone())
         });

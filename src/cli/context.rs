@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::cli::preprocess::build_config;
 use crate::{
     io::{self, LoadedLayout},
     providers::KeymapDocument,
@@ -8,8 +10,6 @@ use crate::{
         TaskOutcome, TaskStatus, apply_tasks_with_options,
     },
 };
-#[cfg(feature = "ancpp-preprocessor")]
-use crate::cli::preprocess::build_config;
 
 use super::{app::SharedArgs, error::CliError};
 

@@ -2,9 +2,8 @@ use zmk_layout_rs::{
     bindings::BindingParser,
     dts::DtsDocument,
     providers::{
-        format::{BindingFormat, parse_binding_groups, format_bindings_raw},
-        BehaviorProvider,
-        ComboProvider,
+        BehaviorProvider, ComboProvider,
+        format::{BindingFormat, format_bindings_raw, parse_binding_groups},
     },
 };
 
@@ -16,7 +15,9 @@ fn binding_format_normalizes_and_rejects_empty() {
     let normalized = format.normalize_binding("&kp A").expect("normalize");
     assert_eq!(normalized, "&kp A");
 
-    let err = format.normalize_binding("   ").expect_err("empty binding should fail");
+    let err = format
+        .normalize_binding("   ")
+        .expect_err("empty binding should fail");
     assert!(
         err.to_string().contains("binding string cannot be empty"),
         "unexpected error: {err}"

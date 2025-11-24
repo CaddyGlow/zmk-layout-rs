@@ -89,12 +89,15 @@ pub fn load_layout_preprocessed(
     config: &PreprocessorConfig,
 ) -> Result<LoadedLayout, IoError> {
     let path = path.as_ref().to_path_buf();
-    let output = preprocess_layout(&path, config)
-        .map_err(|source| IoError::PreprocessLayout { path: path.clone(), source })?;
-    let document = DtsDocument::parse_str(&output.expanded).map_err(|source| IoError::ParseLayout {
+    let output = preprocess_layout(&path, config).map_err(|source| IoError::PreprocessLayout {
         path: path.clone(),
         source,
     })?;
+    let document =
+        DtsDocument::parse_str(&output.expanded).map_err(|source| IoError::ParseLayout {
+            path: path.clone(),
+            source,
+        })?;
     Ok(LoadedLayout {
         path,
         text: output.expanded,

@@ -1,12 +1,16 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 
-use mlua::{Result as LuaResult, Table as LuaTable, UserData, UserDataMethods, Value as LuaValue};
+use mlua::{
+    Lua, Result as LuaResult, Table as LuaTable, UserData, UserDataMethods, Value as LuaValue,
+};
 use toml::Value as TomlValue;
 
 use crate::providers::BehaviorDefinition;
 
-use super::util::{SharedLayout, create_read_only_table, lua_table_to_strings, script_error};
+use super::util::{
+    SharedLayout, create_read_only_table, ensure_staged, lua_table_to_strings, script_error,
+};
 
 #[derive(Clone)]
 pub struct BehaviorObject {
@@ -19,23 +23,24 @@ pub struct BehaviorObject {
 
 impl BehaviorObject {
     pub fn new(name: String, layout: SharedLayout) -> Self {
-        Self {
+        let behavior = Self {
             name,
             layout,
             params: RefCell::new(BTreeMap::new()),
             bindings: RefCell::new(None),
             applied: Cell::new(false),
-        }
+        };
+        behavior.seed_from_layout();
+        behavior
     }
 
-    pub fn as_binding_string(&self) -> String {
-        format!("&{}", self.name)
+    pub fn as_binding_string(&self) -> LuaResult<String> {
+        self.ensure_applied()?;
+        Ok(format!("&{}", self.name))
     }
 
     fn apply_internal(&self) -> LuaResult<()> {
-        if self.applied.get() {
-            return Ok(());
-        }
+        self.ensure_staged()?;
         let mut metadata = self.params.borrow().clone();
         if let Some(bindings) = self.bindings.borrow().clone() {
             let boxed = bindings
@@ -60,23 +65,48 @@ impl BehaviorObject {
             .into_iter()
             .find(|behavior| behavior.name == self.name)
     }
+
+    fn seed_from_layout(&self) {
+        if let Some(def) = self.behavior_definition() {
+            if !def.bindings.is_empty() {
+                self.bindings.borrow_mut().replace(def.bindings);
+            }
+        }
+    }
+
+    fn ensure_staged(&self) -> LuaResult<()> {
+        ensure_staged(&self.applied, &format!("behavior '{}'", self.name))
+    }
+
+    fn ensure_applied(&self) -> LuaResult<()> {
+        if self.applied.get() {
+            Ok(())
+        } else {
+            self.apply_internal()
+        }
+    }
 }
 
 impl UserData for BehaviorObject {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("param", |_, this, (key, value): (String, LuaValue)| {
+            this.ensure_staged()?;
             let toml = lua_value_to_toml(value)?;
             this.params.borrow_mut().insert(key, toml);
             Ok(this.clone())
         });
 
         methods.add_method("bindings", |_, this, bindings: LuaTable| {
+            this.ensure_staged()?;
             let list = lua_table_to_strings(bindings)?;
             this.bindings.borrow_mut().replace(list);
             Ok(this.clone())
         });
 
         methods.add_method("get_param", |lua, this, key: String| {
+            if let Some(value) = this.params.borrow().get(&key) {
+                return toml_to_lua_value(lua, value);
+            }
             if let Some(def) = this.behavior_definition() {
                 for prop in def.properties {
                     if prop.name == key {
@@ -92,7 +122,11 @@ impl UserData for BehaviorObject {
 
         methods.add_method("get_bindings", |lua, this, ()| {
             let table = lua.create_table()?;
-            if let Some(def) = this.behavior_definition() {
+            if let Some(bindings) = this.bindings.borrow().as_ref() {
+                for (idx, binding) in bindings.iter().enumerate() {
+                    table.set(idx + 1, binding.clone())?;
+                }
+            } else if let Some(def) = this.behavior_definition() {
                 for (idx, binding) in def.bindings.iter().enumerate() {
                     table.set(idx + 1, binding.clone())?;
                 }
@@ -150,4 +184,28 @@ fn lua_value_to_toml(value: LuaValue<'_>) -> LuaResult<TomlValue> {
             other.type_name()
         ))),
     }
+}
+
+fn toml_to_lua_value<'lua>(lua: &'lua Lua, value: &TomlValue) -> LuaResult<LuaValue<'lua>> {
+    Ok(match value {
+        TomlValue::String(text) => LuaValue::String(lua.create_string(text)?),
+        TomlValue::Integer(num) => LuaValue::Integer(*num),
+        TomlValue::Float(num) => LuaValue::Number(*num),
+        TomlValue::Boolean(flag) => LuaValue::Boolean(*flag),
+        TomlValue::Array(items) => {
+            let table = lua.create_table()?;
+            for (idx, entry) in items.iter().enumerate() {
+                table.set(idx + 1, toml_to_lua_value(lua, entry)?)?;
+            }
+            LuaValue::Table(table)
+        }
+        TomlValue::Table(entries) => {
+            let table = lua.create_table()?;
+            for (key, entry) in entries {
+                table.set(key.as_str(), toml_to_lua_value(lua, entry)?)?;
+            }
+            LuaValue::Table(table)
+        }
+        TomlValue::Datetime(dt) => LuaValue::String(lua.create_string(&dt.to_string())?),
+    })
 }

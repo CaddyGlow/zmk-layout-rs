@@ -20,6 +20,14 @@ This creates a more readable, maintainable scripting experience compared to the 
 - Provide type-safe Rust implementations using mlua UserData
 - Enable lazy evaluation with auto-apply semantics
 
+## Current State (post-refactor)
+
+- The `layout` global is installed from `tasks::lua_engine::register_script_api`, pointing at `LayoutApi` under `src/lua_api`.
+- Layer/combo/behavior builders mutate the document; macro/input/conditional builders still stage data only (no document writes), and combo/behavior builders don’t preload existing definitions when editing.
+- Query objects cover layers/combos/behaviors but omit metadata, layer order, filters, and staged builders default to empty values when reading.
+- Layout-level I/O helpers exist for DTS/JSON files plus `parse_dts`; string-based renders/imports and template overrides are not yet exposed.
+- Error handling uses ad-hoc runtime errors via `script_error`; only `LayerBuilder` enforces double-apply; index/type validation is not centralized for every builder.
+
 ## Commit Strategy
 
 **IMPORTANT**: Each phase must be committed separately with a corresponding CHANGELOG.md entry following the established format. After each phase completion:
@@ -86,6 +94,17 @@ layout:get_behavior(name)    -- BehaviorInfo (read-only)
 layout:list_layers()         -- string[]
 layout:list_combos()         -- string[]
 layout:list_behaviors()      -- string[]
+
+-- File/string I/O helpers (file-based ones exist today; string renders/imports are planned)
+layout:load_dtsi(path)
+layout:save_dtsi(path)
+layout:load_json(json_path, template_path)
+layout:save_json(path[, template_path])
+layout:parse_dts(source)
+layout:parse_json(json, template_path)
+layout:to_dts_string()
+layout:to_json_string(template_path)
+layout:render_template(json, template_path)
 ```
 
 ---
@@ -562,159 +581,55 @@ end
 
 ---
 
-## Implementation Phases
+## Implementation Phases (post-refactor)
 
-### Phase 1: Architecture & Core Objects (ComboObject + LayerBuilder)
+### Phase 1: Harden builders & lifecycle
 
-**Commit 1**: Core fluent API with combo and layer support
+- Seed builders from existing definitions so edits start from the current document (combos/behaviors/macros/inputs/conditionals).
+- Finish apply paths for macros/inputs/conditionals and ensure combo layer filters/conditions/timeouts plus behavior bindings write through `LayoutEngine`.
+- Centralize 1-based index/type validation and enforce staged→applied errors for every builder; auto-apply only when consumed as bindings; double-apply throws a clear Lua error.
+- Files: `src/lua_api/{combo,behavior,macro_builder,input,conditional,layer,util}.rs`, `src/layout_engine/*` (helpers), `tests/lua_api.rs`.
 
-- Create `src/lua_api/` module structure
-- Implement `ComboObject` with fluent methods
-- Implement `LayerBuilder` with mixed-type binding support
-- Implement `LayoutAPI` entry point
-- Add comprehensive unit tests
-- Update CHANGELOG.md
+### Phase 2: Layout-level helpers & serialization
 
-**Files**:
-- `src/lua_api/mod.rs`
-- `src/lua_api/combo.rs`
-- `src/lua_api/layer.rs`
-- `src/lua_api/api.rs`
-- `src/lib.rs`
-- `tests/lua_api.rs`
+- Add layout-level metadata helpers plus delete/move APIs with dependent cleanup/reindexing for combos/conditionals/macros/inputs/behaviors.
+- Wire DTS/JSON string+file helpers through `adapters::pipeline` and `io` utilities (template overrides, canonical ordering) and expose template render convenience.
+- Files: `src/lua_api/api.rs`, `src/io/mod.rs`, `src/adapters/pipeline.rs`, `src/layout_engine/*`, `tests/lua_api.rs`, fixtures.
 
----
+### Phase 3: Query expansion
 
-### Phase 2: BehaviorObject
+- Expand info objects to include metadata, indices, layer filters/conditions/resolution/params; add list/get coverage for macros/inputs/conditionals and seed builders from document state.
+- Keep query snapshots read-only with deterministic mutation errors; ensure get_* on builders reflect document state, not staged defaults.
+- Files: `src/lua_api/query.rs`, `src/lua_api/*` (builder getters), `tests/lua_api.rs`.
 
-**Commit 2**: Add behavior configuration support
+### Phase 4: Integration, tests, docs
 
-- Implement `BehaviorObject` with param() and bindings() methods
-- Add behavior query methods
-- Wire into LayoutAPI
-- Add tests
-- Update CHANGELOG.md
-
-**Files**:
-- `src/lua_api/behavior.rs`
-- `src/lua_api/api.rs` (update)
-- `tests/lua_api.rs` (update)
-
----
-
-### Phase 3: MacroObject
-
-**Commit 3**: Add macro definition support
-
-- Implement `MacroObject` with action builders
-- Add press/release/tap/wait methods
-- Support multi-key actions
-- Auto-apply on first use as binding
-- Add tests
-- Update CHANGELOG.md
-
-**Files**:
-- `src/lua_api/macro_builder.rs`
-- `src/lua_api/api.rs` (update)
-- `tests/lua_api.rs` (update)
-
----
-
-### Phase 4: InputObject & ConditionalObject
-
-**Commit 4**: Add input listener and conditional layer support
-
-- Implement `InputObject` for encoders/sensors
-- Implement `ConditionalObject` for conditional layers
-- Add respective tests
-- Update CHANGELOG.md
-
-**Files**:
-- `src/lua_api/input.rs`
-- `src/lua_api/conditional.rs`
-- `src/lua_api/api.rs` (update)
-- `tests/lua_api.rs` (update)
-
----
-
-### Phase 5: Query API
-
-**Commit 5**: Add read-only query API for layout inspection
-
-- Implement read-only info objects (LayerInfo, ComboInfo, etc.)
-- Add query methods to LayoutAPI
-- Add list_layers(), list_combos(), list_behaviors()
-- Enable get_* methods on builder objects
-- Add tests
-- Update CHANGELOG.md
-
-**Files**:
-- `src/lua_api/query.rs`
-- `src/lua_api/combo.rs` (add get_* methods)
-- `src/lua_api/layer.rs` (add get_* methods)
-- `src/lua_api/behavior.rs` (add get_* methods)
-- `src/lua_api/api.rs` (update)
-- `tests/lua_api.rs` (update)
-
----
-
-### Phase 6: Integration
-
-**Commit 6**: Integrate fluent API into script system
-
-- Register LayoutAPI in `register_script_api()`
-- Maintain backwards compatibility
-- Add integration tests with real keymaps
-- Create test fixtures
-- Update CHANGELOG.md
-
-**Files**:
-- `src/tasks/mod.rs`
-- `tests/lua_api.rs` (integration tests)
-- `tests/fixtures/fluent_api_*.lua`
-
----
-
-### Phase 7: Documentation
-
-**Commit 7**: Complete API documentation and examples
-
-- Create comprehensive API reference doc
-- Write example scripts for all patterns
-- Migration guide from function-based API
-- Update README
-- Update CHANGELOG.md
-
-**Files**:
-- `docs/fluent_lua_api.md`
-- `examples/fluent_api_*.lua`
-- `README.md`
-- `docs/customization_tasks.md`
-
----
+- Update `tasks::lua_engine::register_script_api` to expose the full surface; add Lua fixtures covering CRUD, serialization, delete/move, and error paths; integrate with CLI regression suite.
+- Publish documentation/examples (`docs/fluent_lua_api.md`, `examples/fluent_api_*.lua`) and update README + CHANGELOG; commit per phase.
+- Files: `src/tasks/lua_engine.rs`, `docs/*`, `examples/*`, `CHANGELOG.md`, `tests/fixtures/*`.
 
 ## Error Handling
 
-All builder objects validate input and provide clear error messages:
+All builder objects validate input and provide clear error messages (runtime paths return `nil, "ERR_CODE: message"`, while programmer misuse like double-apply throws):
 
 ```lua
 -- Missing required fields
 local combo = layout:combo("bad")
 combo:keys({1, 2})  -- Missing binding
--- Error: combo 'bad' requires a binding before use
+-- Error: ERR_MISSING_FIELD: combo 'bad' requires a binding before use
 
 -- Invalid binding type
 layout:layer("base"):bind(1, 123)
--- Error: binding must be string or object, got number
+-- Error: ERR_INVALID_TYPE: binding must be string or object, got number
 
 -- Index out of range
 layout:layer("base"):bind(0, "&kp Q")
--- Error: binding index must be >= 1 (Lua 1-based)
+-- Error: ERR_OUT_OF_RANGE: binding index must be >= 1 (Lua 1-based)
 
 -- Double apply on immutable object
 local combo = layout:combo("esc"):keys({1,2}):binding("&kp ESC")
 layout:layer("base"):bind(1, combo):apply()  -- Auto-applies combo
-combo:timeout(50):apply()  -- Error: combo already applied
+combo:timeout(50):apply()  -- Error: ERR_ALREADY_APPLIED: combo already applied
 ```
 
 ---
@@ -746,51 +661,45 @@ layout:layer("base"):bind(2, esc):apply()
 ## Testing Strategy
 
 ### Unit Tests
-- Individual builder object creation
-- Method chaining
-- Type validation
-- Error cases
-- Lazy evaluation
+- Builder lifecycle (staged→applied errors, double-apply, auto-apply when used as binding)
+- Index/type validation and 1-based conversions
+- Delete/move helpers with dependent cleanup/reindex
+- Serialization helpers (DTS/JSON string+file, template overrides, canonical ordering)
+- Query snapshot immutability and builders seeded from existing definitions
 
 ### Integration Tests
-- Load real keymap fixtures
-- Execute Lua scripts using fluent API
-- Verify document mutations
-- Test query API accuracy
-- Test edit operations
+- Lua scripts covering create/edit/delete across layers/combos/behaviors/macros/inputs/conditionals
+- Round-trip DTS/JSON via load/parse/save + template render helpers
+- CLI `script` command exercising old + fluent APIs together
+- Deterministic error messages for invalid types/indices/lifecycle misuse
 
 ### Test Fixtures
-- Create from scratch
-- Edit existing layout
-- Mixed function/fluent API
-- Error handling scenarios
-- Query operations
+- Create from scratch and edit existing layouts (seeded builders)
+- Delete/move with dependent cleanup
+- Template-based JSON↔DTS conversions
+- Mixed function/fluent API flows
+- Error-handling scenarios (invalid indices/types/double-apply)
 
 ---
 
 ## Success Criteria
 
-- [ ] All 7 phases committed with CHANGELOG entries
-- [ ] 100% test coverage for new code
-- [ ] All ZMK constructs supported
-- [ ] Query API for reading layout state
-- [ ] Edit existing layouts, not just create new
-- [ ] Backwards compatibility maintained
-- [ ] Documentation complete with examples
-- [ ] No breaking changes
+- [ ] Builders apply real mutations for layers/combos/behaviors/macros/inputs/conditionals (no placeholders)
+- [ ] Staged→applied lifecycle enforced everywhere with centralized 1-based validation and clear Lua errors
+- [ ] Layout-level helpers (meta/delete/move) plus DTS/JSON string+file I/O with template support and canonical ordering
+- [ ] Query/list coverage for all constructs with metadata/properties and read-only snapshots
+- [ ] Function-based API remains compatible when the fluent API is registered via `tasks::lua_engine`
+- [ ] Docs/examples/CHANGELOG entries land with each phase alongside regression fixtures
 
 ---
 
 ## Implementation Timeline
 
-Each phase is one commit:
+Each phase ships with tests + CHANGELOG entry:
 
-1. Core Objects (Combo + Layer) - **Commit 1**
-2. BehaviorObject - **Commit 2**
-3. MacroObject - **Commit 3**
-4. InputObject + ConditionalObject - **Commit 4**
-5. Query API - **Commit 5**
-6. Integration - **Commit 6**
-7. Documentation - **Commit 7**
+1. Harden builders & lifecycle
+2. Layout helpers & serialization
+3. Query expansion
+4. Integration, fixtures, docs
 
-Total: **7 commits** with CHANGELOG.md updated for each phase.
+Total: **4 commits** with CHANGELOG.md updated for each phase.

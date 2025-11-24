@@ -3,7 +3,7 @@ use crate::{
     tokenizer::TokenSpan,
 };
 
-use super::{ProviderError, COMBO_CONDITION_COMMENT_PREFIX};
+use super::{COMBO_CONDITION_COMMENT_PREFIX, ProviderError};
 
 pub fn find_layer_node<'a>(items: &'a [DtItem], name: &str) -> Option<&'a DtNode> {
     for item in items {
@@ -41,28 +41,22 @@ pub fn find_layer_node_mut<'a>(items: &'a mut [DtItem], name: &str) -> Option<&'
 
 #[allow(dead_code)]
 pub fn find_child_node<'a>(items: &'a [DtItem], name: &str) -> Option<&'a DtNode> {
-    items
-        .iter()
-        .find_map(|item| match item {
-            DtItem::Node(node) if node.name == name => Some(node),
-            _ => None,
-        })
+    items.iter().find_map(|item| match item {
+        DtItem::Node(node) if node.name == name => Some(node),
+        _ => None,
+    })
 }
 
 #[allow(dead_code)]
 pub fn find_child_node_mut<'a>(node: &'a mut DtNode, name: &str) -> Option<&'a mut DtNode> {
-    node.children
-        .iter_mut()
-        .find_map(|child| match child {
-            DtItem::Node(child) if child.name == name => Some(child),
-            _ => None,
-        })
+    node.children.iter_mut().find_map(|child| match child {
+        DtItem::Node(child) if child.name == name => Some(child),
+        _ => None,
+    })
 }
 
 pub fn find_bindings_property(node: &DtNode) -> Option<&DtProperty> {
-    node.properties
-        .iter()
-        .find(|prop| prop.name == "bindings")
+    node.properties.iter().find(|prop| prop.name == "bindings")
 }
 
 pub fn find_bindings_property_mut(node: &mut DtNode) -> Option<&mut DtProperty> {
@@ -100,15 +94,8 @@ pub fn ensure_bindings_property(node: &mut DtNode) -> &mut DtProperty {
 }
 
 pub fn ensure_property<'a>(node: &'a mut DtNode, name: &str) -> &'a mut DtProperty {
-    if let Some(idx) = node
-        .properties
-        .iter()
-        .position(|prop| prop.name == name)
-    {
-        return node
-            .properties
-            .get_mut(idx)
-            .expect("property should exist");
+    if let Some(idx) = node.properties.iter().position(|prop| prop.name == name) {
+        return node.properties.get_mut(idx).expect("property should exist");
     }
     node.properties.push(DtProperty {
         name: name.to_string(),
@@ -160,10 +147,7 @@ pub fn empty_span() -> TokenSpan {
     super::format::empty_span()
 }
 
-pub fn ensure_layer_node(
-    document_items: &mut [DtItem],
-    layer: &str,
-) -> Result<(), ProviderError> {
+pub fn ensure_layer_node(document_items: &mut [DtItem], layer: &str) -> Result<(), ProviderError> {
     let keymap_root = find_layer_node_mut(document_items, "keymap")
         .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
     if let Some(idx) = keymap_root

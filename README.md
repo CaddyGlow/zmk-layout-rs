@@ -4,8 +4,7 @@ Rust port of the ZMK layout tooling stack. The crate parses Devicetree keymaps,
 offers structured editing primitives, and bridges layouts to a stable JSON
 format that can be consumed by GUI editors and other automation.
 
-The implementation follows the staged roadmap in `rust/PLAN.md` and is written
-without `unsafe`.
+See `CLI_CODEBASE_REFACTOR_PLAN.md` for the refactor roadmap; the crate is written without `unsafe`.
 
 ## Highlights
 
@@ -21,24 +20,33 @@ without `unsafe`.
   mod chains, etc.) and normalizes them for consistent round‑tripping.
 - **Provider APIs** – `providers` exposes ergonomic methods for mutating
   `DtsDocument`s (layers, combos, behavior metadata) with structured errors; modules are split into `layers`, `combos`, `behaviors`, and shared `format`/`util` helpers.
+- **CLI + shared IO** – `cli` hosts clap definitions + per-command handlers and relies on `io` helpers for layout/task loading, serialization, and diff rendering.
 - **Standard adapter** – `adapters::standard` converts between Devicetree and a
   JSON schema (`layers`, `combos`, `behaviors`, `metadata`) for use by other
   projects, with a unified `adapters::pipeline` that loads JSON/DTS (paths or text) and optionally captures template metadata.
+- **Firmware builds** – `build` provides manifest parsing, toolchain orchestration, cache/workspace management, and layout staging (including adapter pipelines) for the `zmk-layout firmware` commands.
 - **Flash fakes** – set `ZMK_FLASH_FAKE_BACKEND=1` plus `ZMK_FLASH_FAKE_MOUNTPOINT`, `ZMK_FLASH_FAKE_NAME`, `ZMK_FLASH_FAKE_SERIAL`, `ZMK_FLASH_FAKE_VENDOR`, `ZMK_FLASH_FAKE_MODEL`, and `ZMK_FLASH_FAKE_FSTYPE` to run firmware `devices`/`flash` commands without hardware.
 
 ```
 src
-├── adapters/             # Standard/MoErgo adapters + unified pipeline
-│   ├── standard/         # JSON import/export helpers
-│   └── pipeline.rs       # JSON/DTS loader with template capture
+├── adapters/              # Standard/MoErgo adapters + unified pipeline/bundles
+│   ├── standard/          # JSON import/export/helpers + template renderers
+│   └── pipeline.rs        # JSON/DTS loader with optional template capture
 ├── ast/                   # AST definitions + walkers
 ├── bindings/              # Binding parser & normalization rules
-├── dts/                   # High level DtsDocument wrapper
+├── build/                 # Firmware builder/toolchains/workspaces/progress
+├── cli/                   # clap app + per-command handlers + shared context
+├── dts/                   # High-level DtsDocument wrapper
+├── flash/                 # Flash core + platform backends (feature-gated)
+├── io/                    # Shared layout/task IO + diff helpers
+├── layout_engine/         # Task execution plumbing over KeymapDocument
 ├── macro_support/         # Macro registry & expansion
 ├── parser/                # Devicetree parser
-├── providers/             # Keymap/behavior/combo helpers (see docs/providers.md)
+├── providers/             # Keymap/behavior/combo helpers
 ├── serialization/         # Serializer back to DTS text
-└── tokenizer/             # Logos-based tokenizer
+└── tasks/                 # Task config/targets/lua_engine + executor
+
+See `docs/codebase_overview.md` for a contributor-oriented summary of module boundaries and feature flags.
 ```
 
 ## Getting Started

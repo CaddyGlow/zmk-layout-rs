@@ -4,10 +4,8 @@ use serde_json::Value as JsonValue;
 
 use crate::dts::DtsDocument;
 
-use super::{
-    standard::{
-        AdapterError, AdapterLayout, TemplateParseMode, export_standard_str_with_template_mode,
-    },
+use super::standard::{
+    AdapterError, AdapterLayout, TemplateParseMode, export_standard_str_with_template_mode,
 };
 
 /// Unified input sources for adapter operations (JSON or rendered DTS).
@@ -98,11 +96,7 @@ impl AdapterPipeline {
         template_mode: TemplateParseMode,
     ) -> Result<AdapterLayout, AdapterError> {
         if let Some(template) = template_source {
-            let json = export_standard_str_with_template_mode(
-                &rendered,
-                &template,
-                template_mode,
-            )?;
+            let json = export_standard_str_with_template_mode(&rendered, &template, template_mode)?;
             return AdapterLayout::from_standard_json(&json).map_err(AdapterError::from);
         }
         let doc = DtsDocument::parse_str(&rendered)?;

@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 
+#[cfg(feature = "ancpp-preprocessor")]
+use crate::cli::preprocess::build_config;
 use crate::{
     cli::{app::ScriptArgs, error::CliError},
     io,
     providers::KeymapDocument,
     tasks::execute_script,
 };
-#[cfg(feature = "ancpp-preprocessor")]
-use crate::cli::preprocess::build_config;
 
 pub fn run(args: &ScriptArgs) -> Result<i32, CliError> {
     let script_text = io::read_text(&args.script)?;

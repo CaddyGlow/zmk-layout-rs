@@ -1,10 +1,20 @@
 #![cfg(feature = "ancpp-preprocessor")]
 
-use std::{collections::HashMap, collections::HashSet, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
-use crate::{cli::{app::PreprocessorArgs, error::CliError}, preprocessor::PreprocessorConfig};
+use crate::{
+    cli::{app::PreprocessorArgs, error::CliError},
+    preprocessor::PreprocessorConfig,
+};
 
-pub fn build_config(args: &PreprocessorArgs, layout_path: &Path) -> Result<PreprocessorConfig, CliError> {
+pub fn build_config(
+    args: &PreprocessorArgs,
+    layout_path: &Path,
+) -> Result<PreprocessorConfig, CliError> {
     let mut user_dirs: HashSet<PathBuf> = args.include.iter().cloned().collect();
     if let Some(parent) = layout_path.parent() {
         user_dirs.insert(parent.to_path_buf());
@@ -29,7 +39,11 @@ fn parse_definitions(defines: &[String]) -> Result<HashMap<String, String>, CliE
             .next()
             .map(str::trim)
             .filter(|k| !k.is_empty())
-            .ok_or_else(|| CliError::InvalidArgument(format!("invalid --cpp-define `{def}`, expected NAME or NAME=VALUE")))?;
+            .ok_or_else(|| {
+                CliError::InvalidArgument(format!(
+                    "invalid --cpp-define `{def}`, expected NAME or NAME=VALUE"
+                ))
+            })?;
         let value = parts.next().unwrap_or("1");
         predefs.insert(key.to_string(), value.to_string());
     }
