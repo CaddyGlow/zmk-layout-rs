@@ -40,6 +40,14 @@ impl DtsDocument {
         })
     }
 
+    /// Construct a document directly from AST items.
+    pub fn from_items(items: Vec<DtItem>) -> Self {
+        Self {
+            items,
+            macro_registry: None,
+        }
+    }
+
     /// Parse an on-disk DTS file.
     pub fn parse_file(path: impl AsRef<Path>) -> Result<Self, DtsError> {
         let text = fs::read_to_string(path)?;

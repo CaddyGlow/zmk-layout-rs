@@ -54,6 +54,41 @@ impl LayoutEngine {
         }
     }
 
+    /// Create a minimal, empty layout with keymap + behaviors/macros/combos roots.
+    pub fn empty() -> Self {
+        let make_node = |name: &str| DtNode {
+            name: name.to_string(),
+            raw_name: String::new(),
+            span: empty_span(),
+            properties: Vec::new(),
+            children: Vec::new(),
+            leading_comments: Vec::new(),
+            trailing_comments: Vec::new(),
+        };
+        let root_nodes = vec![
+            DtItem::Node(make_node("behaviors")),
+            DtItem::Node(make_node("macros")),
+            DtItem::Node(make_node("combos")),
+            DtItem::Node({
+                let mut keymap = make_node("keymap");
+                keymap.properties.push(DtProperty {
+                    name: "compatible".to_string(),
+                    raw_name: String::new(),
+                    value: DtValue {
+                        raw: "\"zmk,keymap\"".to_string(),
+                        span: empty_span(),
+                    },
+                    span: empty_span(),
+                    leading_comments: Vec::new(),
+                    trailing_comment: None,
+                });
+                keymap
+            }),
+        ];
+        let doc = DtsDocument::from_items(root_nodes);
+        LayoutEngine::new(KeymapDocument::from_document(doc))
+    }
+
     pub fn into_document(self) -> KeymapDocument {
         self.document
     }

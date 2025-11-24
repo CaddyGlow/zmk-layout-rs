@@ -127,8 +127,12 @@ pub struct DiffArgs {
 pub struct ScriptArgs {
     #[arg(long, value_name = "FILE", help = "Lua script file to execute")]
     pub script: PathBuf,
-    #[arg(long = "layout", value_name = "DTS", help = "Layout file to transform")]
-    pub layout: PathBuf,
+    #[arg(
+        long = "layout",
+        value_name = "DTS",
+        help = "Layout file to transform (optional; starts from a minimal layout when omitted)"
+    )]
+    pub layout: Option<PathBuf>,
     #[arg(long, value_name = "FILE", help = "Write updated layout to this file")]
     pub output: Option<PathBuf>,
     #[arg(long = "diff", help = "Show diff instead of writing output")]

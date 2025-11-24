@@ -20,12 +20,15 @@ use crate::{
     adapters::{
         pipeline::AdapterPipeline,
         standard::{
-            export_standard_file, export_standard_str, export_standard_str_with_template_mode,
-            import_standard_file_with_template, import_standard_str_with_template,
-            render_standard_template, TemplateParseMode,
+            TemplateParseMode, export_standard_file, export_standard_str,
+            export_standard_str_with_template_mode, import_standard_file_with_template,
+            import_standard_str_with_template, render_standard_template,
         },
     },
-    build::{BuildReport, BuildRequest, CliDockerBackend, FirmwareBuilder, NoopProgressReporter},
+    build::{
+        BuildReport, BuildRequest, CliDockerBackend, CliProgressReporter, FirmwareBuilder,
+        NoopProgressReporter,
+    },
     dts::DtsDocument,
     layout_engine::LayoutEngine,
     providers::KeymapDocument,
@@ -64,6 +67,11 @@ impl UserData for LayoutApi {
         });
         methods.add_method("conditional", |_, this, name: String| {
             Ok(ConditionalObject::new(name, Rc::clone(&this.layout)))
+        });
+
+        methods.add_method("new", |_, this, ()| {
+            *this.layout.borrow_mut() = LayoutEngine::empty();
+            Ok(())
         });
 
         methods.add_method("get_layer", |_, this, name: String| {
@@ -318,11 +326,10 @@ fn build_request_from_table(
         for pair in env.pairs::<mlua::Value, mlua::Value>() {
             let (key, value) = pair.map_err(|err| script_error(err.to_string()))?;
             let key = match key {
-                mlua::Value::String(s) => {
-                    s.to_str()
-                        .map_err(|err| script_error(err.to_string()))?
-                        .to_string()
-                }
+                mlua::Value::String(s) => s
+                    .to_str()
+                    .map_err(|err| script_error(err.to_string()))?
+                    .to_string(),
                 other => {
                     return Err(script_error(format!(
                         "env keys must be strings (got {})",
@@ -331,11 +338,10 @@ fn build_request_from_table(
                 }
             };
             let value = match value {
-                mlua::Value::String(s) => {
-                    s.to_str()
-                        .map_err(|err| script_error(err.to_string()))?
-                        .to_string()
-                }
+                mlua::Value::String(s) => s
+                    .to_str()
+                    .map_err(|err| script_error(err.to_string()))?
+                    .to_string(),
                 other => {
                     return Err(script_error(format!(
                         "env values must be strings (got {})",
@@ -351,10 +357,16 @@ fn build_request_from_table(
         .get::<_, Option<String>>("output_dir")?
         .unwrap_or_else(|| "out/firmware".to_string());
     let disable_cache: bool = opts.get("disable_cache").unwrap_or(false);
+    let verbose: bool = opts.get("verbose").unwrap_or(false);
+    let progress: Arc<dyn crate::build::progress::ProgressReporter> = if verbose {
+        Arc::new(CliProgressReporter)
+    } else {
+        Arc::new(NoopProgressReporter)
+    };
     req = req
         .output_dir(output_dir)
         .disable_cache(disable_cache)
-        .progress(Arc::new(NoopProgressReporter));
+        .progress(progress);
 
     let layout_json: Option<String> = opts.get("layout_json")?;
     let layout_json_text: Option<String> = opts.get("layout_json_text")?;
@@ -405,9 +417,7 @@ fn build_request_from_table(
         req = req.layout_via_pipeline(pipeline);
         layout_kind = Some("layout_dts_text".to_string());
     } else if let Some(keymap_path) = keymap {
-        let extra = kconfig
-            .as_ref()
-            .map(std::path::PathBuf::from);
+        let extra = kconfig.as_ref().map(std::path::PathBuf::from);
         req = req.layout_files(keymap_path, extra);
         layout_kind = Some("keymap".to_string());
     } else if use_current {
@@ -456,10 +466,7 @@ fn render_request_summary<'lua>(
     Ok(summary)
 }
 
-fn render_dry_run<'lua>(
-    lua: &'lua Lua,
-    bundle: &RequestBundle,
-) -> LuaResult<mlua::Table<'lua>> {
+fn render_dry_run<'lua>(lua: &'lua Lua, bundle: &RequestBundle) -> LuaResult<mlua::Table<'lua>> {
     let table = lua.create_table()?;
     table.set("success", true)?;
     table.set("built", false)?;

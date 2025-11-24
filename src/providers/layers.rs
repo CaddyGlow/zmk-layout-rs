@@ -12,8 +12,7 @@ use super::{
     format::{BindingFormat, format_bindings_raw, format_u32_list, parse_binding_list},
     util::{
         ensure_bindings_property, ensure_layer_node, ensure_property, find_bindings_property,
-        find_bindings_property_mut, find_child_node_mut, find_layer_node, find_layer_node_mut,
-        is_behavior_root,
+        find_bindings_property_mut, find_layer_node, find_layer_node_mut, is_behavior_root,
     },
 };
 
@@ -350,26 +349,43 @@ impl KeymapProvider {
     }
 
     fn behavior_node_mut(&mut self, behavior: &str) -> Result<&mut DtNode, ProviderError> {
-        let mut root_found = false;
-        for item in &mut self.document.items {
-            if let crate::ast::DtItem::Node(node) = item {
-                if is_behavior_root(node) {
-                    root_found = true;
-                    if let Some(child) = find_child_node_mut(node, behavior) {
-                        return Ok(child);
-                    }
-                }
+        let root_index = ensure_behaviors_root(&mut self.document.items);
+        let root = match self.document.items.get_mut(root_index) {
+            Some(crate::ast::DtItem::Node(node)) => node,
+            _ => unreachable!(),
+        };
+        if let Some(idx) = root.children.iter().position(
+            |item| matches!(item, crate::ast::DtItem::Node(node) if node.name == behavior),
+        ) {
+            match root.children.get_mut(idx) {
+                Some(crate::ast::DtItem::Node(node)) => return Ok(node),
+                _ => unreachable!(),
             }
         }
-        if !root_found {
-            return Err(ProviderError::BehaviorsMissing);
+        root.children
+            .push(crate::ast::DtItem::Node(super::util::empty_node(behavior)));
+        match root.children.last_mut() {
+            Some(crate::ast::DtItem::Node(node)) => Ok(node),
+            _ => unreachable!(),
         }
-        Err(ProviderError::BehaviorNotFound(behavior.to_string()))
     }
 
     fn ensure_layer_node(&mut self, layer: &str) -> Result<(), ProviderError> {
         ensure_layer_node(&mut self.document.items, layer)
     }
+}
+
+fn ensure_behaviors_root(document_items: &mut Vec<crate::ast::DtItem>) -> usize {
+    if let Some(index) = document_items
+        .iter()
+        .position(|item| matches!(item, crate::ast::DtItem::Node(node) if is_behavior_root(node)))
+    {
+        return index;
+    }
+    document_items.push(crate::ast::DtItem::Node(super::util::empty_node(
+        "behaviors",
+    )));
+    document_items.len() - 1
 }
 
 /// High-level keymap document that reuses the provider stack.

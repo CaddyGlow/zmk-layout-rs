@@ -159,10 +159,6 @@ fn stage_moergo_inputs(
         .keymap
         .as_ref()
         .ok_or(BuildError::MissingLayoutArtifact("keymap"))?;
-    let config_src = artifacts
-        .config
-        .as_ref()
-        .ok_or(BuildError::MissingLayoutArtifact("kconfig"))?;
 
     let config_root = workspace.config_dir();
     fs::create_dir_all(config_root).map_err(BuildError::Io)?;
@@ -170,7 +166,12 @@ fn stage_moergo_inputs(
     let keymap_dest = config_root.join(format!("{board}.keymap"));
     fs::copy(keymap_src, &keymap_dest).map_err(BuildError::Io)?;
     let kconfig_dest = config_root.join(format!("{board}.conf"));
-    fs::copy(config_src, &kconfig_dest).map_err(BuildError::Io)?;
+    if let Some(config_src) = artifacts.config.as_ref() {
+        fs::copy(config_src, &kconfig_dest).map_err(BuildError::Io)?;
+    } else {
+        // Minimal kconfig for MoErgo builds can be empty; create a stub if missing.
+        fs::write(&kconfig_dest, b"").map_err(BuildError::Io)?;
+    }
 
     // Copy default.nix template to config directory
     let default_nix = include_str!("../../../toolchains/moergo/default.nix");

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::cli::preprocess::build_config;
 use crate::{
     cli::{app::ScriptArgs, error::CliError},
+    dts::DtsDocument,
     io,
     providers::KeymapDocument,
     tasks::execute_script,
@@ -11,15 +12,7 @@ use crate::{
 
 pub fn run(args: &ScriptArgs) -> Result<i32, CliError> {
     let script_text = io::read_text(&args.script)?;
-    #[cfg(feature = "ancpp-preprocessor")]
-    let layout = if args.preprocess.preprocess {
-        let cfg = build_config(&args.preprocess, &args.layout)?;
-        io::load_layout_preprocessed(&args.layout, &cfg)?
-    } else {
-        io::load_layout(&args.layout)?
-    };
-    #[cfg(not(feature = "ancpp-preprocessor"))]
-    let layout = io::load_layout(&args.layout)?;
+    let layout = load_layout_or_default(args)?;
     let document = KeymapDocument::from_document(layout.document.clone());
 
     let script_dir = args.script.parent().map(|p| {
@@ -56,4 +49,51 @@ pub fn run(args: &ScriptArgs) -> Result<i32, CliError> {
     }
 
     Ok(0)
+}
+
+fn load_layout_or_default(args: &ScriptArgs) -> Result<io::LoadedLayout, CliError> {
+    if let Some(path) = args.layout.as_ref() {
+        #[cfg(feature = "ancpp-preprocessor")]
+        {
+            if args.preprocess.preprocess {
+                let cfg = build_config(&args.preprocess, path)?;
+                return Ok(io::load_layout_preprocessed(path, &cfg)?);
+            }
+        }
+        return Ok(io::load_layout(path)?);
+    }
+
+    #[cfg(feature = "ancpp-preprocessor")]
+    {
+        if args.preprocess.preprocess {
+            return Err(CliError::InvalidArgument(
+                "--preprocess requires a layout path".into(),
+            ));
+        }
+    }
+
+    let source = r#"
+/ {
+    behaviors {};
+    macros {};
+    combos {};
+};
+
+keymap {
+    compatible = "zmk,keymap";
+    base {
+        bindings = < &none >;
+    };
+};
+"#;
+    let document = DtsDocument::parse_str(source).map_err(|err| CliError::ParseLayout {
+        path: PathBuf::from("<memory>"),
+        source: err,
+    })?;
+    let text = document.to_string().map_err(CliError::Serialize)?;
+    Ok(io::LoadedLayout {
+        path: PathBuf::from("<memory>"),
+        text,
+        document,
+    })
 }
