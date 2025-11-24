@@ -60,7 +60,7 @@ pub enum Command {
     #[command(subcommand)]
     Profiles(ProfilesCommand),
     #[command(subcommand)]
-    Layer(LayerCommand),
+    Keymap(KeymapCommand),
 }
 
 #[derive(Args, Clone)]
@@ -153,7 +153,7 @@ pub enum ProfilesCommand {
 }
 
 #[derive(Subcommand)]
-pub enum LayerCommand {
+pub enum KeymapCommand {
     Export(LayerExportArgs),
     Import(LayerImportArgs),
 }

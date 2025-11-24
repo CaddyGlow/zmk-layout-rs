@@ -5,7 +5,7 @@ mod script;
 mod tasks;
 
 use crate::cli::{
-    app::{Command, FirmwareCommand, LayerCommand, ProfilesCommand},
+    app::{Command, FirmwareCommand, KeymapCommand, ProfilesCommand},
     error::CliError,
 };
 
@@ -19,7 +19,7 @@ pub fn dispatch(cli: Cli) -> Result<i32, CliError> {
         Command::Script(args) => script::run(&args),
         Command::Firmware(cmd) => run_firmware(cmd),
         Command::Profiles(cmd) => run_profiles(cmd),
-        Command::Layer(cmd) => run_layer(cmd),
+        Command::Keymap(cmd) => run_keymap(cmd),
     }
 }
 
@@ -37,9 +37,9 @@ fn run_profiles(command: ProfilesCommand) -> Result<i32, CliError> {
     }
 }
 
-fn run_layer(command: LayerCommand) -> Result<i32, CliError> {
+fn run_keymap(command: KeymapCommand) -> Result<i32, CliError> {
     match command {
-        LayerCommand::Export(args) => layer::export(&args),
-        LayerCommand::Import(args) => layer::import(&args),
+        KeymapCommand::Export(args) => layer::export(&args),
+        KeymapCommand::Import(args) => layer::import(&args),
     }
 }
