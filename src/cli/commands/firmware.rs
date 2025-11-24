@@ -164,6 +164,10 @@ fn build_firmware_request(
         let (key, value) = parse_env_var(pair)?;
         builder = builder.env(key, value);
     }
+    for def in &args.kconfig_defs {
+        let (key, value) = parse_kconfig_def(def)?;
+        builder = builder.kconfig_def(key, value);
+    }
     let builder = apply_firmware_layout(builder, args)?;
     Ok(builder.build()?)
 }
@@ -234,6 +238,18 @@ fn parse_env_var(input: &str) -> Result<(String, String), CliError> {
     Ok((key.to_string(), value.to_string()))
 }
 
+fn parse_kconfig_def(input: &str) -> Result<(String, String), CliError> {
+    let mut parts = input.splitn(2, '=');
+    let key = parts
+        .next()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| CliError::InvalidKconfigDef(input.to_string()))?;
+    let value = parts
+        .next()
+        .ok_or_else(|| CliError::InvalidKconfigDef(input.to_string()))?;
+    Ok((key.to_string(), value.to_string()))
+}
+
 fn print_firmware_request(request: &BuildRequest) {
     let toolchain = match (&request.toolchain_id, request.keyboard_profile()) {
         (Some(id), _) => id.clone(),
@@ -264,6 +280,13 @@ fn print_firmware_request(request: &BuildRequest) {
     } else {
         for (key, value) in &request.extra_env {
             println!("env      : {key}={value}");
+        }
+    }
+    if request.kconfig_defs.is_empty() {
+        println!("kconfig  : (none)");
+    } else {
+        for (key, value) in &request.kconfig_defs {
+            println!("kconfig  : {key}={value}");
         }
     }
 }

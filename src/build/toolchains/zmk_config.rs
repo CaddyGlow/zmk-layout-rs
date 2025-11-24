@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::build::{
     docker::{DockerBackend, DockerInvocation, OutputHandler, VolumeMode, VolumeMount},
     error::BuildError,
+    kconfig::append_kconfig_defs,
     layout::KeymapArtifacts,
     logs::LogFile,
     manifest::{BuildTarget, ToolchainKind},
@@ -52,7 +53,7 @@ impl Toolchain for ZmkConfigToolchain {
         target: &BuildTarget,
         docker: &dyn DockerBackend,
     ) -> Result<ToolchainRunResult, BuildError> {
-        place_layout_files(ctx.workspace, ctx.layout, target)?;
+        place_layout_files(ctx.workspace, ctx.layout, target, &ctx.request.kconfig_defs)?;
         let config = resolve_toolchain_config(ctx.profile, target, &ctx.profile.id);
         let build_dir = ctx.workspace.build_dir_for(&target.id);
         fs::create_dir_all(&build_dir).map_err(BuildError::Io)?;
@@ -97,6 +98,7 @@ fn place_layout_files(
     workspace: &WorkspaceHandle,
     layout: &KeymapArtifacts,
     target: &BuildTarget,
+    kconfig_defs: &BTreeMap<String, String>,
 ) -> Result<(), BuildError> {
     let keymap_src = layout
         .keymap
@@ -108,19 +110,28 @@ fn place_layout_files(
         fs::create_dir_all(&shield_dir).map_err(BuildError::Io)?;
         let keymap_dest = shield_dir.join(format!("{shield}.keymap"));
         fs::copy(keymap_src, &keymap_dest).map_err(BuildError::Io)?;
+        let config_dest = shield_dir.join(format!("{shield}.conf"));
         if let Some(config_src) = layout.config.as_ref() {
-            let config_dest = shield_dir.join(format!("{shield}.conf"));
             fs::copy(config_src, &config_dest).map_err(BuildError::Io)?;
+            append_kconfig_defs(&config_dest, kconfig_defs)?;
+        } else if !kconfig_defs.is_empty() {
+            fs::write(&config_dest, b"").map_err(BuildError::Io)?;
+            append_kconfig_defs(&config_dest, kconfig_defs)?;
         }
-    } else {
-        let board_dir = config_root.join("boards").join(&target.board);
-        fs::create_dir_all(&board_dir).map_err(BuildError::Io)?;
-        let keymap_dest = board_dir.join(format!("{}.keymap", target.board));
-        fs::copy(keymap_src, &keymap_dest).map_err(BuildError::Io)?;
-        if let Some(config_src) = layout.config.as_ref() {
-            let config_dest = board_dir.join(format!("{}.conf", target.board));
-            fs::copy(config_src, &config_dest).map_err(BuildError::Io)?;
-        }
+        return Ok(());
+    }
+
+    let board_dir = config_root.join("boards").join(&target.board);
+    fs::create_dir_all(&board_dir).map_err(BuildError::Io)?;
+    let keymap_dest = board_dir.join(format!("{}.keymap", target.board));
+    fs::copy(keymap_src, &keymap_dest).map_err(BuildError::Io)?;
+    let config_dest = board_dir.join(format!("{}.conf", target.board));
+    if let Some(config_src) = layout.config.as_ref() {
+        fs::copy(config_src, &config_dest).map_err(BuildError::Io)?;
+        append_kconfig_defs(&config_dest, kconfig_defs)?;
+    } else if !kconfig_defs.is_empty() {
+        fs::write(&config_dest, b"").map_err(BuildError::Io)?;
+        append_kconfig_defs(&config_dest, kconfig_defs)?;
     }
     Ok(())
 }
@@ -307,6 +318,9 @@ impl ZmkConfigToolchain {
             cmake_args.push(format!("-DSHIELD={shield}"));
         }
         for (key, value) in &target.cmake_defs {
+            cmake_args.push(format!("-D{key}={value}"));
+        }
+        for (key, value) in &ctx.request.kconfig_defs {
             cmake_args.push(format!("-D{key}={value}"));
         }
 

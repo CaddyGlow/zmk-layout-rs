@@ -1,10 +1,11 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, fs, path::PathBuf, sync::Arc};
 
 use crate::{
     adapters::standard::AdapterLayout,
     build::{
         docker::{DockerBackend, DockerInvocation, OutputHandler, VolumeMode, VolumeMount},
         error::BuildError,
+        kconfig::append_kconfig_defs,
         layout::KeymapArtifacts,
         logs::LogFile,
         manifest::{BuildTarget, ToolchainKind},
@@ -43,7 +44,12 @@ impl Toolchain for MoergoToolchain {
     ) -> Result<ToolchainRunResult, BuildError> {
         let config = resolve_toolchain_config(ctx.profile, target, &ctx.profile.id);
         let layout_path = ensure_layout_json(ctx.workspace, ctx.layout)?;
-        let keymap_inputs = stage_moergo_inputs(ctx.workspace, ctx.layout, &target.board)?;
+        let keymap_inputs = stage_moergo_inputs(
+            ctx.workspace,
+            ctx.layout,
+            &target.board,
+            &ctx.request.kconfig_defs,
+        )?;
         let container_layout = ctx
             .workspace
             .container_path(&layout_path)
@@ -154,6 +160,7 @@ fn stage_moergo_inputs(
     workspace: &WorkspaceHandle,
     artifacts: &KeymapArtifacts,
     board: &str,
+    kconfig_defs: &BTreeMap<String, String>,
 ) -> Result<MoergoInputPaths, BuildError> {
     let keymap_src = artifacts
         .keymap
@@ -172,6 +179,7 @@ fn stage_moergo_inputs(
         // Minimal kconfig for MoErgo builds can be empty; create a stub if missing.
         fs::write(&kconfig_dest, b"").map_err(BuildError::Io)?;
     }
+    append_kconfig_defs(&kconfig_dest, kconfig_defs)?;
 
     // Copy default.nix template to config directory
     let default_nix = include_str!("../../../toolchains/moergo/default.nix");

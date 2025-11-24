@@ -63,6 +63,8 @@ Key options:
   + `--kconfig`).
 - `--target` can be repeated to restrict the build to a subset of target IDs.
 - `--env KEY=VALUE` overrides environment variables for the Docker invocation.
+- `-D/--kconfig-def NAME=VALUE` appends additional Kconfig options (forwarded as
+  `-D` CMake args for west builds and written into the staged `.conf` file).
 - `--disable-cache` skips cache hydration/persist so temporary workspaces are
   always clean.
 

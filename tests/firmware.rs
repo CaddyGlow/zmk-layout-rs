@@ -140,6 +140,12 @@ fn firmware_builder_runs_moergo_toolchain() {
             workspace.join("config/nice_nano_v2.conf").exists(),
             "kconfig should be staged for the MoErgo toolchain"
         );
+        let config_text =
+            fs::read_to_string(workspace.join("config/nice_nano_v2.conf")).expect("config text");
+        assert!(
+            config_text.contains("CONFIG_TEST_OVERRIDE=123"),
+            "kconfig definitions from the CLI should be appended"
+        );
     });
     let builder = FirmwareBuilder::new(manifest, Box::new(docker.clone()));
     let output_dir = tempdir().expect("tempdir");
@@ -147,6 +153,7 @@ fn firmware_builder_runs_moergo_toolchain() {
         .builder()
         .keyboard("glove80")
         .target("left")
+        .kconfig_def("CONFIG_TEST_OVERRIDE", "123")
         .layout_files(fixture("cli_base.dts"), Some(fixture("sample_config.dtsi")))
         .output_dir(output_dir.path().to_path_buf())
         .build()
@@ -257,6 +264,13 @@ fn firmware_builder_runs_zmk_toolchain() {
                 let build_dir = workspace.join("build/right/zephyr");
                 fs::create_dir_all(&build_dir).expect("build dir");
                 fs::write(build_dir.join("firmware.uf2"), b"demo").expect("artifact");
+                let config_path =
+                    workspace.join("config/boards/shields/glove80_right/glove80_right.conf");
+                let config_text = fs::read_to_string(&config_path).expect("config text");
+                assert!(
+                    config_text.contains("CONFIG_TEST_FEATURE=\"demo\""),
+                    "kconfig definitions should be appended to the staged config"
+                );
             }
             _ => {}
         }
@@ -268,6 +282,7 @@ fn firmware_builder_runs_zmk_toolchain() {
         .keyboard("glove80")
         .toolchain("zmk")
         .target("right")
+        .kconfig_def("CONFIG_TEST_FEATURE", "\"demo\"")
         .layout_files(fixture("cli_base.dts"), Some(fixture("sample_config.dtsi")))
         .output_dir(output_dir.path().to_path_buf())
         .build()
@@ -318,6 +333,13 @@ fn firmware_builder_runs_zmk_toolchain() {
             .iter()
             .any(|arg| arg.contains("-DSHIELD=glove80_right")),
         "shield should be passed to west build"
+    );
+    assert!(
+        record
+            .command
+            .iter()
+            .any(|arg| arg == "-DCONFIG_TEST_FEATURE=\"demo\""),
+        "kconfig -D definitions should propagate to west build"
     );
     assert_eq!(
         record.env.get("ZMK_CONFIG").map(String::as_str),

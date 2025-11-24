@@ -40,6 +40,7 @@ pub struct BuildRequest {
     pub layout: LayoutSource,
     pub output_dir: PathBuf,
     pub extra_env: BTreeMap<String, String>,
+    pub kconfig_defs: BTreeMap<String, String>,
     pub disable_cache: bool,
     pub manifest: Arc<FirmwareManifest>,
     pub progress: Arc<dyn ProgressReporter>,
@@ -63,6 +64,10 @@ impl fmt::Debug for BuildRequest {
             .field(
                 "env_keys",
                 &self.extra_env.keys().cloned().collect::<Vec<_>>(),
+            )
+            .field(
+                "kconfig_defs",
+                &self.kconfig_defs.keys().cloned().collect::<Vec<_>>(),
             )
             .field("manifest_version", &self.manifest.version)
             .finish_non_exhaustive()
@@ -89,6 +94,7 @@ pub struct BuildRequestBuilder {
     layout: Option<LayoutSource>,
     output_dir: Option<PathBuf>,
     extra_env: BTreeMap<String, String>,
+    kconfig_defs: BTreeMap<String, String>,
     disable_cache: bool,
     progress: Option<Arc<dyn ProgressReporter>>,
 }
@@ -103,6 +109,7 @@ impl BuildRequestBuilder {
             layout: None,
             output_dir: None,
             extra_env: BTreeMap::new(),
+            kconfig_defs: BTreeMap::new(),
             disable_cache: false,
             progress: None,
         }
@@ -161,6 +168,11 @@ impl BuildRequestBuilder {
         self
     }
 
+    pub fn kconfig_def(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.kconfig_defs.insert(key.into(), value.into());
+        self
+    }
+
     pub fn disable_cache(mut self, flag: bool) -> Self {
         self.disable_cache = flag;
         self
@@ -215,6 +227,7 @@ impl BuildRequestBuilder {
             layout,
             output_dir,
             extra_env: self.extra_env,
+            kconfig_defs: self.kconfig_defs,
             disable_cache: self.disable_cache,
             manifest,
             progress,

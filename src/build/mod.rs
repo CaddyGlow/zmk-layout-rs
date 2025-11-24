@@ -3,6 +3,7 @@
 pub mod builder;
 pub mod docker;
 pub mod error;
+pub mod kconfig;
 pub mod layout;
 pub mod logs;
 pub mod manifest;

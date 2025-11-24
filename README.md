@@ -283,7 +283,8 @@ zmk-layout firmware build \
 ```
 
 Key options: supply exactly one layout input (`--layout-json`, `--layout-dts`, or `--keymap` plus an optional `--kconfig`),
-repeat `--target` to limit which manifest targets build, use `--env KEY=VALUE` for ad-hoc environment overrides, and add
+repeat `--target` to limit which manifest targets build, use `--env KEY=VALUE` for ad-hoc environment overrides, add
+`-D/--kconfig-def NAME=VALUE` to append Kconfig options (also forwarded as west `-D` args), and enable
 `--disable-cache` or `--dry-run` when you want clean workspaces or a printed request without touching Docker. For manifest
 schema details, caching policies, and artifact/log expectations see [`docs/firmware_building.md`](docs/firmware_building.md).
 

@@ -44,6 +44,8 @@ pub enum CliError {
     FirmwareLayout(String),
     #[error("invalid env specification `{0}`, expected KEY=VALUE")]
     InvalidEnv(String),
+    #[error("invalid kconfig definition `{0}`, expected NAME=VALUE")]
+    InvalidKconfigDef(String),
     #[error("script execution error: {0}")]
     ScriptExecution(#[from] ScriptExecutionError),
     #[error("profile check error: {0}")]

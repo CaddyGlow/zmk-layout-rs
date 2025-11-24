@@ -319,6 +319,13 @@ pub struct FirmwareBuildArgs {
     )]
     pub kconfig: Option<PathBuf>,
     #[arg(
+        short = 'D',
+        long = "kconfig-def",
+        value_name = "NAME=VALUE",
+        help = "Override or append Kconfig options (repeatable)"
+    )]
+    pub kconfig_defs: Vec<String>,
+    #[arg(
         long = "output-dir",
         value_name = "DIR",
         help = "Directory where artifacts should land"
