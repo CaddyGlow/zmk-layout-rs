@@ -5,8 +5,8 @@ use serde_json::Value as JsonValue;
 use tempfile::tempdir;
 
 use zmk_layout_rs::{
-    adapters::standard::export_standard_str, dts::DtsDocument, layout_engine::LayoutEngine,
-    lua_api::api::install_layout_api, keymap::KeymapDocument,
+    adapters::standard::export_standard_str, dts::DtsDocument, keymap::KeymapDocument,
+    layout_engine::LayoutEngine, lua_api::api::install_layout_api,
 };
 
 fn make_engine() -> LayoutEngine {

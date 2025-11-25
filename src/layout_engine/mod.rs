@@ -1,11 +1,8 @@
 //! Layout mutation helpers shared across tasks, scripts, and future tooling.
 
 use crate::{
-    adapters::ComboSpec,
-    adapters::standard::LayerSpec,
-    bindings::BindingParser,
-    keymap::KeymapDocument,
-    providers::ProviderError,
+    adapters::ComboSpec, adapters::standard::LayerSpec, bindings::BindingParser,
+    keymap::KeymapDocument, providers::ProviderError,
 };
 use serde_json;
 use std::collections::{BTreeMap, HashMap};
@@ -467,7 +464,11 @@ impl LayoutEngine {
     }
 
     pub fn combo_state(&self, name: &str) -> Option<ComboState> {
-        let def = self.document.combos.iter().find(|combo| combo.name == name)?;
+        let def = self
+            .document
+            .combos
+            .iter()
+            .find(|combo| combo.name == name)?;
         Some(ComboState {
             name: def.name.clone(),
             key_positions: def.key_positions.clone(),

@@ -8,11 +8,11 @@ use serde_json::Value;
 
 use crate::{
     adapters::{
+        AdapterError,
         standard::{
             BehaviorSpec, ComboSpec, InputListenerNodeSpec, InputListenerSpec, InputProcessorSpec,
             LayerSpec, MacroSpec,
         },
-        AdapterError,
     },
     bindings::{BindingParser, LayoutBinding, LayoutParam, ParamValue},
     keymap::{KeymapDocument, KeymapMetadata},
@@ -206,8 +206,20 @@ impl MoergoLayout {
             .duration_since(UNIX_EPOCH)
             .map(|dur| dur.as_secs() as i64)
             .unwrap_or_default();
-        let (keyboard, firmware_api_version, locale, uuid, parent_uuid, unlisted, date, tags, cdb, cdt, cfg, layout_params) =
-            extract_extras(metadata);
+        let (
+            keyboard,
+            firmware_api_version,
+            locale,
+            uuid,
+            parent_uuid,
+            unlisted,
+            date,
+            tags,
+            cdb,
+            cdt,
+            cfg,
+            layout_params,
+        ) = extract_extras(metadata);
 
         Self {
             keyboard: keyboard.or_else(|| Some("glove80".into())),
@@ -685,10 +697,7 @@ fn extract_extras(
             .extras
             .get("config_parameters")
             .and_then(|v| v.as_array().cloned()),
-        metadata
-            .extras
-            .get("layout_parameters")
-            .cloned(),
+        metadata.extras.get("layout_parameters").cloned(),
     )
 }
 
@@ -700,7 +709,12 @@ fn build_extras_from_moergo(layout: &MoergoLayout) -> BTreeMap<String, Value> {
     );
     extras.insert(
         "firmware_api_version".into(),
-        Value::String(layout.firmware_api_version.clone().unwrap_or_else(|| "1".into())),
+        Value::String(
+            layout
+                .firmware_api_version
+                .clone()
+                .unwrap_or_else(|| "1".into()),
+        ),
     );
     extras.insert(
         "locale".into(),

@@ -345,11 +345,9 @@ fn cli_keymap_convert_requires_template_or_profile() {
         .arg("--to")
         .arg("dts");
 
-    cmd.assert()
-        .failure()
-        .stderr(predicates::str::contains(
-            "provide --template or --profile when converting to dts/dtsi",
-        ));
+    cmd.assert().failure().stderr(predicates::str::contains(
+        "provide --template or --profile when converting to dts/dtsi",
+    ));
 }
 
 #[test]
@@ -371,11 +369,9 @@ fn cli_keymap_convert_rejects_vendor_on_json_input() {
         .arg("--vendor")
         .arg("moergo");
 
-    cmd.assert()
-        .failure()
-        .stderr(predicates::str::contains(
-            "--vendor is only supported for Devicetree input formats",
-        ));
+    cmd.assert().failure().stderr(predicates::str::contains(
+        "--vendor is only supported for Devicetree input formats",
+    ));
 }
 
 #[test]

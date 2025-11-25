@@ -255,9 +255,7 @@ impl LayoutFormattingRow {
 impl LayoutDetection {
     /// Returns true if any configured marker or regex matches the rendered DTS text.
     pub fn matches(&self, rendered: &str) -> bool {
-        self.markers
-            .iter()
-            .any(|marker| rendered.contains(marker))
+        self.markers.iter().any(|marker| rendered.contains(marker))
             || self
                 .regex
                 .iter()

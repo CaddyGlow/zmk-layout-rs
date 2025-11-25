@@ -53,10 +53,7 @@ fn main() {
 fn run() -> Result<(), AdapterError> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Export {
-            dts,
-            json,
-        } => {
+        Command::Export { dts, json } => {
             let source = fs::read_to_string(&dts)?;
             let document = DtsDocument::parse_str(&source).map_err(DtsError::from)?;
             export_standard_file(&document, json)?;

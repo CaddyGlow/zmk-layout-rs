@@ -23,17 +23,11 @@ pub fn convert(args: &KeymapConvertArgs) -> Result<i32, CliError> {
     let output_text = match args.to {
         KeymapFormat::Json => keymap_to_standard_json(&keymap)?,
         KeymapFormat::MoergoJson => moergo::export_moergo_json(&keymap)?,
-        KeymapFormat::Dts | KeymapFormat::Dtsi => {
-            keymap_to_dts(&keymap, args)?
-        }
+        KeymapFormat::Dts | KeymapFormat::Dtsi => keymap_to_dts(&keymap, args)?,
     };
 
     io::write_text(&args.output, &output_text)?;
-    eprintln!(
-        "wrote {} to {}",
-        args.to.as_str(),
-        args.output.display()
-    );
+    eprintln!("wrote {} to {}", args.to.as_str(), args.output.display());
     Ok(0)
 }
 
@@ -47,8 +41,9 @@ fn load_keymap(args: &KeymapConvertArgs) -> Result<KeymapDocument, CliError> {
 
 fn load_standard_json(path: &PathBuf) -> Result<KeymapDocument, CliError> {
     let text = io::read_text(path)?;
-    let adapter = AdapterLayout::from_standard_json(&text)
-        .map_err(|err| CliError::InvalidArgument(format!("failed to parse standard JSON: {err}")))?;
+    let adapter = AdapterLayout::from_standard_json(&text).map_err(|err| {
+        CliError::InvalidArgument(format!("failed to parse standard JSON: {err}"))
+    })?;
     Ok(KeymapDocument::from(adapter))
 }
 
@@ -92,8 +87,9 @@ fn load_dts_as_keymap(args: &KeymapConvertArgs) -> Result<KeymapDocument, CliErr
         })?;
         export_standard_str(&document)?
     };
-    let adapter = AdapterLayout::from_standard_json(&contents)
-        .map_err(|err| CliError::InvalidArgument(format!("failed to parse exported JSON: {err}")))?;
+    let adapter = AdapterLayout::from_standard_json(&contents).map_err(|err| {
+        CliError::InvalidArgument(format!("failed to parse exported JSON: {err}"))
+    })?;
     Ok(KeymapDocument::from(adapter))
 }
 
@@ -144,9 +140,9 @@ fn load_or_detect_profile(
     source: &str,
 ) -> Result<Option<KeyboardProfileDoc>, CliError> {
     if let Some(profile) = profile_name {
-        return KeyboardProfileDoc::load(profile)
-            .map(Some)
-            .map_err(|err| CliError::InvalidArgument(format!("failed to load profile {profile}: {err}")));
+        return KeyboardProfileDoc::load(profile).map(Some).map_err(|err| {
+            CliError::InvalidArgument(format!("failed to load profile {profile}: {err}"))
+        });
     }
 
     let matches = KeyboardProfileDoc::detect_from_rendered(source);

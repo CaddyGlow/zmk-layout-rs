@@ -6,9 +6,9 @@ use std::{
 use thiserror::Error;
 
 use crate::{
+    adapters::AdapterError,
     adapters::standard::AdapterLayout,
     dts::DtsDocument,
-    adapters::AdapterError,
     keymap::KeymapDocument,
     layout_handle::{LayoutHandle, LayoutOrigin},
     serialization::SerializeError,
@@ -102,10 +102,11 @@ pub fn load_layout_preprocessed(
         path: path.clone(),
         source,
     })?;
-    let document = DtsDocument::parse_str(&output.expanded).map_err(|source| IoError::ParseLayout {
-        path: path.clone(),
-        source,
-    })?;
+    let document =
+        DtsDocument::parse_str(&output.expanded).map_err(|source| IoError::ParseLayout {
+            path: path.clone(),
+            source,
+        })?;
     let adapter = AdapterLayout::from_document(&document);
     let keymap = KeymapDocument::from(adapter);
     Ok(LayoutHandle {
@@ -122,7 +123,9 @@ pub fn load_layout_preprocessed(
 pub fn serialize_keymap(document: KeymapDocument) -> Result<String, IoError> {
     let adapter: AdapterLayout = document.into();
     let base = minimal_dts_document();
-    let updated = adapter.apply_to_document(base).map_err(AdapterError::from)?;
+    let updated = adapter
+        .apply_to_document(base)
+        .map_err(AdapterError::from)?;
     Ok(updated.to_string()?)
 }
 
@@ -137,7 +140,9 @@ pub fn serialize_keymap_with_base(
         path: base_path.as_ref().to_path_buf(),
         source,
     })?;
-    let updated = adapter.apply_to_document(base).map_err(AdapterError::from)?;
+    let updated = adapter
+        .apply_to_document(base)
+        .map_err(AdapterError::from)?;
     Ok(updated.to_string()?)
 }
 

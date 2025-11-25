@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
 
 use crate::{
-    layout_handle::{LayoutHandle, LayoutHandleError, LayoutOrigin},
     keymap::KeymapDocument,
+    layout_handle::{LayoutHandle, LayoutHandleError, LayoutOrigin},
 };
 
 use super::{error::BuildError, request::LayoutSource, workspace::WorkspaceHandle};
@@ -37,9 +37,8 @@ impl LayoutStager {
             LayoutSource::JsonValue(value) => {
                 let json_text = serde_json::to_string(value)
                     .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
-                let mut handle =
-                    LayoutHandle::from_json_text(json_text, LayoutOrigin::JsonText)
-                        .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+                let mut handle = LayoutHandle::from_json_text(json_text, LayoutOrigin::JsonText)
+                    .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
                 self.write_handle(&mut handle, workspace, true)
             }
             LayoutSource::Document(document) => {
@@ -47,7 +46,9 @@ impl LayoutStager {
                     source_path: None,
                     raw_text: None,
                     preprocessed_text: None,
-                    keymap: KeymapDocument::from(crate::adapters::standard::AdapterLayout::from_document(&document)),
+                    keymap: KeymapDocument::from(
+                        crate::adapters::standard::AdapterLayout::from_document(&document),
+                    ),
                     profile: profile.map(|p| p.document.clone()),
                     origin: LayoutOrigin::Document,
                 };
@@ -123,7 +124,6 @@ impl LayoutStager {
         }
         Ok(artifacts)
     }
-
 }
 
 #[cfg(test)]

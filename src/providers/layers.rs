@@ -358,11 +358,9 @@ impl KeymapProvider {
     fn behavior_node_mut(&mut self, behavior: &str) -> Result<&mut DtNode, ProviderError> {
         let root_index = find_behavior_root(&mut self.document.items, behavior);
         let root = self.behavior_root_node_mut(root_index)?;
-        if let Some(idx) = root
-            .children
-            .iter()
-            .position(|item| matches!(item, crate::ast::DtItem::Node(node) if node.name == behavior))
-        {
+        if let Some(idx) = root.children.iter().position(
+            |item| matches!(item, crate::ast::DtItem::Node(node) if node.name == behavior),
+        ) {
             return Self::behavior_child_node_mut(root, idx);
         }
         root.children
@@ -374,10 +372,7 @@ impl KeymapProvider {
         ensure_layer_node(&mut self.document.items, layer)
     }
 
-    fn behavior_root_node_mut(
-        &mut self,
-        index: usize,
-    ) -> Result<&mut DtNode, ProviderError> {
+    fn behavior_root_node_mut(&mut self, index: usize) -> Result<&mut DtNode, ProviderError> {
         match self.document.items.get_mut(index) {
             Some(crate::ast::DtItem::Node(node)) => Ok(node),
             Some(_) => Err(ProviderError::DocumentCorrupted(
@@ -512,7 +507,9 @@ impl KeymapDocument {
         behavior: &str,
         binding_cells: Option<u32>,
     ) -> Result<(), ProviderError> {
-        self.with_provider_mut(|provider| provider.set_behavior_binding_cells(behavior, binding_cells))
+        self.with_provider_mut(|provider| {
+            provider.set_behavior_binding_cells(behavior, binding_cells)
+        })
     }
 
     pub fn set_behavior_bindings(
