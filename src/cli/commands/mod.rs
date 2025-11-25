@@ -1,5 +1,5 @@
 mod firmware;
-mod layer;
+mod keymap;
 mod profiles;
 mod script;
 mod tasks;
@@ -39,7 +39,7 @@ fn run_profiles(command: ProfilesCommand) -> Result<i32, CliError> {
 
 fn run_keymap(command: KeymapCommand) -> Result<i32, CliError> {
     match command {
-        KeymapCommand::Export(args) => layer::export(&args),
-        KeymapCommand::Import(args) => layer::import(&args),
+        KeymapCommand::ToJson(args) => keymap::to_json(&args),
+        KeymapCommand::ToDts(args) => keymap::to_dts(&args),
     }
 }

@@ -224,7 +224,7 @@ Build with `--features ancpp-preprocessor` to enable C-preprocessing before pars
 
 - `--preprocess` opt-in flag; add `--cpp-include DIR` for zmk-helpers and your config dir, `--cpp-system-include DIR` for Zephyr/ZMK headers, and `--cpp-define NAME[=VALUE]` for things like `HOST_OS=2`.
 - Tasks/Script: `zmk-layout apply/validate/diff` and `zmk-layout script` accept the flags and preprocess `--base-layout` / `--layout` first.
-- Layer export: `zmk-layout layer export --preprocess ... --dts config/keymap.dts --json layout.json` expands macros before exporting JSON.
+- Keymap export: `zmk-layout keymap to-json --preprocess ... --dts config/keymap.dts --json layout.json` expands macros before exporting JSON.
 - Firmware build: `zmk-layout firmware build --preprocess ... --layout-dts config/keymap.dts ...` preprocesses the DTS before feeding the build pipeline.
 
 The ancpp crate is MPL-2.0 with additional terms; keep it feature-gated if your project requires MIT/Apache-only dependencies.

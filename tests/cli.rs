@@ -190,7 +190,7 @@ fn cli_profiles_check_all_scans_directory() {
 }
 
 #[test]
-fn cli_layer_round_trip_without_template_placeholders() {
+fn cli_keymap_round_trip_without_template_placeholders() {
     let dir = tempdir().expect("tempdir");
     let template = fixture("sample_keymap.dtsi");
     let dts_path = dir.path().join("template.dts");
@@ -199,8 +199,8 @@ fn cli_layer_round_trip_without_template_placeholders() {
 
     let mut export_cmd = cargo_bin_cmd!("zmk-layout");
     export_cmd
-        .arg("layer")
-        .arg("export")
+        .arg("keymap")
+        .arg("to-json")
         .arg("--dts")
         .arg(&dts_path)
         .arg("--json")
@@ -210,8 +210,8 @@ fn cli_layer_round_trip_without_template_placeholders() {
     let output_path = dir.path().join("output.dts");
     let mut import_cmd = cargo_bin_cmd!("zmk-layout");
     import_cmd
-        .arg("layer")
-        .arg("import")
+        .arg("keymap")
+        .arg("to-dts")
         .arg("--json")
         .arg(&json_path)
         .arg("--template")
@@ -233,7 +233,7 @@ fn cli_layer_round_trip_without_template_placeholders() {
 }
 
 #[test]
-fn cli_layer_import_export_with_template_placeholders() {
+fn cli_keymap_round_trip_with_template_placeholders() {
     let dir = tempdir().expect("tempdir");
     let template = fixture("layer_template.j2");
     let json_path = dir.path().join("layout.json");
@@ -254,8 +254,8 @@ fn cli_layer_import_export_with_template_placeholders() {
     let output_path = dir.path().join("rendered.dts");
     let mut import_cmd = cargo_bin_cmd!("zmk-layout");
     import_cmd
-        .arg("layer")
-        .arg("import")
+        .arg("keymap")
+        .arg("to-dts")
         .arg("--json")
         .arg(&json_path)
         .arg("--template")
@@ -278,8 +278,8 @@ fn cli_layer_import_export_with_template_placeholders() {
     let roundtrip_json = dir.path().join("roundtrip.json");
     let mut export_cmd = cargo_bin_cmd!("zmk-layout");
     export_cmd
-        .arg("layer")
-        .arg("export")
+        .arg("keymap")
+        .arg("to-json")
         .arg("--dts")
         .arg(&output_path)
         .arg("--template")

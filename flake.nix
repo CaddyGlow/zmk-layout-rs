@@ -39,6 +39,7 @@
           "rust-src"
           "rustc"
           "rustfmt"
+          "rust-analyzer"
         ];
 
         # Cross stdlib for Windows GNU target

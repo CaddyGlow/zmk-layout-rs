@@ -154,8 +154,10 @@ pub enum ProfilesCommand {
 
 #[derive(Subcommand)]
 pub enum KeymapCommand {
-    Export(LayerExportArgs),
-    Import(LayerImportArgs),
+    #[command(name = "to-json")]
+    ToJson(KeymapToJsonArgs),
+    #[command(name = "to-dts")]
+    ToDts(KeymapToDtsArgs),
 }
 
 #[derive(Args, Clone)]
@@ -178,11 +180,18 @@ pub struct ProfileCheckArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct LayerExportArgs {
+pub struct KeymapToJsonArgs {
     #[arg(long, value_name = "FILE", help = "Input DTS/.dtsi file to parse")]
     pub dts: PathBuf,
     #[arg(long, value_name = "FILE", help = "Destination JSON file to write")]
     pub json: PathBuf,
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Template used to capture placeholder values while exporting",
+        requires = "json"
+    )]
+    pub template: Option<PathBuf>,
     #[arg(
         long,
         value_enum,
@@ -195,7 +204,7 @@ pub struct LayerExportArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct LayerImportArgs {
+pub struct KeymapToDtsArgs {
     #[arg(long, value_name = "FILE", help = "Standard JSON layout file")]
     pub json: PathBuf,
     #[arg(
