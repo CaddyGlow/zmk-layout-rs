@@ -43,9 +43,9 @@ comment = "Move ESC onto TAB"
 | `combo`       | `name`, `key_positions`, `binding`; optional `timeout_ms`, `layers`, `conditions` | `combos.<name>`               | `layers` accepts numeric indexes or layer names. `conditions` is a list of strings (e.g., `layer_state == nav`) stored alongside the combo. |
 | `layer`       | `name`, `bindings`; optional `metadata` map                              | `layers.<name>`               | Metadata entries (color, label, etc.) are written into properties. |
 | `layer-order` | `layer` plus `position` *or* `before`/`after`                            | `layers.order.<layer>`        | Reorders the layer list in the keymap node. |
-| `behavior`    | `behavior`, `settings` map                                              | `behaviors.<name>`            | Updates behavior properties (`bindings`, timing fields, labels, etc.). |
-| `meta`        | `key`, `value`                                                          | `meta.<key>`                  | Stores arbitrary metadata under a top-level `meta { key = value; }` block for documentation/export tooling. |
-| `script`      | `filename` or `script`, optional `args`                                 | `scripts.<identifier>`        | Executes Lua automation with access to the same layout engine used by declarative tasks. |
+| `behavior`    | `behavior`, `settings` map                                              | `behaviors.<name>`            | Updates behavior bindings and properties (`bindings` array is optional; timing/label fields are merged). |
+| `meta`        | `key`, `value`                                                          | `meta.<key>`                  | Stores metadata extras on the layout (consumed by adapters/templates and surfaced in task summaries). |
+| `script`      | `filename` or `script`, optional `args`                                 | `scripts.<identifier>`        | Executes Lua automation with the same helpers exposed by `zmk-layout keymap lua`. |
 
 ### Conflict Policies & `expected`
 
@@ -54,7 +54,7 @@ Each task inherits `config.default_conflict` and may override it per entry. Poli
 - `prompt` (default): report a conflict and stop the run.
 - `override`: log the mismatch and keep going.
 - `skip`: log the mismatch and ignore the task.
-- `script`: reserved for Lua automation (no-op today).
+- `script`: invoke `config.conflict_script` (Lua) to decide whether to override, skip, or abort.
 
 To guard against upstream changes, provide either `from = "&kp Q"` (override tasks) or the generic
 `expected = "layers base order"` field. When the actual layout does not match `expected`, the per-task
@@ -67,13 +67,20 @@ three core actions:
 
 ```bash
 # Apply tasks and write to a new DTS
-zmk-layout keymap apply --tasks layout_tasks.toml --base-layout keymap.dts --output keymap.generated.dts
+zmk-layout keymap apply \
+  --tasks tests/fixtures/tasks_regression_config.toml \
+  --base-layout tests/fixtures/tasks_regression_base.dts \
+  --output out/tasks_regression_base.generated.dts
 
 # Check what would happen without touching the file
-zmk-layout keymap validate --tasks layout_tasks.toml --base-layout keymap.dts
+zmk-layout keymap validate \
+  --tasks tests/fixtures/tasks_regression_config.toml \
+  --base-layout tests/fixtures/tasks_regression_base.dts
 
 # Preview changes as a unified diff
-zmk-layout keymap diff --tasks layout_tasks.toml --base-layout keymap.dts
+zmk-layout keymap diff \
+  --tasks tests/fixtures/tasks_regression_config.toml \
+  --base-layout tests/fixtures/tasks_regression_base.dts
 ```
 
 Helpful flags:
@@ -105,8 +112,8 @@ targets ensure two people editing the same slot are prompted to resolve the clas
   macros available, etc.).
 - **Immediate conflicts** – inspect the `before => after` snippets printed for each task or add an
   `expected = "..."` string when the task should bail if the base layout drifted.
-- **Silent skips** – behavior/meta/script tasks are parsed today but treated as future work, so the CLI
-  will report them as `SKIPPED`.
+- **Skipped behavior/meta/script tasks** – these tasks execute now; they only skip when the settings
+  map is empty or a conflict policy tells the engine to skip a mismatched `expected` block.
 
 For additional background, see `LAYOUT_TASK_PLAN.md` for the full roadmap.
 
@@ -151,20 +158,17 @@ still surface the data.
 ## Lua Scripting
 
 `script` tasks are now powered by an embedded Lua engine. Scripts can either be inline
-(`script = """ ... """`) or reference a `.lua` file relative to the task file. Each script
-receives a helper API roughly equivalent to the declarative task set:
+(`script = """ ... """`) or reference a `.lua` file relative to the task file. The fluent `layout`
+global (1-based indices) mirrors the declarative task surface:
 
-- `set_binding(layer: string, index: int, binding: string)` – replace a single binding (`override`).
-- `set_layer(layer: string, bindings: array<string>)` – replace the entire binding list (`layer`).
-- `set_layer_metadata(layer: string, metadata: map)` – write layer metadata entries.
-- `move_layer(layer: string, index: int)` – reorder a layer to an absolute index (`layer-order`).
-- `upsert_combo(name: string, positions: array<int>, binding: string)` – basic combo creation.
-- `upsert_combo_full(name, positions, binding, timeout_ms_or_unit, layers: array<int|string>, conditions: array<string>)` – full combo editing, including timeout overrides, layer masks, and condition strings.
-- `set_behavior_bindings(name: string, bindings: array<string>)` – replace a behavior’s bindings.
-- `set_behavior_settings(name: string, settings: map)` – update behavior properties (tapping term, labels, etc.).
-- `set_meta(key: string, value: any)` – add/update entries in the `meta { ... }` block.
-- `log(message: string)` – append notes to the task outcome.
-- `ARGS` – a map built from the task’s `args = { ... }` table, exposed as a global variable.
+- `layout:layer(name)` – stage binding/metadata edits with `:bind`, `:bindings`, `:meta`, `:apply`.
+- `layout:combo(name)` – configure combos with `:keys`, `:binding`, `:timeout`, `:on_layers`, `:when`, `:apply`.
+- `layout:behavior(name)` – update bindings/params with `:bindings`, `:param`, `:apply`.
+- `layout:move_layer(name, index)` / `layout:remove_layer(name)` – reorder or drop layers.
+- `layout:meta(key, value)` – write layout-level metadata extras.
+- Queries: `layout:get_layer`, `layout:get_combo`, `layout:get_behavior`, `layout:list_layers`, `layout:list_combos`, `layout:list_behaviors`.
+- I/O: `layout:load_dts/dtsi/json`, `layout:parse_dts/parse_json`, `layout:save_dts/save_json`, `layout:to_dts_string/to_json_string`.
+- `log(message)` appends notes; globals `ARGS`, `TASK_ID`, `TARGET`, and `COMMENT` are populated during task execution.
 
 Scripts run against a clone of the layout; the mutated document is written back only when the run
 succeeds and the CLI is in apply mode. `validate` still executes the script so logs/errors surface,

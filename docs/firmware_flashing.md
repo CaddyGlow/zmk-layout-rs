@@ -19,23 +19,30 @@ image never lands on the right half (and vice-versa).
   expose a mass storage volume.
 
 ## UX and CLI Flow
-- New command: `zmk-layout firmware flash --keyboard glove80 --artifacts dist`
-  - Optional flags: `--side left|right|both`, `--firmware <path>`, `--build-info
-    <build-info.json>`, `--device <mountpoint>`, `--no-sync`.
+- New command: `zmk-layout firmware flash --manifest profiles/firmwares/glove80.toml --keyboard glove80 --artifacts dist`
+  - Optional flags: `--side left|right|both`, `--firmware <path>`, `--left <path>`, `--right <path>`,
+    `--build-info <build-info.json>`, `--artifacts <dir>`, `--device <mountpoint>`,
+    `--mount-timeout <sec>`, `--copy-timeout <sec>`, `--no-sync`.
+- The manifest supplies the keyboard profile so the flash flow can reuse `hardware.flash` queries and
+  per-side board ids from `hardware.boards`.
 - Default flow when `--side` is absent for split boards:
   1. Prompt: "Put LEFT half in bootloader and plug it in."
   2. Wait for a matching device, mount if needed, copy the left artifact.
   3. Prompt: "Now repeat for RIGHT half." and flash the right artifact.
+- Profiles with `hardware.is_split = true` default to flashing left then right; non-split keyboards
+  only flash the left side unless `--side` is provided.
 - If a single artifact was provided but the keyboard is split, reuse it for all
   requested sides (still validate side/device matching when possible).
 - CLI connects to the existing progress reporter: checkpoints for "detect",
   "copy", "sync", "eject", and warnings for benign detach errors.
 
 ## Artifacts and Side Selection
+- Targets come from the manifest-backed keyboard profile; `--side` narrows that list but still uses
+  the profile to resolve board ids for validation.
 - Source inputs (in priority order):
   1. `--firmware foo.uf2` (single file for every side)
   2. Explicit side flags `--left path --right path`
-  3. `--build-info build-info-*.json` (read `artifacts.per_target` to locate
+  3. `--build-info out/build-info-glove80-zmk.json` (read `artifacts.per_target` to locate
      files for targets named `left`/`right`; fall back to `artifacts.files`
      when only one artifact exists)
   4. Raw directory via `--artifacts DIR` (auto-pick `*left*.uf2`, `*right*.uf2`,
@@ -72,7 +79,8 @@ image never lands on the right half (and vice-versa).
 4. Optional side verification:
    - Read `INFO_UF2.TXT` (or `CURRENT.UF2` header) for a `Board-ID` string.
    - If it matches `hardware.boards.id` or contains `lh`/`rh` hints, ensure we
-     are flashing the correct side; otherwise warn and prompt `--force`.
+     are flashing the correct side; otherwise warn and abort so the user can
+     swap devices.
 5. Stream-copy the artifact to the volume root using buffered I/O and track
    bytes written; respect `copy_timeout`.
 6. `sync` if `sync_after_copy` is true. Treat `ENODEV`/`ENOENT` during sync or
@@ -114,12 +122,13 @@ image never lands on the right half (and vice-versa).
 
 ## Symbol Reference (CLI + API)
 - CLI entrypoint: `zmk-layout firmware flash`
-  - Flags: `--keyboard`, `--side left|right|both`, `--firmware <uf2>`,
-    `--left <uf2>`, `--right <uf2>`, `--build-info <json>`,
-    `--artifacts <dir>`, `--device <mount>`, `--no-sync`, `--force`,
-    `--mount-timeout <sec>`, `--copy-timeout <sec>`.
-  - Reuses existing `--output-dir` concepts only for build; flashing writes
-    nowhere else.
+  - Flags: `--manifest <manifest.toml>`, `--keyboard <id>`,
+    `--side left|right|both`, `--firmware <uf2>`, `--left <uf2>`,
+    `--right <uf2>`, `--build-info <json>`, `--artifacts <dir>`,
+    `--device <mount>`, `--no-sync`, `--mount-timeout <sec>`,
+    `--copy-timeout <sec>`.
+  - Flashing writes directly to the device; build output directories are only
+    relevant for the optional `--build-info` input.
 - New Rust types under `flash` (public):
   - `FlashSide` enum (`Left`, `Right`, `Both`)
   - `FlashTarget` (side + optional board id)
@@ -136,9 +145,21 @@ image never lands on the right half (and vice-versa).
   - Potential addition (TBD): `hardware.flash[*].role` if per-side overrides
     are needed.
 
+## Testing without hardware
+- Enable the fake backend to exercise device listing and flash logging without a real board:
+  - `ZMK_FLASH_FAKE_BACKEND=1`
+  - `ZMK_FLASH_FAKE_MOUNTPOINT=/tmp/fake-mount`
+  - `ZMK_FLASH_FAKE_NAME=FAKE_DEVICE`
+  - `ZMK_FLASH_FAKE_SERIAL=GLV80-FAKE`
+  - `ZMK_FLASH_FAKE_VENDOR=DemoVendor`
+  - `ZMK_FLASH_FAKE_MODEL=DemoModel`
+  - `ZMK_FLASH_FAKE_FSTYPE=vfat`
+- Example: `ZMK_FLASH_FAKE_BACKEND=1 ZMK_FLASH_FAKE_MOUNTPOINT=/tmp/fake-mount zmk-layout firmware flash --manifest profiles/firmwares/usb_flash_dummy.toml --keyboard usb_flash_dummy --firmware out/demo.uf2`
+
 ## Error Handling and Telemetry
 - Hard failures: no matching device within timeout, zero bytes copied, write
-  errors before full length, conflicting side detection without `--force`.
+  errors before full length, conflicting side detection when the profile/device
+  pairing cannot be confirmed.
 - Warnings (non-fatal): device disappeared after full copy, unmount errors,
   missing `INFO_UF2.TXT`, multiple matching devices (prompt user to pick).
 - Progress messages should always include: expected side, device identifier

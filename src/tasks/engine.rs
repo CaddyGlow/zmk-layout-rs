@@ -5,8 +5,8 @@ pub use crate::layout_engine::MetadataMap;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    layout_engine::{LayoutEngine, LayoutEngineError},
     keymap::KeymapDocument,
+    layout_engine::{LayoutEngine, LayoutEngineError},
     tasks::{
         config::{
             BehaviorTask, ComboTask, ConflictPolicy, LayerOrderMovement, LayerOrderTask, LayerTask,
@@ -236,18 +236,13 @@ fn apply_layer_task(
         notes.join(" | ")
     };
 
-    if !apply_or_dry_run(
-        mode,
-        &mut outcome,
-        Some(dry_run_message.as_str()),
-        || {
-            engine.set_layer_bindings(&action.name, &normalized)?;
-            if let Some(meta) = metadata.as_ref() {
-                engine.set_layer_metadata(&action.name, meta)?;
-            }
-            Ok(())
-        },
-    ) {
+    if !apply_or_dry_run(mode, &mut outcome, Some(dry_run_message.as_str()), || {
+        engine.set_layer_bindings(&action.name, &normalized)?;
+        if let Some(meta) = metadata.as_ref() {
+            engine.set_layer_metadata(&action.name, meta)?;
+        }
+        Ok(())
+    }) {
         return outcome;
     }
     outcome.after = Some(format_bindings_raw(&normalized));
@@ -1226,10 +1221,20 @@ set_binding("base", 0, "&kp ESC");
             action: TaskAction::Script(ScriptTask {
                 source: ScriptSource::Inline(
                     r#"
-set_layer_metadata("base", { display_name = "Primary", color = {1, 2, 3} })
-set_layer("base", {"&kp ESC", "&kp W"})
-move_layer("nav", 0)
-upsert_combo_full("combo_new", {0, 1}, "&kp ENTER", 50, {"nav"}, {"layer_state == nav"})
+layout:layer("base")
+  :bindings({"&kp ESC", "&kp W"})
+  :meta("display_name", "\"Primary\"")
+  :apply()
+
+layout:move_layer("nav", 1)
+
+layout:combo("combo_new")
+  :keys({1, 2})
+  :binding("&kp ENTER")
+  :timeout(50)
+  :on_layers({"nav"})
+  :when("layer_state == nav")
+  :apply()
 "#
                     .into(),
                 ),

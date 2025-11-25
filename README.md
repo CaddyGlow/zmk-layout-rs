@@ -258,9 +258,16 @@ zmk-layout keymap lua \
 zmk-layout keymap lua --script scratch/update_layers.lua --layout config/keymap.dts --diff
 ```
 
-Scripts receive the same helper API as `script` tasks (`set_binding`, `set_layer`, `upsert_combo`, etc.) and can emit notes
-with `log("...")`. Pass `--diff` to print a unified diff instead of writing files, or omit `--output` entirely to stream the
-updated DTS to stdout. See `docs/customization_tasks.md` for the full scripting surface.
+Scripts use the fluent `layout` global (1-based indices) shared with `script` tasks:
+
+```lua
+layout:layer("base"):bind(2, "&kp TAB"):apply()
+layout:combo("copy"):keys({28, 29}):binding("&kp C"):apply()
+log("patched base layer")
+```
+
+Pass `--diff` to print a unified diff instead of writing files, or omit `--output` entirely to stream the
+updated DTS to stdout. See `docs/customization_tasks.md` and `docs/layer_api.md` for the full scripting surface.
 
 ### Template-based generation
 

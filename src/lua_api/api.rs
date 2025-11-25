@@ -1,6 +1,8 @@
 use std::{fs, rc::Rc};
 
-use mlua::{Lua, Result as LuaResult, UserData, UserDataMethods};
+use mlua::{
+    Lua, Result as LuaResult, Table as LuaTable, UserData, UserDataMethods, Value as LuaValue,
+};
 
 use super::{
     behavior::BehaviorObject,
@@ -13,7 +15,7 @@ use super::{
         BehaviorInfoObject, ComboInfoObject, LayerInfoObject, list_behavior_definitions,
         list_combo_definitions,
     },
-    util::{SharedLayout, SharedLogs, script_error},
+    util::{SharedLayout, SharedLogs, require_positive_index, script_error},
 };
 
 use crate::{
@@ -30,10 +32,11 @@ use crate::{
     },
     dts::DtsDocument,
     io::serialize_keymap,
-    layout_engine::LayoutEngine,
     keymap::KeymapDocument,
+    layout_engine::LayoutEngine,
 };
 use serde_json;
+use toml::{Value as TomlValue, map::Map as TomlMap};
 
 #[derive(Clone)]
 pub struct LayoutApi {
@@ -72,6 +75,29 @@ impl UserData for LayoutApi {
         methods.add_method("new", |_, this, ()| {
             *this.layout.borrow_mut() = LayoutEngine::empty();
             Ok(())
+        });
+
+        methods.add_method("move_layer", |_, this, (name, index): (String, i64)| {
+            let normalized = require_positive_index(index, "layer")?;
+            this.layout
+                .borrow_mut()
+                .reorder_layer(&name, normalized)
+                .map_err(|err| script_error(err.to_string()))
+        });
+
+        methods.add_method("remove_layer", |_, this, name: String| {
+            this.layout
+                .borrow_mut()
+                .remove_layer(&name)
+                .map_err(|err| script_error(err.to_string()))
+        });
+
+        methods.add_method("meta", |_, this, (key, value): (String, LuaValue)| {
+            let toml = lua_value_to_toml(value)?;
+            this.layout
+                .borrow_mut()
+                .set_meta_entry(&key, &toml)
+                .map_err(|err| script_error(err.to_string()))
         });
 
         methods.add_method("get_layer", |_, this, name: String| {
@@ -167,20 +193,17 @@ impl UserData for LayoutApi {
                 .map_err(|err| script_error(format!("failed to write {path}: {err}")))
         });
 
-        methods.add_method(
-            "save_json",
-            |_, this, path: String| {
-                let document = this.layout.borrow();
-                let keymap = document.document().clone();
-                let adapter: AdapterLayout = keymap.into();
-                let json = adapter
-                    .to_standard_json()
-                    .map_err(|err| script_error(format!("failed to export JSON: {err}")))?;
-                fs::write(&path, json)
-                    .map_err(|err| script_error(format!("failed to write {path}: {err}")))?;
-                Ok(())
-            },
-        );
+        methods.add_method("save_json", |_, this, path: String| {
+            let document = this.layout.borrow();
+            let keymap = document.document().clone();
+            let adapter: AdapterLayout = keymap.into();
+            let json = adapter
+                .to_standard_json()
+                .map_err(|err| script_error(format!("failed to export JSON: {err}")))?;
+            fs::write(&path, json)
+                .map_err(|err| script_error(format!("failed to write {path}: {err}")))?;
+            Ok(())
+        });
 
         methods.add_method("parse_dts", |_, this, source: String| {
             let doc = DtsDocument::parse_str(&source)
@@ -209,17 +232,14 @@ impl UserData for LayoutApi {
                 .map_err(|err| script_error(format!("failed to serialize DTS: {err}")))
         });
 
-        methods.add_method(
-            "to_json_string",
-            |_, this, ()| {
-                let document = this.layout.borrow();
-                let keymap = document.document().clone();
-                let adapter: AdapterLayout = keymap.into();
-                adapter
-                    .to_standard_json()
-                    .map_err(|err| script_error(format!("failed to export JSON: {err}")))
-            },
-        );
+        methods.add_method("to_json_string", |_, this, ()| {
+            let document = this.layout.borrow();
+            let keymap = document.document().clone();
+            let adapter: AdapterLayout = keymap.into();
+            adapter
+                .to_standard_json()
+                .map_err(|err| script_error(format!("failed to export JSON: {err}")))
+        });
 
         methods.add_method(
             "render_template",
@@ -255,6 +275,58 @@ pub fn install_layout_api(lua: &Lua, layout: SharedLayout, logs: SharedLogs) -> 
     let api = LayoutApi::new(layout, logs);
     lua.globals().set("layout", api)?;
     Ok(())
+}
+
+fn lua_value_to_toml(value: LuaValue) -> LuaResult<TomlValue> {
+    match value {
+        LuaValue::Nil => Err(script_error("metadata values cannot be nil")),
+        LuaValue::Boolean(flag) => Ok(TomlValue::Boolean(flag)),
+        LuaValue::Integer(num) => Ok(TomlValue::Integer(num)),
+        LuaValue::Number(num) => Ok(TomlValue::Float(num)),
+        LuaValue::String(text) => Ok(TomlValue::String(text.to_str()?.to_string())),
+        LuaValue::Table(table) => {
+            if table_is_array(&table)? {
+                let mut items = Vec::new();
+                for entry in table.sequence_values::<LuaValue>() {
+                    items.push(lua_value_to_toml(entry?)?);
+                }
+                Ok(TomlValue::Array(items))
+            } else {
+                let mut map = TomlMap::new();
+                for pair in table.pairs::<LuaValue, LuaValue>() {
+                    let (key, entry) = pair?;
+                    let key = match key {
+                        LuaValue::String(name) => name.to_str()?.to_string(),
+                        other => {
+                            return Err(script_error(format!(
+                                "metadata keys must be strings, found {}",
+                                other.type_name()
+                            )));
+                        }
+                    };
+                    map.insert(key, lua_value_to_toml(entry)?);
+                }
+                Ok(TomlValue::Table(map))
+            }
+        }
+        other => Err(script_error(format!(
+            "unsupported metadata value type `{}`",
+            other.type_name()
+        ))),
+    }
+}
+
+fn table_is_array(table: &LuaTable) -> LuaResult<bool> {
+    for pair in table.clone().pairs::<LuaValue, LuaValue>() {
+        let (key, _) = pair?;
+        if let LuaValue::Integer(index) = key {
+            if index >= 1 {
+                continue;
+            }
+        }
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 struct RequestBundle {

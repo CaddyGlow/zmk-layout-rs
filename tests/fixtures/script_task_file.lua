@@ -1,2 +1,4 @@
 log("file script start")
-set_binding("base", 1, "&kp TAB")
+layout:layer("base")
+  :bind(2, "&kp TAB")
+  :apply()
