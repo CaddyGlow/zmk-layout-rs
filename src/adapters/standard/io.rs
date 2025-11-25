@@ -14,9 +14,8 @@ use super::{
     layout::AdapterLayout,
     render::render_layout_with_template,
     template::{
-        RegexExtractionConfig, TemplateCapture, TemplateParseMode, apply_captured_template_values,
-        capture_regex_sections, capture_template_sections, strip_fragments_matching,
-        strip_template_fragments, template_contains_placeholders,
+        RegexExtractionConfig, TemplateCapture, apply_captured_template_values,
+        capture_regex_sections, strip_fragments_matching, template_contains_placeholders,
     },
 };
 
@@ -33,38 +32,6 @@ pub fn export_standard_file(
     let json = export_standard_str(document)?;
     fs::write(path, json)?;
     Ok(())
-}
-
-/// Export a document to the standard JSON format while extracting template metadata.
-pub fn export_standard_str_with_template(
-    rendered_source: &str,
-    template_source: &str,
-) -> Result<String, AdapterError> {
-    export_standard_str_with_template_mode(
-        rendered_source,
-        template_source,
-        TemplateParseMode::StripPlaceholders,
-    )
-}
-
-/// Export a document to JSON with template metadata using the requested parse mode.
-pub fn export_standard_str_with_template_mode(
-    rendered_source: &str,
-    template_source: &str,
-    mode: TemplateParseMode,
-) -> Result<String, AdapterError> {
-    let TemplateCapture { values, fragments } =
-        capture_template_sections(template_source, rendered_source)?;
-    let source_to_parse = match mode {
-        TemplateParseMode::StripPlaceholders => {
-            strip_template_fragments(rendered_source, &fragments)
-        }
-        TemplateParseMode::FullDocument => rendered_source.to_string(),
-    };
-    let document = DtsDocument::parse_str(&source_to_parse).map_err(DtsError::from)?;
-    let mut layout = AdapterLayout::from_document(&document);
-    apply_captured_template_values(&mut layout, values);
-    Ok(layout.to_standard_json()?)
 }
 
 /// Export a document to the standard JSON format using regex delimiters instead of a template.
@@ -84,19 +51,6 @@ pub fn export_standard_str_with_regex_extractions(
     let mut layout = AdapterLayout::from_document(&document);
     apply_captured_template_values(&mut layout, values);
     Ok(layout.to_standard_json()?)
-}
-
-/// Export a DTS file to the standard JSON format using a template for metadata extraction.
-pub fn export_standard_file_with_template(
-    dts_path: impl AsRef<Path>,
-    template_path: impl AsRef<Path>,
-    json_path: impl AsRef<Path>,
-) -> Result<(), AdapterError> {
-    let rendered = fs::read_to_string(&dts_path)?;
-    let template = fs::read_to_string(template_path)?;
-    let json = export_standard_str_with_template(&rendered, &template)?;
-    fs::write(json_path, json)?;
-    Ok(())
 }
 
 /// Apply a standard JSON payload to a document template.

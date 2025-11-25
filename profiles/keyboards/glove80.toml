@@ -83,6 +83,17 @@ CONFIG_EXPERIMENTAL_RGB_LAYER = false
 [layout]
 template = "templates/glove80/keymap.dtsi.j2"
 
+[layout.detection]
+# Markers and regexes that appear in MoErgo-rendered DTSI files
+markers = [
+    "Automatically generated keymap",
+    "Custom Device-tree",
+    "Input Listeners",
+    "System behavior and Macros",
+    "MoErgo",
+]
+regex = ["/\\*\\s*Automatically\\s+generated\\s+keymap\\s*\\*/"]
+
 [layout.formatting]
 key_gap = "  "
 base_indent = ""

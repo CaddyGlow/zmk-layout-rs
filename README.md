@@ -139,22 +139,18 @@ cargo run --example standard_cli -- import \
 
 ### Adapter pipeline (JSON/DTS sources)
 
-Load layouts from JSON or DTS (paths or text) with optional template capture:
+Load layouts from JSON or DTS (paths or text):
 
 ```rust
-use zmk_layout_rs::adapters::{AdapterPipeline, TemplateParseMode};
+use zmk_layout_rs::adapters::AdapterPipeline;
 
 fn load_any_layout() -> Result<(), Box<dyn std::error::Error>> {
     // From JSON path
     let json_layout = AdapterPipeline::from_json_path("layout.json").load()?;
 
-    // From DTS + template (strip placeholders before parse)
+    // From DTS
     let rendered = std::fs::read_to_string("rendered.dts")?;
-    let template = std::fs::read_to_string("template.dtsi")?;
-    let layout = AdapterPipeline::from_dts_text(rendered)
-        .template_source(template)
-        .template_mode(TemplateParseMode::StripPlaceholders)
-        .load()?;
+    let layout = AdapterPipeline::from_dts_text(rendered).load()?;
 
     println!("layers: {}", layout.layers.len());
     Ok(())
@@ -224,7 +220,7 @@ Build with `--features ancpp-preprocessor` to enable C-preprocessing before pars
 
 - `--preprocess` opt-in flag; add `--cpp-include DIR` for zmk-helpers and your config dir, `--cpp-system-include DIR` for Zephyr/ZMK headers, and `--cpp-define NAME[=VALUE]` for things like `HOST_OS=2`.
 - Tasks/Script: `zmk-layout apply/validate/diff` and `zmk-layout script` accept the flags and preprocess `--base-layout` / `--layout` first.
-- Keymap export: `zmk-layout keymap to-json --preprocess ... --dts config/keymap.dts --json layout.json` expands macros before exporting JSON.
+- Keymap export: `zmk-layout keymap to-json --preprocess ... --dts config/keymap.dts --json layout.json` expands macros before exporting JSON. You can supply `--profile <name>` to auto-apply profile-specific extraction (e.g., MoErgo regex capture) instead of plain DTS parsing.
 - Firmware build: `zmk-layout firmware build --preprocess ... --layout-dts config/keymap.dts ...` preprocesses the DTS before feeding the build pipeline.
 
 The ancpp crate is MPL-2.0 with additional terms; keep it feature-gated if your project requires MIT/Apache-only dependencies.

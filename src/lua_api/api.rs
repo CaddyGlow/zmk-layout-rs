@@ -20,8 +20,7 @@ use crate::{
     adapters::{
         pipeline::AdapterPipeline,
         standard::{
-            AdapterLayout, TemplateParseMode, export_standard_str_with_template_mode,
-            import_standard_file_with_template, import_standard_str_with_template,
+            AdapterLayout, import_standard_file_with_template, import_standard_str_with_template,
             render_standard_template,
         },
     },
@@ -170,33 +169,16 @@ impl UserData for LayoutApi {
 
         methods.add_method(
             "save_json",
-            |_, this, (path, template_path): (String, Option<String>)| {
+            |_, this, path: String| {
                 let document = this.layout.borrow();
                 let keymap = document.document().clone();
-                if let Some(template_path) = template_path {
-                    let rendered = serialize_keymap(keymap.clone())
-                        .map_err(|err| script_error(format!("failed to render DTS: {err}")))?;
-                    let template = fs::read_to_string(&template_path).map_err(|err| {
-                        script_error(format!("failed to read {template_path}: {err}"))
-                    })?;
-                    let json = export_standard_str_with_template_mode(
-                        &rendered,
-                        &template,
-                        TemplateParseMode::StripPlaceholders,
-                    )
+                let adapter: AdapterLayout = keymap.into();
+                let json = adapter
+                    .to_standard_json()
                     .map_err(|err| script_error(format!("failed to export JSON: {err}")))?;
-                    fs::write(&path, json)
-                        .map_err(|err| script_error(format!("failed to write {path}: {err}")))?;
-                    Ok(())
-                } else {
-                    let adapter: AdapterLayout = keymap.into();
-                    let json = adapter
-                        .to_standard_json()
-                        .map_err(|err| script_error(format!("failed to export JSON: {err}")))?;
-                    fs::write(&path, json)
-                        .map_err(|err| script_error(format!("failed to write {path}: {err}")))?;
-                    Ok(())
-                }
+                fs::write(&path, json)
+                    .map_err(|err| script_error(format!("failed to write {path}: {err}")))?;
+                Ok(())
             },
         );
 
@@ -229,27 +211,13 @@ impl UserData for LayoutApi {
 
         methods.add_method(
             "to_json_string",
-            |_, this, template_path: Option<String>| {
+            |_, this, ()| {
                 let document = this.layout.borrow();
                 let keymap = document.document().clone();
-                let rendered = serialize_keymap(keymap.clone())
-                    .map_err(|err| script_error(format!("failed to render DTS: {err}")))?;
-                if let Some(template_path) = template_path {
-                    let template = fs::read_to_string(&template_path).map_err(|err| {
-                        script_error(format!("failed to read {template_path}: {err}"))
-                    })?;
-                    export_standard_str_with_template_mode(
-                        &rendered,
-                        &template,
-                        TemplateParseMode::StripPlaceholders,
-                    )
+                let adapter: AdapterLayout = keymap.into();
+                adapter
+                    .to_standard_json()
                     .map_err(|err| script_error(format!("failed to export JSON: {err}")))
-                } else {
-                    let adapter: AdapterLayout = keymap.into();
-                    adapter
-                        .to_standard_json()
-                        .map_err(|err| script_error(format!("failed to export JSON: {err}")))
-                }
             },
         );
 
@@ -414,13 +382,11 @@ fn build_request_from_table(
         req = req.layout_json_value(value);
         layout_kind = Some("layout_json_text".to_string());
     } else if let Some(path) = layout_dts {
-        let pipeline =
-            AdapterPipeline::from_dts_path(path).template_mode(TemplateParseMode::FullDocument);
+        let pipeline = AdapterPipeline::from_dts_path(path);
         req = req.layout_via_pipeline(pipeline);
         layout_kind = Some("layout_dts_path".to_string());
     } else if let Some(text) = layout_dts_text {
-        let pipeline =
-            AdapterPipeline::from_dts_text(text).template_mode(TemplateParseMode::FullDocument);
+        let pipeline = AdapterPipeline::from_dts_text(text);
         req = req.layout_via_pipeline(pipeline);
         layout_kind = Some("layout_dts_text".to_string());
     } else if let Some(keymap_path) = keymap {

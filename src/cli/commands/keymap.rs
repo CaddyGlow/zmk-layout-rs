@@ -2,9 +2,8 @@
 use crate::cli::preprocess::build_config;
 use crate::{
     adapters::{
-        export_standard_str, export_standard_str_with_template, import_standard_str_with_template,
-        moergo::export_standard_str_from_moergo_dtsi, render_standard_template,
-        template_contains_placeholders,
+        export_standard_str, import_standard_str_with_template, moergo::export_standard_str_from_moergo_dtsi,
+        render_standard_template, template_contains_placeholders,
     },
     cli::{
         app::{KeymapToDtsArgs, KeymapToJsonArgs, VendorExtractionFlag},
@@ -12,6 +11,7 @@ use crate::{
     },
     dts::DtsDocument,
     io,
+    profiles::KeyboardProfileDoc,
 };
 
 pub fn to_json(args: &KeymapToJsonArgs) -> Result<i32, CliError> {
@@ -30,34 +30,39 @@ pub fn to_json(args: &KeymapToJsonArgs) -> Result<i32, CliError> {
     #[cfg(not(feature = "ancpp-preprocessor"))]
     let source = io::read_text(&args.dts)?;
 
-    if let Some(vendor) = args.vendor {
-        let contents = match vendor {
-            VendorExtractionFlag::Moergo => export_standard_str_from_moergo_dtsi(&source)?,
-        };
-        io::write_text(&args.json, &contents)?;
+    let profile = if let Some(profile) = &args.profile {
+        Some(
+            KeyboardProfileDoc::load(profile)
+                .map_err(|err| CliError::InvalidArgument(format!("failed to load profile {profile}: {err}")))?,
+        )
     } else {
-        let contents = if let Some(template_path) = &args.template {
-            let template_source = io::read_text(template_path)?;
-            if template_contains_placeholders(&template_source) {
-                export_standard_str_with_template(&source, &template_source)?
-            } else {
-                let document =
-                    DtsDocument::parse_str(&source).map_err(|source| CliError::ParseLayout {
-                        path: args.dts.clone(),
-                        source,
-                    })?;
-                export_standard_str(&document)?
-            }
-        } else {
-            let document =
-                DtsDocument::parse_str(&source).map_err(|source| CliError::ParseLayout {
-                    path: args.dts.clone(),
-                    source,
-                })?;
-            export_standard_str(&document)?
-        };
-        io::write_text(&args.json, &contents)?;
-    }
+        let matches = KeyboardProfileDoc::detect_from_rendered(&source);
+        if matches.len() > 1 {
+            return Err(CliError::InvalidArgument(
+                "multiple profiles matched the input; specify --profile to disambiguate".into(),
+            ));
+        }
+        matches.into_iter().next()
+    };
+
+    let use_moergo_extractions = match args.vendor {
+        Some(VendorExtractionFlag::Moergo) => true,
+        None => profile
+            .as_ref()
+            .map(|p| p.metadata.vendor.eq_ignore_ascii_case("moergo"))
+            .unwrap_or(false),
+    };
+
+    let contents = if use_moergo_extractions {
+        export_standard_str_from_moergo_dtsi(&source)?
+    } else {
+        let document = DtsDocument::parse_str(&source).map_err(|source| CliError::ParseLayout {
+            path: args.dts.clone(),
+            source,
+        })?;
+        export_standard_str(&document)?
+    };
+    io::write_text(&args.json, &contents)?;
 
     eprintln!("wrote keymap JSON to {}", args.json.display());
     Ok(0)

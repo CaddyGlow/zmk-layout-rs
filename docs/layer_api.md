@@ -74,14 +74,12 @@ end
 
 ### Adapter pipeline
 
-If you want to hydrate layouts from JSON or rendered DTS (with template capture) before mutating them, use `adapters::pipeline::AdapterPipeline`:
+If you want to hydrate layouts from JSON or rendered DTS before mutating them, use `adapters::pipeline::AdapterPipeline`:
 
 ```rust
-use zmk_layout_rs::adapters::{AdapterPipeline, TemplateParseMode};
+use zmk_layout_rs::adapters::AdapterPipeline;
 
 let layout = AdapterPipeline::from_dts_text(rendered_dts)
-    .template_source(template_source)
-    .template_mode(TemplateParseMode::StripPlaceholders)
     .load()?;
 
 let layers = layout.layers;

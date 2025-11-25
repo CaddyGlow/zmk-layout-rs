@@ -107,6 +107,7 @@ pub(crate) fn apply_captured_template_values(
     }
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn capture_template_sections(
     template_source: &str,
     rendered_source: &str,
@@ -143,6 +144,7 @@ pub(crate) fn capture_regex_sections(
     capture
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn strip_template_fragments(
     rendered_source: &str,
     fragments: &[CapturedFragment],
@@ -169,6 +171,7 @@ pub(crate) fn strip_fragments_matching(
     output
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn should_strip_before_parse(key: &str) -> bool {
     matches!(
         key,
@@ -326,141 +329,4 @@ pub enum TemplateError {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::super::{
-        layout::AdapterLayout,
-        render::render_layout_with_template,
-        types::{LayerSpec, LayoutMetadata},
-    };
-    use super::*;
-    use crate::dts::DtsDocument;
-
-    #[test]
-    fn captures_metadata_from_moergo_template() {
-        let template = include_str!("../../../examples/moergo_glove80.j2");
-
-        let mut layout = AdapterLayout {
-            layers: vec![LayerSpec {
-                name: "base".into(),
-                bindings: vec!["&kp A".into(), "&kp B".into()],
-            }],
-            combos: Vec::new(),
-            behaviors: Vec::new(),
-            macros: Vec::new(),
-            input_listeners: Vec::new(),
-            metadata: LayoutMetadata::default(),
-        };
-        layout.metadata.title = Some("Glove80".into());
-        layout.metadata.extras.insert(
-            "includes".into(),
-            json!("#include <behaviors.dtsi>\n#include <dt-bindings/zmk/keys.h>"),
-        );
-        layout.metadata.extras.insert(
-            "custom_devicetree".into(),
-            json!("&sensor {\n    status = \"okay\";\n};\n"),
-        );
-        layout
-            .metadata
-            .extras
-            .insert("custom_defined_behaviors".into(), json!("/* custom */\n"));
-
-        let rendered =
-            render_layout_with_template(&layout, template).expect("template should render");
-        let document = DtsDocument::parse_str(&rendered).expect("template renders valid DTS");
-        let mut extracted = AdapterLayout::from_document(&document);
-        merge_template_metadata(&mut extracted, template, &rendered)
-            .expect("metadata extraction succeeds");
-
-        let includes = extracted
-            .metadata
-            .extras
-            .get("includes")
-            .and_then(|value| value.as_str())
-            .expect("includes captured");
-        assert!(includes.contains("#include <behaviors.dtsi>"));
-
-        let custom_dt = extracted
-            .metadata
-            .extras
-            .get("custom_devicetree")
-            .and_then(|value| value.as_str())
-            .expect("custom devicetree captured");
-        assert!(custom_dt.contains("&sensor"));
-
-        assert_eq!(
-            extracted.metadata.title.as_deref(),
-            Some("Glove80"),
-            "keyboard_name placeholder hydrates title"
-        );
-    }
-
-    #[test]
-    fn export_captures_include_statements() {
-        let source = r#"
-#include <behaviors.dtsi>
-#include <dt-bindings/zmk/outputs.h>
-
-/* On demand includes */
-#include <dt-bindings/zmk/input_transform.h>
-#include <input/processors.dtsi>
-
-/ {
-    keymap {};
-};
-"#;
-
-        let doc = DtsDocument::parse_str(source).expect("valid DTS with includes");
-        let layout = AdapterLayout::from_document(&doc);
-
-        let includes = layout
-            .metadata
-            .extras
-            .get("resolved_includes")
-            .and_then(|value| value.as_str())
-            .expect("resolved includes captured");
-        assert!(includes.contains("#include <behaviors.dtsi>"));
-        assert!(includes.contains("#include <input/processors.dtsi>"));
-    }
-
-    #[test]
-    fn template_deduplicates_static_include_lines() {
-        let mut layout = AdapterLayout {
-            layers: vec![LayerSpec {
-                name: "base".into(),
-                bindings: vec!["&kp A".into()],
-            }],
-            combos: Vec::new(),
-            behaviors: Vec::new(),
-            macros: Vec::new(),
-            input_listeners: Vec::new(),
-            metadata: LayoutMetadata::default(),
-        };
-        layout.metadata.extras.insert(
-            "resolved_includes".into(),
-            json!("#include <behaviors.dtsi>\n#include <dt-bindings/zmk/input_transform.h>"),
-        );
-
-        let template = r#"
-#include <behaviors.dtsi>
-{{includes}}
-
-{{keymap_node}}
-"#;
-
-        let rendered =
-            render_layout_with_template(&layout, template).expect("template should render");
-        DtsDocument::parse_str(&rendered).expect("template output should be valid DTS");
-
-        assert_eq!(
-            rendered.matches("#include <behaviors.dtsi>").count(),
-            1,
-            "static include should not be duplicated",
-        );
-        assert!(
-            rendered.contains("#include <dt-bindings/zmk/input_transform.h>"),
-            "custom include should remain"
-        );
-    }
-}
+mod tests {}

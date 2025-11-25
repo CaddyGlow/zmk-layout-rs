@@ -201,8 +201,7 @@ fn apply_firmware_layout(
             .clone()
             .or(layout.raw_text.clone())
             .unwrap_or_default();
-        let pipeline = AdapterPipeline::from_dts_text(dts_text)
-            .template_mode(crate::adapters::standard::TemplateParseMode::FullDocument);
+        let pipeline = AdapterPipeline::from_dts_text(dts_text);
         builder = builder.layout_via_pipeline(pipeline);
         layout_set = true;
     }

@@ -282,8 +282,6 @@ fn cli_keymap_round_trip_with_template_placeholders() {
         .arg("to-json")
         .arg("--dts")
         .arg(&output_path)
-        .arg("--template")
-        .arg(&template)
         .arg("--json")
         .arg(&roundtrip_json);
     export_cmd.assert().success();

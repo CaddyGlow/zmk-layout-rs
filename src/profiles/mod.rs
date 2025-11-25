@@ -103,6 +103,15 @@ impl KeyboardProfileDoc {
 
         profiles.into_iter().collect()
     }
+
+    /// Try to detect which profile matches a rendered DTS layout based on profile hints.
+    pub fn detect_from_rendered(rendered: &str) -> Vec<Self> {
+        KeyboardProfileDoc::list_available()
+            .into_iter()
+            .filter_map(|name| KeyboardProfileDoc::load(&name).ok())
+            .filter(|profile| profile.layout.detection.matches(rendered))
+            .collect()
+    }
 }
 
 /// Document metadata identifying the keyboard.
@@ -182,6 +191,7 @@ pub struct LayoutSection {
     pub formatting: LayoutFormatting,
     pub keymap: LayoutKeymap,
     pub renderers: BTreeMap<String, LayoutRenderer>,
+    pub detection: LayoutDetection,
     pub extras: ProfileProperties,
 }
 
@@ -216,6 +226,14 @@ pub struct LayoutRenderer {
     pub extras: ProfileProperties,
 }
 
+/// Heuristics used to detect whether a rendered DTS belongs to this profile.
+#[derive(Debug, Clone, Default)]
+pub struct LayoutDetection {
+    pub markers: Vec<String>,
+    pub regex: Vec<String>,
+    pub extras: ProfileProperties,
+}
+
 impl LayoutFormattingRow {
     /// Render the row positions as a fixed-width ASCII string for debugging/tests.
     pub fn ascii_art(&self) -> String {
@@ -231,6 +249,20 @@ impl LayoutFormattingRow {
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+}
+
+impl LayoutDetection {
+    /// Returns true if any configured marker or regex matches the rendered DTS text.
+    pub fn matches(&self, rendered: &str) -> bool {
+        self.markers
+            .iter()
+            .any(|marker| rendered.contains(marker))
+            || self
+                .regex
+                .iter()
+                .filter_map(|pattern| regex::Regex::new(pattern).ok())
+                .any(|re| re.is_match(rendered))
     }
 }
 
@@ -581,6 +613,8 @@ struct RawLayoutSection {
     keymap: Option<RawLayoutKeymap>,
     #[serde(default)]
     renderers: BTreeMap<String, RawLayoutRenderer>,
+    #[serde(default)]
+    detection: Option<RawLayoutDetection>,
     #[serde(flatten)]
     extras: ProfileProperties,
 }
@@ -603,6 +637,11 @@ impl TryFrom<RawLayoutSection> for LayoutSection {
             formatting,
             keymap,
             renderers,
+            detection: raw
+                .detection
+                .map(LayoutDetection::try_from)
+                .transpose()?
+                .unwrap_or_default(),
             extras: raw.extras,
         })
     }
@@ -647,6 +686,33 @@ struct RawLayoutFormattingRow {
     keys: Option<Vec<i32>>,
     #[serde(flatten)]
     extras: ProfileProperties,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawLayoutDetection {
+    #[serde(default)]
+    markers: Vec<String>,
+    #[serde(default)]
+    regex: Vec<String>,
+    #[serde(flatten)]
+    extras: ProfileProperties,
+}
+
+impl TryFrom<RawLayoutDetection> for LayoutDetection {
+    type Error = ProfileError;
+
+    fn try_from(raw: RawLayoutDetection) -> Result<Self, Self::Error> {
+        if raw.markers.is_empty() && raw.regex.is_empty() {
+            return Err(ProfileError::Validation(
+                "layout.detection must include at least one marker or regex".into(),
+            ));
+        }
+        Ok(LayoutDetection {
+            markers: raw.markers,
+            regex: raw.regex,
+            extras: raw.extras,
+        })
+    }
 }
 
 impl TryFrom<RawLayoutFormattingRow> for LayoutFormattingRow {

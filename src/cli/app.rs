@@ -187,15 +187,14 @@ pub struct KeymapToJsonArgs {
     pub json: PathBuf,
     #[arg(
         long,
-        value_name = "FILE",
-        help = "Template used to capture placeholder values while exporting",
-        requires = "json"
+        value_name = "PROFILE",
+        help = "Keyboard profile to guide export (enables profile-specific extraction when available)"
     )]
-    pub template: Option<PathBuf>,
+    pub profile: Option<String>,
     #[arg(
         long,
         value_enum,
-        help = "Use vendor-specific regex extraction"
+        help = "Force vendor-specific regex extraction"
     )]
     pub vendor: Option<VendorExtractionFlag>,
     #[cfg(feature = "ancpp-preprocessor")]

@@ -129,7 +129,7 @@ impl LayoutStager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{AdapterPipeline, standard::TemplateParseMode};
+    use crate::adapters::AdapterPipeline;
     use crate::build::{manifest::CachePolicy, workspace::WorkspaceManager};
     use crate::profiles::KeyboardProfileDoc;
     use serde_json::Value as JsonValue;
@@ -154,9 +154,7 @@ keymap {
     };
 };
 "#;
-        let pipeline = AdapterPipeline::from_dts_text(dts)
-            .template_source(dts.to_string())
-            .template_mode(TemplateParseMode::FullDocument);
+        let pipeline = AdapterPipeline::from_dts_text(dts);
 
         let artifacts = stager.stage(&LayoutSource::Pipeline(pipeline), None, &workspace)?;
         assert!(artifacts.keymap.as_ref().unwrap().exists());
