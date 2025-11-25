@@ -230,6 +230,18 @@ pub struct KeymapConvertArgs {
     pub preprocess: PreprocessorArgs,
 }
 
+impl KeymapConvertArgs {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.vendor.is_some() && !self.from.is_dts_like() {
+            return Err("--vendor is only supported for Devicetree input formats".into());
+        }
+        if self.to.is_dts_like() && self.template.is_none() && self.profile.is_none() {
+            return Err("provide --template or --profile when converting to dts/dtsi".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum VendorExtractionFlag {
     Moergo,
@@ -252,6 +264,10 @@ impl KeymapFormat {
             KeymapFormat::Dtsi => "dtsi",
             KeymapFormat::MoergoJson => "moergo-json",
         }
+    }
+
+    pub fn is_dts_like(&self) -> bool {
+        matches!(self, KeymapFormat::Dts | KeymapFormat::Dtsi)
     }
 }
 

@@ -18,6 +18,7 @@ use crate::{
 use std::path::PathBuf;
 
 pub fn convert(args: &KeymapConvertArgs) -> Result<i32, CliError> {
+    args.validate().map_err(CliError::InvalidArgument)?;
     let keymap = load_keymap(args)?;
     let output_text = match args.to {
         KeymapFormat::Json => keymap_to_standard_json(&keymap)?,

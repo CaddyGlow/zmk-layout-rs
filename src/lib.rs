@@ -22,6 +22,7 @@ pub mod parser;
 pub mod preprocessor;
 pub mod profiles;
 pub mod providers;
+pub mod prelude;
 pub mod serialization;
 pub mod tasks;
 pub mod tokenizer;

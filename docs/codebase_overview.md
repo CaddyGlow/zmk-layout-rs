@@ -22,6 +22,7 @@ This document summarizes the main modules and how they fit together for contribu
 - `src/adapters/`
   - `standard/` exposes the JSON <-> Devicetree adapter, template renderers, and property-order helpers.
   - `pipeline.rs` offers a unified loader for JSON/DTS inputs with optional template capture.
+- `src/prelude.rs` re-exports common types/aliases (e.g., `DtsKeymapDocument`, `KeymapProvider`, task engine types) for downstream consumers.
 - `src/build/`
   - Builder/toolchain/workspace layers for firmware builds plus layout staging in `layout.rs`.
   - `BuildRequest` supports multiple layout sources, including adapter pipelines and DTS documents.

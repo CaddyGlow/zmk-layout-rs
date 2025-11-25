@@ -3,7 +3,7 @@ use crate::{
     bindings::{BindingParser, LayoutBinding},
     dts::DtsDocument,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, mem};
 
 use super::{
     ProviderError,
@@ -28,6 +28,18 @@ impl KeymapProvider {
             document,
             parser: BindingParser::new(),
         }
+    }
+
+    fn binding_format(&self) -> BindingFormat<'_> {
+        BindingFormat::new(&self.parser)
+    }
+
+    fn normalize_binding(&self, binding: &str) -> Result<String, ProviderError> {
+        self.binding_format().normalize_binding(binding)
+    }
+
+    fn normalize_bindings(&self, bindings: &[&str]) -> Result<Vec<String>, ProviderError> {
+        self.binding_format().normalize_bindings(bindings)
     }
 
     pub fn document(&self) -> &DtsDocument {
@@ -79,8 +91,7 @@ impl KeymapProvider {
         index: usize,
         binding: &str,
     ) -> Result<(), ProviderError> {
-        let format = BindingFormat::new(&self.parser);
-        let binding_str = format.normalize_binding(binding)?;
+        let binding_str = self.normalize_binding(binding)?;
 
         let node = find_layer_node_mut(&mut self.document.items, layer)
             .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
@@ -104,8 +115,7 @@ impl KeymapProvider {
         layer: &str,
         bindings: &[&str],
     ) -> Result<(), ProviderError> {
-        let format = BindingFormat::new(&self.parser);
-        let normalized = format.normalize_bindings(bindings)?;
+        let normalized = self.normalize_bindings(bindings)?;
         ensure_layer_node(&mut self.document.items, layer)?;
         let node = find_layer_node_mut(&mut self.document.items, layer)
             .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
@@ -137,8 +147,7 @@ impl KeymapProvider {
         combo: &str,
         bindings: &[&str],
     ) -> Result<(), ProviderError> {
-        let format = BindingFormat::new(&self.parser);
-        let binding_values = format.normalize_bindings(bindings)?;
+        let binding_values = self.normalize_bindings(bindings)?;
         let combo_node = combo_node_mut(&mut self.document.items, combo)?;
         let bindings_prop = find_bindings_property_mut(combo_node).ok_or_else(|| {
             ProviderError::PropertyMissing {
@@ -219,8 +228,7 @@ impl KeymapProvider {
                 "combo must declare at least one key position".to_string(),
             ));
         }
-        let format = BindingFormat::new(&self.parser);
-        let normalized = format.normalize_bindings(&[binding])?;
+        let normalized = self.normalize_bindings(&[binding])?;
         apply_combo_metadata(
             &mut self.document.items,
             combo,
@@ -268,8 +276,7 @@ impl KeymapProvider {
         behavior: &str,
         bindings: &[&str],
     ) -> Result<(), ProviderError> {
-        let format = BindingFormat::new(&self.parser);
-        let binding_values = format.normalize_bindings(bindings)?;
+        let binding_values = self.normalize_bindings(bindings)?;
         let behavior_node = self.behavior_node_mut(behavior)?;
         let property = find_bindings_property_mut(behavior_node).ok_or_else(|| {
             ProviderError::PropertyMissing {
@@ -350,28 +357,51 @@ impl KeymapProvider {
 
     fn behavior_node_mut(&mut self, behavior: &str) -> Result<&mut DtNode, ProviderError> {
         let root_index = find_behavior_root(&mut self.document.items, behavior);
-        let root = match self.document.items.get_mut(root_index) {
-            Some(crate::ast::DtItem::Node(node)) => node,
-            _ => unreachable!(),
-        };
-        if let Some(idx) = root.children.iter().position(
-            |item| matches!(item, crate::ast::DtItem::Node(node) if node.name == behavior),
-        ) {
-            match root.children.get_mut(idx) {
-                Some(crate::ast::DtItem::Node(node)) => return Ok(node),
-                _ => unreachable!(),
-            }
+        let root = self.behavior_root_node_mut(root_index)?;
+        if let Some(idx) = root
+            .children
+            .iter()
+            .position(|item| matches!(item, crate::ast::DtItem::Node(node) if node.name == behavior))
+        {
+            return Self::behavior_child_node_mut(root, idx);
         }
         root.children
             .push(crate::ast::DtItem::Node(super::util::empty_node(behavior)));
-        match root.children.last_mut() {
-            Some(crate::ast::DtItem::Node(node)) => Ok(node),
-            _ => unreachable!(),
-        }
+        Self::behavior_child_node_mut(root, root.children.len().saturating_sub(1))
     }
 
     fn ensure_layer_node(&mut self, layer: &str) -> Result<(), ProviderError> {
         ensure_layer_node(&mut self.document.items, layer)
+    }
+
+    fn behavior_root_node_mut(
+        &mut self,
+        index: usize,
+    ) -> Result<&mut DtNode, ProviderError> {
+        match self.document.items.get_mut(index) {
+            Some(crate::ast::DtItem::Node(node)) => Ok(node),
+            Some(_) => Err(ProviderError::DocumentCorrupted(
+                "behavior root entry is not a node".into(),
+            )),
+            None => Err(ProviderError::DocumentCorrupted(
+                "behavior root index out of bounds".into(),
+            )),
+        }
+    }
+
+    fn behavior_child_node_mut<'a>(
+        root: &'a mut DtNode,
+        index: usize,
+    ) -> Result<&'a mut DtNode, ProviderError> {
+        match root.children.get_mut(index) {
+            Some(crate::ast::DtItem::Node(node)) => Ok(node),
+            Some(_) => Err(ProviderError::DocumentCorrupted(
+                "behavior child entry is not a node".into(),
+            )),
+            None => Err(ProviderError::DocumentCorrupted(
+                "behavior child index out of bounds".into(),
+            )),
+        }
     }
 }
 
@@ -433,7 +463,7 @@ impl KeymapDocument {
     }
 
     pub fn layer_names(&self) -> Vec<String> {
-        KeymapProvider::new(self.document.clone()).layer_names()
+        self.with_provider(|provider| provider.layer_names())
     }
 
     pub fn behaviors(&self) -> Vec<super::behaviors::BehaviorDefinition> {
@@ -445,7 +475,7 @@ impl KeymapDocument {
     }
 
     pub fn bindings_for_layer(&self, layer: &str) -> Result<Vec<LayoutBinding>, ProviderError> {
-        KeymapProvider::new(self.document.clone()).bindings_for_layer(layer)
+        self.with_provider(|provider| provider.bindings_for_layer(layer))
     }
 
     pub fn set_binding(
@@ -454,10 +484,7 @@ impl KeymapDocument {
         index: usize,
         binding: &str,
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_binding(layer, index, binding)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_binding(layer, index, binding))
     }
 
     pub fn set_behavior_properties(
@@ -468,10 +495,7 @@ impl KeymapDocument {
         if properties.is_empty() {
             return Ok(());
         }
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_behavior_properties(behavior, properties)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_behavior_properties(behavior, properties))
     }
 
     pub fn set_macro_timing(
@@ -480,10 +504,7 @@ impl KeymapDocument {
         wait_ms: Option<u32>,
         tap_ms: Option<u32>,
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_macro_timing(behavior, wait_ms, tap_ms)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_macro_timing(behavior, wait_ms, tap_ms))
     }
 
     pub fn set_behavior_binding_cells(
@@ -491,10 +512,7 @@ impl KeymapDocument {
         behavior: &str,
         binding_cells: Option<u32>,
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_behavior_binding_cells(behavior, binding_cells)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_behavior_binding_cells(behavior, binding_cells))
     }
 
     pub fn set_behavior_bindings(
@@ -502,10 +520,7 @@ impl KeymapDocument {
         behavior: &str,
         bindings: &[&str],
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_behavior_bindings(behavior, bindings)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_behavior_bindings(behavior, bindings))
     }
 
     pub fn set_behavior_label(
@@ -513,10 +528,7 @@ impl KeymapDocument {
         behavior: &str,
         label: Option<&str>,
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_behavior_label(behavior, label)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_behavior_label(behavior, label))
     }
 
     pub fn set_layer_bindings(
@@ -524,10 +536,7 @@ impl KeymapDocument {
         layer: &str,
         bindings: &[&str],
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_layer_bindings(layer, bindings)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_layer_bindings(layer, bindings))
     }
 
     pub fn set_layer_metadata(
@@ -538,10 +547,7 @@ impl KeymapDocument {
         if metadata.is_empty() {
             return Ok(());
         }
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_layer_metadata(layer, metadata)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_layer_metadata(layer, metadata))
     }
 
     pub fn set_combo_bindings(
@@ -549,10 +555,7 @@ impl KeymapDocument {
         combo: &str,
         bindings: &[&str],
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_combo_bindings(combo, bindings)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_combo_bindings(combo, bindings))
     }
 
     pub fn set_combo_key_positions(
@@ -560,10 +563,7 @@ impl KeymapDocument {
         combo: &str,
         positions: &[u32],
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_combo_key_positions(combo, positions)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_combo_key_positions(combo, positions))
     }
 
     pub fn set_combo_timeout_ms(
@@ -571,17 +571,11 @@ impl KeymapDocument {
         combo: &str,
         timeout_ms: Option<u32>,
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_combo_timeout_ms(combo, timeout_ms)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_combo_timeout_ms(combo, timeout_ms))
     }
 
     pub fn set_combo_layers(&mut self, combo: &str, layers: &[u32]) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.set_combo_layers(combo, layers)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.set_combo_layers(combo, layers))
     }
 
     pub fn upsert_combo(
@@ -593,10 +587,9 @@ impl KeymapDocument {
         layers: &[u32],
         conditions: &[String],
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.upsert_combo(name, binding, key_positions, timeout_ms, layers, conditions)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| {
+            provider.upsert_combo(name, binding, key_positions, timeout_ms, layers, conditions)
+        })
     }
 
     pub fn move_layer_to_index(
@@ -604,42 +597,42 @@ impl KeymapDocument {
         layer: &str,
         position: usize,
     ) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.move_layer_to_index(layer, position)?;
-        self.document = provider.into_document();
-        Ok(())
+        self.with_provider_mut(|provider| provider.move_layer_to_index(layer, position))
     }
 
     pub fn reorder_layer(&mut self, layer: &str, position: usize) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.move_layer_to_index(layer, position)?;
-        self.document = provider.into_document();
-
+        self.with_provider_mut(|provider| provider.move_layer_to_index(layer, position))?;
         self.update_layer_defines()?;
         Ok(())
     }
 
     pub fn add_layer(&mut self, name: &str, bindings: &[&str]) -> Result<(), ProviderError> {
-        let mut provider = KeymapProvider::new(self.document.clone());
-        provider.ensure_layer_node(name)?;
-        provider.set_layer_bindings(name, bindings)?;
-        self.document = provider.into_document();
+        self.with_provider_mut(|provider| {
+            provider.ensure_layer_node(name)?;
+            provider.set_layer_bindings(name, bindings)
+        })?;
 
         self.update_layer_defines()?;
         Ok(())
     }
 
     pub fn remove_layer(&mut self, name: &str) -> Result<(), ProviderError> {
-        let mut document = self.document.clone();
-        if let Some(keymap) = find_layer_node_mut(&mut document.items, "keymap") {
-            keymap
-                .children
-                .retain(|item| !matches!(item, DtItem::Node(node) if node.name == name));
-            self.document = document;
-            self.update_layer_defines()?;
-            return Ok(());
+        let removed = self.with_provider_mut(|provider| {
+            let doc = provider.document_mut();
+            if let Some(keymap) = find_layer_node_mut(&mut doc.items, "keymap") {
+                let before = keymap.children.len();
+                keymap
+                    .children
+                    .retain(|item| !matches!(item, DtItem::Node(node) if node.name == name));
+                return Ok(before != keymap.children.len());
+            }
+            Ok(false)
+        })?;
+        if !removed {
+            return Err(ProviderError::LayerNotFound(name.to_string()));
         }
-        Err(ProviderError::LayerNotFound(name.to_string()))
+        self.update_layer_defines()?;
+        Ok(())
     }
 }
 
@@ -670,6 +663,22 @@ fn apply_combo_metadata(
 }
 
 impl KeymapDocument {
+    fn with_provider<R>(&self, op: impl FnOnce(KeymapProvider) -> R) -> R {
+        let provider = KeymapProvider::new(self.document.clone());
+        op(provider)
+    }
+
+    fn with_provider_mut<R>(
+        &mut self,
+        op: impl FnOnce(&mut KeymapProvider) -> Result<R, ProviderError>,
+    ) -> Result<R, ProviderError> {
+        let document = mem::replace(&mut self.document, DtsDocument::from_items(Vec::new()));
+        let mut provider = KeymapProvider::new(document);
+        let result = op(&mut provider);
+        self.document = provider.into_document();
+        result
+    }
+
     fn update_layer_defines(&mut self) -> Result<(), ProviderError> {
         // Get current layer order
         let layer_names = self.layer_names();

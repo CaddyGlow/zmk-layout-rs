@@ -175,8 +175,7 @@ fn apply_override_task(
         return outcome;
     }
 
-    let before_value = Some(bindings[slot].clone());
-    outcome.before = before_value.clone();
+    outcome.before = Some(bindings[slot].clone());
 
     let normalized = match engine.normalize_binding(&action.value) {
         Ok(val) => val,
@@ -186,21 +185,17 @@ fn apply_override_task(
         }
     };
 
-    let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
+    if !guard_expected_state(task, &mut outcome, scripts) {
         return outcome;
     }
 
-    if mode == ExecutionMode::Apply {
-        if let Err(err) = engine.set_binding(&layer, slot, &normalized) {
-            apply_engine_error(&mut outcome, err);
-            return outcome;
-        }
-    } else {
-        append_message(
-            &mut outcome.message,
-            "dry-run: override not applied (reporting desired result)",
-        );
+    if !apply_or_dry_run(
+        mode,
+        &mut outcome,
+        Some("dry-run: override not applied (reporting desired result)"),
+        || engine.set_binding(&layer, slot, &normalized),
+    ) {
+        return outcome;
     }
     outcome.after = Some(normalized);
     outcome.status = TaskStatus::Applied;
@@ -214,12 +209,9 @@ fn apply_layer_task(
     mode: ExecutionMode,
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
-    let mut outcome = TaskOutcome::new(task);
-    let before = engine.layer_to_string(&action.name);
-    outcome.before = before.clone();
+    let mut outcome = outcome_with_before(task, engine.layer_to_string(&action.name));
 
-    let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
+    if !guard_expected_state(task, &mut outcome, scripts) {
         return outcome;
     }
 
@@ -231,29 +223,32 @@ fn apply_layer_task(
         }
     };
 
-    if mode == ExecutionMode::Apply {
-        if let Err(err) = engine.set_layer_bindings(&action.name, &normalized) {
-            apply_engine_error(&mut outcome, err);
-            return outcome;
-        }
-        if !action.metadata.is_empty() {
-            let metadata = LayoutEngine::metadata_to_properties(&action.metadata);
-            if let Err(err) = engine.set_layer_metadata(&action.name, &metadata) {
-                apply_engine_error(&mut outcome, err);
-                return outcome;
-            }
-        }
+    let metadata = if action.metadata.is_empty() {
+        None
     } else {
-        append_message(
-            &mut outcome.message,
-            "dry-run: layer bindings not applied (reporting desired result)",
-        );
-        if !action.metadata.is_empty() {
-            append_message(
-                &mut outcome.message,
-                "dry-run: layer metadata not applied (reporting desired result)",
-            );
+        Some(LayoutEngine::metadata_to_properties(&action.metadata))
+    };
+    let dry_run_message = {
+        let mut notes = vec!["dry-run: layer bindings not applied (reporting desired result)"];
+        if metadata.is_some() {
+            notes.push("dry-run: layer metadata not applied (reporting desired result)");
         }
+        notes.join(" | ")
+    };
+
+    if !apply_or_dry_run(
+        mode,
+        &mut outcome,
+        Some(dry_run_message.as_str()),
+        || {
+            engine.set_layer_bindings(&action.name, &normalized)?;
+            if let Some(meta) = metadata.as_ref() {
+                engine.set_layer_metadata(&action.name, meta)?;
+            }
+            Ok(())
+        },
+    ) {
+        return outcome;
     }
     outcome.after = Some(format_bindings_raw(&normalized));
     outcome.status = TaskStatus::Applied;
@@ -267,11 +262,9 @@ fn apply_combo_task(
     mode: ExecutionMode,
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
-    let mut outcome = TaskOutcome::new(task);
-    outcome.before = engine.combo_to_string(&action.name);
+    let mut outcome = outcome_with_before(task, engine.combo_to_string(&action.name));
 
-    let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
+    if !guard_expected_state(task, &mut outcome, scripts) {
         return outcome;
     }
 
@@ -291,23 +284,22 @@ fn apply_combo_task(
         }
     };
 
-    if mode == ExecutionMode::Apply {
-        if let Err(err) = engine.upsert_combo(
-            &action.name,
-            &normalized_binding,
-            &action.key_positions,
-            action.timeout_ms,
-            &layers,
-            &action.conditions,
-        ) {
-            apply_engine_error(&mut outcome, err);
-            return outcome;
-        }
-    } else {
-        append_message(
-            &mut outcome.message,
-            "dry-run: combo task recorded but not applied to document",
-        );
+    if !apply_or_dry_run(
+        mode,
+        &mut outcome,
+        Some("dry-run: combo task recorded but not applied to document"),
+        || {
+            engine.upsert_combo(
+                &action.name,
+                &normalized_binding,
+                &action.key_positions,
+                action.timeout_ms,
+                &layers,
+                &action.conditions,
+            )
+        },
+    ) {
+        return outcome;
     }
     outcome.after = engine.combo_to_string(&action.name);
     if !action.conditions.is_empty() {
@@ -327,12 +319,9 @@ fn apply_layer_order_task(
     mode: ExecutionMode,
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
-    let mut outcome = TaskOutcome::new(task);
-    let before = engine.layer_order_to_string();
-    outcome.before = Some(before);
+    let mut outcome = outcome_with_before(task, Some(engine.layer_order_to_string()));
 
-    let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
+    if !guard_expected_state(task, &mut outcome, scripts) {
         return outcome;
     }
 
@@ -380,16 +369,13 @@ fn apply_layer_order_task(
         return outcome;
     }
 
-    if mode == ExecutionMode::Apply {
-        if let Err(err) = engine.reorder_layer(&action.layer, target_index) {
-            apply_engine_error(&mut outcome, err);
-            return outcome;
-        }
-    } else {
-        append_message(
-            &mut outcome.message,
-            "dry-run: layer ordering not applied (reporting current order)",
-        );
+    if !apply_or_dry_run(
+        mode,
+        &mut outcome,
+        Some("dry-run: layer ordering not applied (reporting current order)"),
+        || engine.reorder_layer(&action.layer, target_index),
+    ) {
+        return outcome;
     }
 
     outcome.after = Some(engine.layer_order_to_string());
@@ -404,11 +390,9 @@ fn apply_behavior_task(
     mode: ExecutionMode,
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
-    let mut outcome = TaskOutcome::new(task);
-    outcome.before = engine.behavior_to_string(&action.behavior);
+    let mut outcome = outcome_with_before(task, engine.behavior_to_string(&action.behavior));
 
-    let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
+    if !guard_expected_state(task, &mut outcome, scripts) {
         return outcome;
     }
 
@@ -421,16 +405,13 @@ fn apply_behavior_task(
         return outcome;
     }
 
-    if mode == ExecutionMode::Apply {
-        if let Err(err) = engine.set_behavior_settings(&action.behavior, &action.settings) {
-            apply_engine_error(&mut outcome, err);
-            return outcome;
-        }
-    } else {
-        append_message(
-            &mut outcome.message,
-            "dry-run: behavior settings not applied (reporting desired result)",
-        );
+    if !apply_or_dry_run(
+        mode,
+        &mut outcome,
+        Some("dry-run: behavior settings not applied (reporting desired result)"),
+        || engine.set_behavior_settings(&action.behavior, &action.settings),
+    ) {
+        return outcome;
     }
     outcome.after = engine.behavior_to_string(&action.behavior);
     outcome.status = TaskStatus::Applied;
@@ -444,24 +425,19 @@ fn apply_meta_task(
     mode: ExecutionMode,
     scripts: &ScriptEnvironment,
 ) -> TaskOutcome {
-    let mut outcome = TaskOutcome::new(task);
-    outcome.before = engine.meta_to_string(&action.key);
+    let mut outcome = outcome_with_before(task, engine.meta_to_string(&action.key));
 
-    let before_snapshot = outcome.before.clone();
-    if !ensure_expected_state(task, before_snapshot.as_deref(), &mut outcome, scripts) {
+    if !guard_expected_state(task, &mut outcome, scripts) {
         return outcome;
     }
 
-    if mode == ExecutionMode::Apply {
-        if let Err(err) = engine.set_meta_entry(&action.key, &action.value) {
-            apply_engine_error(&mut outcome, err);
-            return outcome;
-        }
-    } else {
-        append_message(
-            &mut outcome.message,
-            "dry-run: meta entry not applied (reporting desired result)",
-        );
+    if !apply_or_dry_run(
+        mode,
+        &mut outcome,
+        Some("dry-run: meta entry not applied (reporting desired result)"),
+        || engine.set_meta_entry(&action.key, &action.value),
+    ) {
+        return outcome;
     }
     outcome.after = engine.meta_to_string(&action.key);
     outcome.status = TaskStatus::Applied;
@@ -612,6 +588,43 @@ fn apply_script_task(
         }
     }
     outcome
+}
+
+fn outcome_with_before(task: &Task, before: Option<String>) -> TaskOutcome {
+    let mut outcome = TaskOutcome::new(task);
+    outcome.before = before;
+    outcome
+}
+
+fn guard_expected_state(
+    task: &Task,
+    outcome: &mut TaskOutcome,
+    scripts: &ScriptEnvironment,
+) -> bool {
+    let before_snapshot = outcome.before.clone();
+    ensure_expected_state(task, before_snapshot.as_deref(), outcome, scripts)
+}
+
+fn apply_or_dry_run(
+    mode: ExecutionMode,
+    outcome: &mut TaskOutcome,
+    dry_run_message: Option<&str>,
+    op: impl FnOnce() -> Result<(), LayoutEngineError>,
+) -> bool {
+    match mode {
+        ExecutionMode::Apply => {
+            if let Err(err) = op() {
+                apply_engine_error(outcome, err);
+                return false;
+            }
+        }
+        ExecutionMode::DryRun => {
+            if let Some(message) = dry_run_message {
+                append_message(&mut outcome.message, message);
+            }
+        }
+    }
+    true
 }
 
 fn append_message(target: &mut Option<String>, note: impl Into<String>) {

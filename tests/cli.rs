@@ -329,6 +329,56 @@ fn cli_keymap_round_trip_with_template_placeholders() {
 }
 
 #[test]
+fn cli_keymap_convert_requires_template_or_profile() {
+    let dir = tempdir().expect("tempdir");
+    let output_path = dir.path().join("rendered.dts");
+
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("keymap")
+        .arg("convert")
+        .arg("--input")
+        .arg(fixture("demo_layout.json"))
+        .arg("--output")
+        .arg(&output_path)
+        .arg("--from")
+        .arg("json")
+        .arg("--to")
+        .arg("dts");
+
+    cmd.assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "provide --template or --profile when converting to dts/dtsi",
+        ));
+}
+
+#[test]
+fn cli_keymap_convert_rejects_vendor_on_json_input() {
+    let dir = tempdir().expect("tempdir");
+    let output_path = dir.path().join("roundtrip.json");
+
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("keymap")
+        .arg("convert")
+        .arg("--input")
+        .arg(fixture("demo_layout.json"))
+        .arg("--output")
+        .arg(&output_path)
+        .arg("--from")
+        .arg("json")
+        .arg("--to")
+        .arg("json")
+        .arg("--vendor")
+        .arg("moergo");
+
+    cmd.assert()
+        .failure()
+        .stderr(predicates::str::contains(
+            "--vendor is only supported for Devicetree input formats",
+        ));
+}
+
+#[test]
 fn cli_script_diff_outputs_expected_patch() {
     let expected = fs::read_to_string(fixture("cli_script_diff.txt")).expect("fixture");
 

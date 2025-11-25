@@ -35,4 +35,6 @@ pub enum ProviderError {
     InvalidBinding(String),
     #[error("binding index {index} out of range (len {len})")]
     BindingIndex { index: usize, len: usize },
+    #[error("document structure invalid: {0}")]
+    DocumentCorrupted(String),
 }

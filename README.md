@@ -157,6 +157,23 @@ fn load_any_layout() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Use the prelude
+
+Import `zmk_layout_rs::prelude::*` to pull common types and aliases (`DtsDocument`,
+`KeymapProvider`, task engine types, and both keymap document representations) from
+a single module:
+
+```rust
+use zmk_layout_rs::prelude::*;
+
+fn list_layers() -> Result<(), Box<dyn std::error::Error>> {
+    let doc = DtsDocument::parse_file("config/keymap.dts")?;
+    let provider = KeymapProvider::new(doc);
+    println!("layers: {:?}", provider.layer_names());
+    Ok(())
+}
+```
+
 ### Keyboard profiles
 
 Use the TOML keyboard profiles to hydrate layouts and resolve template metadata:
