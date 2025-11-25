@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 
 use crate::{flash::FlashSideSelection, tasks::ConflictPolicy};
 
@@ -51,16 +51,13 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    Apply(ApplyArgs),
-    Validate(ValidateArgs),
-    Diff(DiffArgs),
-    Script(ScriptArgs),
+    #[command(subcommand)]
+    Keymap(KeymapCommand),
+    Lua(ScriptArgs),
     #[command(subcommand)]
     Firmware(FirmwareCommand),
     #[command(subcommand)]
     Profiles(ProfilesCommand),
-    #[command(subcommand)]
-    Keymap(KeymapCommand),
 }
 
 #[derive(Args, Clone)]
@@ -154,10 +151,13 @@ pub enum ProfilesCommand {
 
 #[derive(Subcommand)]
 pub enum KeymapCommand {
-    #[command(name = "to-json")]
-    ToJson(KeymapToJsonArgs),
-    #[command(name = "to-dts")]
-    ToDts(KeymapToDtsArgs),
+    Apply(ApplyArgs),
+    Validate(ValidateArgs),
+    Diff(DiffArgs),
+    #[command(name = "convert")]
+    Convert(KeymapConvertArgs),
+    #[command(name = "lua")]
+    Lua(ScriptArgs),
 }
 
 #[derive(Args, Clone)]
@@ -180,45 +180,85 @@ pub struct ProfileCheckArgs {
 }
 
 #[derive(Args, Clone)]
-pub struct KeymapToJsonArgs {
-    #[arg(long, value_name = "FILE", help = "Input DTS/.dtsi file to parse")]
-    pub dts: PathBuf,
-    #[arg(long, value_name = "FILE", help = "Destination JSON file to write")]
-    pub json: PathBuf,
+pub struct KeymapConvertArgs {
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Input keymap file (JSON or Devicetree source)"
+    )]
+    pub input: PathBuf,
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Destination keymap file (JSON or Devicetree source)"
+    )]
+    pub output: PathBuf,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "FORMAT",
+        help = "Input format (json/dts/dtsi)"
+    )]
+    pub from: KeymapFormat,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "FORMAT",
+        help = "Output format (json/dts/dtsi)"
+    )]
+    pub to: KeymapFormat,
     #[arg(
         long,
         value_name = "PROFILE",
-        help = "Keyboard profile to guide export (enables profile-specific extraction when available)"
+        help = "Keyboard profile to guide conversion (template lookup, vendor extraction)"
     )]
     pub profile: Option<String>,
     #[arg(
         long,
         value_enum,
-        help = "Force vendor-specific regex extraction"
+        help = "Force vendor-specific regex extraction when reading Devicetree"
     )]
     pub vendor: Option<VendorExtractionFlag>,
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "DTS template that provides macros, includes, etc. (required when converting to dts/dtsi without --profile)"
+    )]
+    pub template: Option<PathBuf>,
     #[cfg(feature = "ancpp-preprocessor")]
     #[command(flatten)]
     pub preprocess: PreprocessorArgs,
 }
 
-#[derive(Args, Clone)]
-pub struct KeymapToDtsArgs {
-    #[arg(long, value_name = "FILE", help = "Standard JSON layout file")]
-    pub json: PathBuf,
-    #[arg(
-        long,
-        value_name = "FILE",
-        help = "DTS template that provides macros, includes, etc."
-    )]
-    pub template: PathBuf,
-    #[arg(long, value_name = "FILE", help = "Output DTS path to write")]
-    pub output: PathBuf,
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
 pub enum VendorExtractionFlag {
     Moergo,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum KeymapFormat {
+    Json,
+    Dts,
+    Dtsi,
+    #[value(name = "moergo-json")]
+    MoergoJson,
+}
+
+impl KeymapFormat {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            KeymapFormat::Json => "json",
+            KeymapFormat::Dts => "dts",
+            KeymapFormat::Dtsi => "dtsi",
+            KeymapFormat::MoergoJson => "moergo-json",
+        }
+    }
+}
+
+impl fmt::Display for KeymapFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Args, Clone)]

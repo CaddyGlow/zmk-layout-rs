@@ -82,7 +82,7 @@ fn adapter_applies_mutations_via_provider() -> Result<(), Box<dyn Error>> {
     assert!(updated.contains("bindings = < &kp SPACE >;"));
     assert!(updated.contains("key-positions = < 2 3 >;"));
     assert!(updated.contains("bindings = < &kp Z &kp X >;"));
-    assert!(updated.contains("layers = <0 1>;"));
+    assert!(updated.contains("layers = < 0 1 >;"));
     Ok(())
 }
 
@@ -250,7 +250,7 @@ fn combo_descriptions_and_layers_round_trip() -> Result<(), Box<dyn Error>> {
         "bindings rendered without extra spacing"
     );
     assert!(
-        rendered.contains("layers = <0 2>;"),
+        rendered.contains("layers = < 0 2 >;"),
         "layers property rendered"
     );
     Ok(())

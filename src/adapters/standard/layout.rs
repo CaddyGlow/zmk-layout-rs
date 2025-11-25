@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 
 use crate::{
-    ast::DtItem,
+    ast::{DtItem, DtNode},
     dts::DtsDocument,
     providers::{
         BehaviorDefinition, BehaviorProvider, ComboProvider, KeymapProvider, ProviderError,
@@ -72,6 +72,10 @@ impl AdapterLayout {
         };
         layout.ensure_property_orders();
 
+        layout
+            .metadata
+            .extras
+            .extend(extract_meta_entries(document));
         if let Some(includes) = extract_header_includes(document) {
             layout
                 .metadata
@@ -296,6 +300,31 @@ impl From<StandardFormat> for AdapterLayout {
         layout.ensure_property_orders();
         layout
     }
+}
+
+fn extract_meta_entries(document: &DtsDocument) -> BTreeMap<String, Value> {
+    fn find_meta_node<'a>(items: &'a [DtItem]) -> Option<&'a DtNode> {
+        for item in items {
+            if let DtItem::Node(node) = item {
+                if node.name == "meta" {
+                    return Some(node);
+                }
+                if let Some(found) = find_meta_node(&node.children) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    find_meta_node(&document.items)
+        .map(|node| {
+            node.properties
+                .iter()
+                .map(|prop| (prop.name.clone(), Value::String(prop.value.raw.clone())))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn behavior_definition_is_macro(definition: &BehaviorDefinition) -> bool {

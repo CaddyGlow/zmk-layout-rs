@@ -67,13 +67,13 @@ three core actions:
 
 ```bash
 # Apply tasks and write to a new DTS
-zmk-layout apply --tasks layout_tasks.toml --base-layout keymap.dts --output keymap.generated.dts
+zmk-layout keymap apply --tasks layout_tasks.toml --base-layout keymap.dts --output keymap.generated.dts
 
 # Check what would happen without touching the file
-zmk-layout validate --tasks layout_tasks.toml --base-layout keymap.dts
+zmk-layout keymap validate --tasks layout_tasks.toml --base-layout keymap.dts
 
 # Preview changes as a unified diff
-zmk-layout diff --tasks layout_tasks.toml --base-layout keymap.dts
+zmk-layout keymap diff --tasks layout_tasks.toml --base-layout keymap.dts
 ```
 
 Helpful flags:
@@ -115,7 +115,7 @@ For additional background, see `LAYOUT_TASK_PLAN.md` for the full roadmap.
 Combos can restrict when they fire by declaring a `conditions = ["..."]` array inside the task. During
 execution, the engine renders these conditions into the generated DTS as tagged comments prefixed with
 `// zmk-task:condition`. The prefix keeps task-managed conditions distinct from normal comments while
-also ensuring `zmk-layout diff` highlights them as part of the patch. Example:
+also ensuring `zmk-layout keymap diff` highlights them as part of the patch. Example:
 
 ```toml
 [[tasks]]
@@ -127,7 +127,7 @@ conditions = ["layer_state == base", "mods.shift"]
 target = "combos.combo_demo"
 ```
 
-Running `zmk-layout apply --combo-conditions ...` prints:
+Running `zmk-layout keymap apply --combo-conditions ...` prints:
 
 ```
 combo conditions:

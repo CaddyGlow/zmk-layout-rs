@@ -60,11 +60,13 @@ pub enum LayoutHandleError {
 
 impl Default for LayoutHandle {
     fn default() -> Self {
+        let mut keymap = KeymapDocument::from(AdapterLayout::default());
+        set_original_format_meta(&mut keymap, "generated");
         Self {
             source_path: None,
             raw_text: None,
             preprocessed_text: None,
-            keymap: KeymapDocument::from(AdapterLayout::default()),
+            keymap,
             profile: None,
             origin: LayoutOrigin::Generated,
         }
@@ -80,7 +82,8 @@ impl LayoutHandle {
         let raw = text.into();
         let document = DtsDocument::parse_str(&raw)?;
         let adapter = AdapterLayout::from_document(&document);
-        let keymap = KeymapDocument::from(adapter);
+        let mut keymap = KeymapDocument::from(adapter);
+        set_original_format_meta(&mut keymap, "dts");
         Ok(Self {
             source_path: None,
             raw_text: Some(raw),
@@ -99,7 +102,8 @@ impl LayoutHandle {
     ) -> Result<Self, LayoutHandleError> {
         let document = DtsDocument::parse_str(&preprocessed_text)?;
         let adapter = AdapterLayout::from_document(&document);
-        let keymap = KeymapDocument::from(adapter);
+        let mut keymap = KeymapDocument::from(adapter);
+        set_original_format_meta(&mut keymap, "dts");
         Ok(Self {
             source_path: Some(path.into()),
             raw_text: Some(raw_text),
@@ -116,7 +120,8 @@ impl LayoutHandle {
         let raw = fs::read_to_string(&path_buf)?;
         let document = DtsDocument::parse_str(&raw)?;
         let adapter = AdapterLayout::from_document(&document);
-        let keymap = KeymapDocument::from(adapter);
+        let mut keymap = KeymapDocument::from(adapter);
+        set_original_format_meta(&mut keymap, "dts");
         Ok(Self {
             source_path: Some(path_buf),
             raw_text: Some(raw),
@@ -143,7 +148,8 @@ impl LayoutHandle {
     ) -> Result<Self, LayoutHandleError> {
         let json = text.into();
         let layout = AdapterLayout::from_standard_json(&json)?;
-        let keymap = KeymapDocument::from(layout);
+        let mut keymap = KeymapDocument::from(layout);
+        set_original_format_meta(&mut keymap, "json");
         Ok(Self {
             source_path: None,
             raw_text: Some(json),
@@ -261,4 +267,12 @@ fn minimal_dts_document() -> DtsDocument {
         DtItem::Node(combos),
         DtItem::Node(keymap),
     ])
+}
+
+fn set_original_format_meta(keymap: &mut KeymapDocument, format: &str) {
+    keymap
+        .metadata
+        .extras
+        .entry("original_format".into())
+        .or_insert(serde_json::Value::String(format.to_string()));
 }

@@ -13,10 +13,7 @@ use super::app::Cli;
 
 pub fn dispatch(cli: Cli) -> Result<i32, CliError> {
     match cli.command {
-        Command::Apply(args) => tasks::apply(&args),
-        Command::Validate(args) => tasks::validate(&args),
-        Command::Diff(args) => tasks::diff(&args),
-        Command::Script(args) => script::run(&args),
+        Command::Lua(args) => script::run(&args),
         Command::Firmware(cmd) => run_firmware(cmd),
         Command::Profiles(cmd) => run_profiles(cmd),
         Command::Keymap(cmd) => run_keymap(cmd),
@@ -39,7 +36,10 @@ fn run_profiles(command: ProfilesCommand) -> Result<i32, CliError> {
 
 fn run_keymap(command: KeymapCommand) -> Result<i32, CliError> {
     match command {
-        KeymapCommand::ToJson(args) => keymap::to_json(&args),
-        KeymapCommand::ToDts(args) => keymap::to_dts(&args),
+        KeymapCommand::Apply(args) => tasks::apply(&args),
+        KeymapCommand::Validate(args) => tasks::validate(&args),
+        KeymapCommand::Diff(args) => tasks::diff(&args),
+        KeymapCommand::Lua(args) => script::run(&args),
+        KeymapCommand::Convert(args) => keymap::convert(&args),
     }
 }

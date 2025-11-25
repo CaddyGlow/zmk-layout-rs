@@ -196,13 +196,13 @@ template changes. Task files follow the schema described in `docs/customization_
 
 ```bash
 # Apply tasks and write the result
-zmk-layout apply --tasks layout_tasks.toml --base-layout config/keymap.dts --output config/keymap.generated.dts
+zmk-layout keymap apply --tasks layout_tasks.toml --base-layout config/keymap.dts --output config/keymap.generated.dts
 
 # Dry-run to inspect conflicts without touching the file
-zmk-layout validate --tasks layout_tasks.toml --base-layout config/keymap.dts
+zmk-layout keymap validate --tasks layout_tasks.toml --base-layout config/keymap.dts
 
 # Review a unified diff in the terminal
-zmk-layout diff --tasks layout_tasks.toml --base-layout config/keymap.dts
+zmk-layout keymap diff --tasks layout_tasks.toml --base-layout config/keymap.dts
 ```
 
 Helpful flags:
@@ -219,24 +219,26 @@ The same document covers the Lua scripting hooks that power `script` tasks and c
 Build with `--features ancpp-preprocessor` to enable C-preprocessing before parsing DTS files (helps when keymaps use zmk-helpers macros). When the feature is on, CLI flags appear on DTS-consuming commands:
 
 - `--preprocess` opt-in flag; add `--cpp-include DIR` for zmk-helpers and your config dir, `--cpp-system-include DIR` for Zephyr/ZMK headers, and `--cpp-define NAME[=VALUE]` for things like `HOST_OS=2`.
-- Tasks/Script: `zmk-layout apply/validate/diff` and `zmk-layout script` accept the flags and preprocess `--base-layout` / `--layout` first.
-- Keymap export: `zmk-layout keymap to-json --preprocess ... --dts config/keymap.dts --json layout.json` expands macros before exporting JSON. You can supply `--profile <name>` to auto-apply profile-specific extraction (e.g., MoErgo regex capture) instead of plain DTS parsing.
+- Tasks/Script: `zmk-layout keymap apply/validate/diff` and `zmk-layout keymap lua` accept the flags and preprocess `--base-layout` / `--layout` first.
+- Keymap export: `zmk-layout keymap convert --preprocess ... --input config/keymap.dts --output layout.json --from dts --to json` expands macros before exporting JSON. You can supply `--profile <name>` to auto-apply profile-specific extraction (e.g., MoErgo regex capture) instead of plain DTS parsing.
+- Keymap render: `zmk-layout keymap convert --input layout.json --output templates/keymap.dtsi --from json --to dts --template templates/keymap.dtsi.j2` writes DTS from JSON. You can pass `--profile <name>` instead of `--template` to resolve the template from the keyboard profile.
+- MoErgo JSON: `--from moergo-json` / `--to moergo-json` round-trip Keymap-Editor exports like the samples under `examples/samples/*.json`.
 - Firmware build: `zmk-layout firmware build --preprocess ... --layout-dts config/keymap.dts ...` preprocesses the DTS before feeding the build pipeline.
 
 The ancpp crate is MPL-2.0 with additional terms; keep it feature-gated if your project requires MIT/Apache-only dependencies.
 
-### Standalone Lua Scripts
+### Lua Scripts
 
 For one-off automation or debugging, run Lua scripts directly without creating a full task file:
 
 ```bash
-zmk-layout script \
+zmk-layout keymap lua \
   --script tasks/swap_layer_names.lua \
   --layout config/keymap.dts \
   --output config/keymap.generated.dts
 
 # Preview without writing a file
-zmk-layout script --script scratch/update_layers.lua --layout config/keymap.dts --diff
+zmk-layout keymap lua --script scratch/update_layers.lua --layout config/keymap.dts --diff
 ```
 
 Scripts receive the same helper API as `script` tasks (`set_binding`, `set_layer`, `upsert_combo`, etc.) and can emit notes

@@ -932,20 +932,16 @@ target = "layers.base.bindings[0]"
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
 
-        let combos_root =
-            find_layer_node(&exec.document.document().items, "combos").expect("combos node");
-        let combo_node = find_child_node(combos_root, "combo_cond").expect("combo node");
-        let comments: Vec<_> = combo_node
-            .leading_comments
+        let combo = exec
+            .document
+            .combos
             .iter()
-            .map(|comment| comment.text.trim().to_string())
-            .collect();
-        assert!(
-            comments
-                .iter()
-                .any(|text| text.contains("layer_state == base"))
+            .find(|combo| combo.name == "combo_cond")
+            .expect("combo node");
+        assert_eq!(
+            combo.conditions,
+            vec!["layer_state == base".to_string(), "mods.shift".to_string()]
         );
-        assert!(comments.iter().any(|text| text.contains("mods.shift")));
 
         let engine = LayoutEngine::new(exec.document.clone());
         let snapshot = engine.combo_to_string("combo_cond").unwrap();
@@ -1099,13 +1095,20 @@ target = "layers.base.bindings[0]"
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
 
-        let layer = find_layer_node(&exec.document.document().items, "base").expect("layer node");
-        let display_name = layer
-            .properties
+        let layer = exec
+            .document
+            .layers
             .iter()
-            .find(|prop| prop.name == "display_name")
-            .expect("display_name property");
-        assert_eq!(display_name.value.raw, "\"Primary\"");
+            .find(|layer| layer.name == "base")
+            .expect("layer node");
+        assert_eq!(
+            layer.properties.get("display_name").map(String::as_str),
+            Some("\"Primary\"")
+        );
+        assert_eq!(
+            layer.properties.get("color").map(String::as_str),
+            Some("< 1 2 3 >")
+        );
     }
 
     #[test]
@@ -1226,13 +1229,16 @@ upsert_combo_full("combo_new", {0, 1}, "&kp ENTER", 50, {"nav"}, {"layer_state =
         let exec = apply_tasks(document, &file);
         assert_eq!(exec.results[0].status, TaskStatus::Applied);
 
-        let layer = find_layer_node(&exec.document.document().items, "base").expect("layer");
-        let display = layer
-            .properties
+        let layer = exec
+            .document
+            .layers
             .iter()
-            .find(|prop| prop.name == "display_name")
-            .expect("display_name");
-        assert_eq!(display.value.raw, "\"Primary\"");
+            .find(|layer| layer.name == "base")
+            .expect("layer");
+        assert_eq!(
+            layer.properties.get("display_name").map(String::as_str),
+            Some("\"Primary\"")
+        );
 
         let engine = LayoutEngine::new(exec.document.clone());
         assert_eq!(engine.layer_order_to_string(), "nav,base");

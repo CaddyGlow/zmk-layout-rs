@@ -104,10 +104,9 @@ impl LayoutEngine {
         self.document
             .layers
             .iter()
-            .enumerate()
-            .map(|(idx, layer)| format!("{idx}:{}", layer.name))
+            .map(|layer| layer.name.clone())
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(",")
     }
 
     pub fn layer_bindings(&self, layer: &str) -> Result<Vec<String>, LayoutEngineError> {
@@ -521,7 +520,7 @@ fn combo_snapshot(combo: &ComboSpec) -> String {
         parts.push(format!("bindings=< {} >", binding));
     }
     if let Some(timeout) = combo.timeout_ms {
-        parts.push(format!("timeout-ms={timeout}"));
+        parts.push(format!("timeout-ms=< {timeout} >"));
     }
     if !combo.layers.is_empty() {
         parts.push(format!(
@@ -600,7 +599,11 @@ fn format_metadata_array(items: &[TomlValue]) -> String {
     {
         let values = items
             .iter()
-            .map(|item| format_metadata_value(item))
+            .map(|item| match item {
+                TomlValue::Integer(num) => num.to_string(),
+                TomlValue::Float(num) => num.to_string(),
+                other => format_metadata_value(other),
+            })
             .collect::<Vec<_>>();
         format!("< {} >", values.join(" "))
     } else {

@@ -1052,10 +1052,10 @@ fn indent_block(text: &str, spaces: usize) -> String {
 
 fn format_compact_u32_list(values: &[u32]) -> String {
     if values.is_empty() {
-        "<>".to_string()
+        "< >".to_string()
     } else {
         format!(
-            "<{}>",
+            "< {} >",
             values
                 .iter()
                 .map(|value| value.to_string())

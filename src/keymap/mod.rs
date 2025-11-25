@@ -102,7 +102,13 @@ impl From<KeymapDocument> for AdapterLayout {
 impl KeymapDocument {
     pub fn from_document(document: DtsDocument) -> Self {
         let adapter = AdapterLayout::from_document(&document);
-        KeymapDocument::from(adapter)
+        let mut keymap = KeymapDocument::from(adapter);
+        keymap
+            .metadata
+            .extras
+            .entry("original_format".into())
+            .or_insert(Value::String("dts".into()));
+        keymap
     }
 
     pub fn parse_str(source: &str) -> Result<Self, crate::tokenizer::LayoutError> {
@@ -286,11 +292,17 @@ impl KeymapDocument {
             .iter()
             .position(|entry| entry.name == layer)
             .ok_or_else(|| ProviderError::LayerNotFound(layer.to_string()))?;
-        if position >= self.layers.len() {
+        let len_before = self.layers.len();
+        if position > len_before {
             return Err(ProviderError::LayerNotFound(layer.to_string()));
         }
         let entry = self.layers.remove(current);
-        self.layers.insert(position, entry);
+        let mut target = position;
+        if position > current {
+            target = target.saturating_sub(1);
+        }
+        let target = target.min(self.layers.len());
+        self.layers.insert(target, entry);
         Ok(())
     }
 

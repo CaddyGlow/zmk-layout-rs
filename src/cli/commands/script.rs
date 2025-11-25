@@ -35,14 +35,15 @@ pub fn run(args: &ScriptArgs) -> Result<i32, CliError> {
         return Ok(2);
     }
 
-    let output = io::serialize_keymap(result.document)?;
+    let (base_text, is_preprocessed) = layout.raw_for_diff();
+    let base_path = layout.diff_base_path();
+    let output = io::serialize_keymap_with_base(result.document, &base_text, &base_path)?;
 
     if args.show_diff {
-        let (base_text, is_preprocessed) = layout.raw_for_diff();
         if is_preprocessed {
             eprintln!("warning: diff is against preprocessed layout content");
         }
-        let diff = io::render_diff(&base_text, &output, &layout.diff_base_path());
+        let diff = io::render_diff(&base_text, &output, &base_path);
         print!("{diff}");
     } else if let Some(path) = &args.output {
         io::write_text(path, &output)?;

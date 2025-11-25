@@ -139,7 +139,7 @@ pub fn format_u32_list(values: &[u32]) -> String {
         "< >".to_string()
     } else {
         format!(
-            "<{}>",
+            "< {} >",
             values
                 .iter()
                 .map(|value| value.to_string())

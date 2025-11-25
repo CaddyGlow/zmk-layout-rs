@@ -18,7 +18,8 @@ fn cli_apply_writes_output_and_warns_on_mismatch() {
     let output_path = dir.path().join("updated.dts");
 
     let mut cmd = cargo_bin_cmd!("zmk-layout");
-    cmd.arg("apply")
+    cmd.arg("keymap")
+        .arg("apply")
         .arg("--tasks")
         .arg(fixture("cli_tasks.toml"))
         .arg("--base-layout")
@@ -54,7 +55,8 @@ fn cli_apply_prints_combo_conditions_when_requested() {
     fs::copy(&base_src, &base_path).expect("copy base");
 
     let mut cmd = cargo_bin_cmd!("zmk-layout");
-    cmd.arg("apply")
+    cmd.arg("keymap")
+        .arg("apply")
         .arg("--tasks")
         .arg(fixture("cli_tasks.toml"))
         .arg("--base-layout")
@@ -78,7 +80,8 @@ fn cli_validate_reports_conflicts() {
     fs::copy(&base_src, &base_path).expect("copy base");
 
     let mut cmd = cargo_bin_cmd!("zmk-layout");
-    cmd.arg("validate")
+    cmd.arg("keymap")
+        .arg("validate")
         .arg("--tasks")
         .arg(fixture("cli_conflict_tasks.toml"))
         .arg("--base-layout")
@@ -97,7 +100,8 @@ fn cli_validate_conflicts_can_be_overridden() {
     fs::copy(&base_src, &base_path).expect("copy base");
 
     let mut cmd = cargo_bin_cmd!("zmk-layout");
-    cmd.arg("validate")
+    cmd.arg("keymap")
+        .arg("validate")
         .arg("--tasks")
         .arg(fixture("cli_conflict_tasks.toml"))
         .arg("--base-layout")
@@ -118,7 +122,8 @@ fn cli_diff_prints_patch() {
     fs::copy(&base_src, &base_path).expect("copy base");
 
     let mut cmd = cargo_bin_cmd!("zmk-layout");
-    cmd.arg("diff")
+    cmd.arg("keymap")
+        .arg("diff")
         .arg("--tasks")
         .arg(fixture("cli_tasks.toml"))
         .arg("--base-layout")
@@ -200,24 +205,32 @@ fn cli_keymap_round_trip_without_template_placeholders() {
     let mut export_cmd = cargo_bin_cmd!("zmk-layout");
     export_cmd
         .arg("keymap")
-        .arg("to-json")
-        .arg("--dts")
+        .arg("convert")
+        .arg("--input")
         .arg(&dts_path)
-        .arg("--json")
-        .arg(&json_path);
+        .arg("--output")
+        .arg(&json_path)
+        .arg("--from")
+        .arg("dts")
+        .arg("--to")
+        .arg("json");
     export_cmd.assert().success();
 
     let output_path = dir.path().join("output.dts");
     let mut import_cmd = cargo_bin_cmd!("zmk-layout");
     import_cmd
         .arg("keymap")
-        .arg("to-dts")
-        .arg("--json")
+        .arg("convert")
+        .arg("--input")
         .arg(&json_path)
-        .arg("--template")
-        .arg(&template)
         .arg("--output")
-        .arg(&output_path);
+        .arg(&output_path)
+        .arg("--from")
+        .arg("json")
+        .arg("--to")
+        .arg("dts")
+        .arg("--template")
+        .arg(&template);
     import_cmd.assert().success();
 
     let rendered = fs::read_to_string(&output_path).expect("read output");
@@ -255,13 +268,17 @@ fn cli_keymap_round_trip_with_template_placeholders() {
     let mut import_cmd = cargo_bin_cmd!("zmk-layout");
     import_cmd
         .arg("keymap")
-        .arg("to-dts")
-        .arg("--json")
+        .arg("convert")
+        .arg("--input")
         .arg(&json_path)
-        .arg("--template")
-        .arg(&template)
         .arg("--output")
-        .arg(&output_path);
+        .arg(&output_path)
+        .arg("--from")
+        .arg("json")
+        .arg("--to")
+        .arg("dts")
+        .arg("--template")
+        .arg(&template);
     import_cmd.assert().success();
 
     let rendered = fs::read_to_string(&output_path).expect("read rendered");
@@ -279,11 +296,15 @@ fn cli_keymap_round_trip_with_template_placeholders() {
     let mut export_cmd = cargo_bin_cmd!("zmk-layout");
     export_cmd
         .arg("keymap")
-        .arg("to-json")
-        .arg("--dts")
+        .arg("convert")
+        .arg("--input")
         .arg(&output_path)
-        .arg("--json")
-        .arg(&roundtrip_json);
+        .arg("--output")
+        .arg(&roundtrip_json)
+        .arg("--from")
+        .arg("dts")
+        .arg("--to")
+        .arg("json");
     export_cmd.assert().success();
 
     let exported = fs::read_to_string(&roundtrip_json).expect("read roundtrip json");
@@ -312,7 +333,8 @@ fn cli_script_diff_outputs_expected_patch() {
     let expected = fs::read_to_string(fixture("cli_script_diff.txt")).expect("fixture");
 
     let mut cmd = cargo_bin_cmd!("zmk-layout");
-    cmd.arg("script")
+    cmd.arg("keymap")
+        .arg("lua")
         .arg("--script")
         .arg(fixture("script_task_file.lua"))
         .arg("--layout")
@@ -338,7 +360,8 @@ fn cli_script_output_writes_expected_layout() {
     let output_path = dir.path().join("script.dts");
 
     let mut cmd = cargo_bin_cmd!("zmk-layout");
-    cmd.arg("script")
+    cmd.arg("keymap")
+        .arg("lua")
         .arg("--script")
         .arg(fixture("script_task_file.lua"))
         .arg("--layout")

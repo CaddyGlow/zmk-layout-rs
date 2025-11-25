@@ -126,6 +126,21 @@ pub fn serialize_keymap(document: KeymapDocument) -> Result<String, IoError> {
     Ok(updated.to_string()?)
 }
 
+/// Serialize a keymap using an existing DTS document as the base.
+pub fn serialize_keymap_with_base(
+    document: KeymapDocument,
+    base_text: &str,
+    base_path: impl AsRef<Path>,
+) -> Result<String, IoError> {
+    let adapter: AdapterLayout = document.into();
+    let base = DtsDocument::parse_str(base_text).map_err(|source| IoError::ParseLayout {
+        path: base_path.as_ref().to_path_buf(),
+        source,
+    })?;
+    let updated = adapter.apply_to_document(base).map_err(AdapterError::from)?;
+    Ok(updated.to_string()?)
+}
+
 /// Load and parse a task file from disk.
 pub fn load_task_file(path: impl AsRef<Path>) -> Result<LoadedTaskFile, IoError> {
     let path = path.as_ref().to_path_buf();

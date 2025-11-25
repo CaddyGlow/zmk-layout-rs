@@ -268,25 +268,20 @@ combos {
 
     let (def, combo_text) = {
         let engine_ref = engine.borrow();
-        let mut combos = engine_ref.document().combos().into_iter();
-        let def = combos
+        let def = engine_ref
+            .document()
+            .combos
+            .iter()
             .find(|combo| combo.name == "esc_combo")
             .expect("combo is present");
         let combo_text = engine_ref.combo_to_string("esc_combo").unwrap();
-        (def, combo_text)
+        (def.clone(), combo_text)
     };
 
     assert_eq!(def.key_positions, vec![0, 1], "keys preserved after edit");
     assert_eq!(def.timeout_ms, Some(100), "timeout updated");
     assert_eq!(def.layers, vec![1], "layers preserved");
-    assert_eq!(
-        def.bindings
-            .get(0)
-            .expect("binding exists")
-            .to_binding_string(),
-        "&kp ESC",
-        "binding preserved"
-    );
+    assert_eq!(def.binding.as_deref(), Some("&kp ESC"), "binding preserved");
     assert!(
         combo_text.contains("conditions=COND_ACTIVE"),
         "conditions preserved: {combo_text}"
