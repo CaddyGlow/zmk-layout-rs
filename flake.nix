@@ -72,9 +72,28 @@
           pkgs.protobuf
           pkgs.openssl
 
+          pkgs.lua54Packages.lua
+
           # MinGW cross-compiler: provides x86_64-w64-mingw32-gcc/ar, etc.
           pkgs.pkgsCross.mingwW64.stdenv.cc
           mingwPthreads
+
+          pkgs.cacert
+
+          pkgs.cloc
+          pkgs.tokei
+          pkgs.scc
+
+          # Python with uv
+          pkgs.python3
+          pkgs.maturin
+          pkgs.uv
+          pkgs.pyright
+
+          # JavaScript tools
+          pkgs.nodejs
+          pkgs.bun
+          pkgs.pnpm
         ];
 
         linuxDevPackages =

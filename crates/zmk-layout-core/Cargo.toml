@@ -1,0 +1,34 @@
+[package]
+name = "zmk-layout-core"
+version.workspace = true
+edition.workspace = true
+description = "Core library for ZMK keyboard layout manipulation"
+
+[features]
+default = ["flash-linux", "flash-macos", "flash-windows", "flash-fake-backend"]
+flash-linux = []
+flash-macos = []
+flash-windows = []
+flash-fake-backend = []
+ancpp-preprocessor = ["ancpp"]
+
+[dependencies]
+logos.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+similar.workspace = true
+tempfile.workspace = true
+dirs.workspace = true
+minijinja.workspace = true
+signal-hook.workspace = true
+regex.workspace = true
+plist.workspace = true
+rust-embed.workspace = true
+log.workspace = true
+
+ancpp = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true

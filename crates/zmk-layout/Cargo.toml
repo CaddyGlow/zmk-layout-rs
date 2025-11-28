@@ -1,0 +1,37 @@
+[package]
+name = "zmk-layout"
+version.workspace = true
+edition.workspace = true
+description = "CLI tool for ZMK keyboard layout manipulation"
+
+[[bin]]
+name = "zmk-layout"
+path = "src/main.rs"
+
+[lib]
+name = "zmk_layout_rs"
+path = "src/lib.rs"
+
+[features]
+default = ["flash-linux", "flash-macos", "flash-windows", "flash-fake-backend"]
+flash-linux = ["zmk-layout-core/flash-linux"]
+flash-macos = ["zmk-layout-core/flash-macos"]
+flash-windows = ["zmk-layout-core/flash-windows"]
+flash-fake-backend = ["zmk-layout-core/flash-fake-backend"]
+ancpp-preprocessor = ["zmk-layout-core/ancpp-preprocessor"]
+
+[dependencies]
+zmk-layout-core.workspace = true
+zmk-layout-lua = { workspace = true, features = ["vendored"] }
+clap.workspace = true
+thiserror.workspace = true
+log.workspace = true
+env_logger.workspace = true
+serde_json.workspace = true
+similar.workspace = true
+tempfile.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true

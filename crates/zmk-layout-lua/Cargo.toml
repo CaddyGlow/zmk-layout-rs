@@ -1,0 +1,17 @@
+[package]
+name = "zmk-layout-lua"
+version.workspace = true
+edition.workspace = true
+description = "Lua scripting API for ZMK layout manipulation"
+
+[features]
+default = ["vendored"]
+vendored = ["mlua/vendored"]
+
+[dependencies]
+zmk-layout-core.workspace = true
+mlua = { version = "0.9", features = ["lua54"] }
+thiserror.workspace = true
+toml.workspace = true
+serde_json.workspace = true
+log.workspace = true

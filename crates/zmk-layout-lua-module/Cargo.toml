@@ -1,0 +1,16 @@
+[package]
+name = "zmk-layout-lua-module"
+version = "0.1.0"
+edition = "2021"
+description = "Native Lua module for ZMK layout manipulation - loadable by any Lua 5.4 interpreter"
+
+[lib]
+crate-type = ["cdylib"]
+name = "zmk_layout"
+
+[dependencies]
+zmk-layout-core = { path = "../zmk-layout-core" }
+# Disable vendored feature since we use "module" which links to host Lua
+zmk-layout-lua = { path = "../zmk-layout-lua", default-features = false }
+# Note: module feature requires linking to host Lua, not vendored
+mlua = { version = "0.9", features = ["lua54", "module"] }

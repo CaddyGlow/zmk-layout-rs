@@ -1,0 +1,14 @@
+/home/rick/projects-caddy/zmk-layout-rs/crates/zmk-layout-lua-module/target/release/deps/serde-347afeb72b5daabc.d: /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/rick/projects-caddy/zmk-layout-rs/crates/zmk-layout-lua-module/target/release/build/serde-66b69aa4606d1244/out/private.rs
+
+/home/rick/projects-caddy/zmk-layout-rs/crates/zmk-layout-lua-module/target/release/deps/libserde-347afeb72b5daabc.rlib: /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/rick/projects-caddy/zmk-layout-rs/crates/zmk-layout-lua-module/target/release/build/serde-66b69aa4606d1244/out/private.rs
+
+/home/rick/projects-caddy/zmk-layout-rs/crates/zmk-layout-lua-module/target/release/deps/libserde-347afeb72b5daabc.rmeta: /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs /home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs /home/rick/projects-caddy/zmk-layout-rs/crates/zmk-layout-lua-module/target/release/build/serde-66b69aa4606d1244/out/private.rs
+
+/home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/lib.rs:
+/home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/integer128.rs:
+/home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/mod.rs:
+/home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/de.rs:
+/home/rick/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.228/src/private/ser.rs:
+/home/rick/projects-caddy/zmk-layout-rs/crates/zmk-layout-lua-module/target/release/build/serde-66b69aa4606d1244/out/private.rs:
+
+# env-dep:OUT_DIR=/home/rick/projects-caddy/zmk-layout-rs/crates/zmk-layout-lua-module/target/release/build/serde-66b69aa4606d1244/out

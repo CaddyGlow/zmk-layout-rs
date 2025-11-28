@@ -1,0 +1,37 @@
+# Rust/maturin build outputs
+/target
+/target/wheels
+
+# Python build/dist artifacts
+/build/
+/dist/
+*.egg-info/
+*.dist-info/
+pip-wheel-metadata/
+wheelhouse/
+
+# Virtual environments
+.venv/
+venv/
+
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.dylib
+*.dll
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.nox/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Tooling metadata
+.maturin/
+.python-version
+.idea/
+.vscode/
