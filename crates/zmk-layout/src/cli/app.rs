@@ -147,6 +147,7 @@ pub enum FirmwareCommand {
 #[derive(Subcommand)]
 pub enum ProfilesCommand {
     Check(ProfileCheckArgs),
+    Show(ProfileShowArgs),
 }
 
 #[derive(Subcommand)]
@@ -177,6 +178,14 @@ pub struct ProfileCheckArgs {
         help = "Directory scanned when --all is provided"
     )]
     pub profiles_dir: PathBuf,
+}
+
+#[derive(Args, Clone)]
+pub struct ProfileShowArgs {
+    #[arg(value_name = "PROFILE", help = "Keyboard profile name (e.g., glove80)")]
+    pub profile: String,
+    #[arg(long, help = "Display position names instead of numeric indices")]
+    pub names: bool,
 }
 
 #[derive(Args, Clone)]

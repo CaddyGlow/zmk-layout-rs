@@ -12,6 +12,7 @@ pub mod build;
 pub mod dts;
 pub mod flash;
 pub mod io;
+pub mod key_positions;
 pub mod keymap;
 pub mod layout_engine;
 pub mod layout_handle;

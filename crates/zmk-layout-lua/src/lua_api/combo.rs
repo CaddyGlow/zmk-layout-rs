@@ -3,8 +3,9 @@ use std::cell::{Cell, RefCell};
 
 use zmk_layout_core::layout_engine::LayerSelector;
 
+use super::position::resolve_positions_1based;
 use super::util::{
-    SharedLayout, ensure_staged, lua_table_to_strings, lua_table_to_u32, lua_value_to_optional_u32,
+    SharedLayout, SharedPositions, ensure_staged, lua_table_to_strings, lua_value_to_optional_u32,
     script_error,
 };
 
@@ -12,6 +13,7 @@ use super::util::{
 pub struct ComboObject {
     name: String,
     layout: SharedLayout,
+    positions: SharedPositions,
     keys: RefCell<Option<Vec<u32>>>,
     binding: RefCell<Option<String>>,
     timeout: RefCell<Option<Option<u32>>>,
@@ -21,10 +23,11 @@ pub struct ComboObject {
 }
 
 impl ComboObject {
-    pub fn new(name: String, layout: SharedLayout) -> Self {
+    pub fn new(name: String, layout: SharedLayout, positions: SharedPositions) -> Self {
         let combo = Self {
             name,
             layout,
+            positions,
             keys: RefCell::new(None),
             binding: RefCell::new(None),
             timeout: RefCell::new(None),
@@ -123,7 +126,8 @@ impl UserData for ComboObject {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method("keys", |_, this, table: LuaTable| {
             this.ensure_staged()?;
-            let keys = lua_table_to_u32(table)?;
+            let positions = this.positions.borrow();
+            let keys = resolve_positions_1based(&positions, table)?;
             *this.keys.borrow_mut() = Some(keys);
             Ok(this.clone())
         });

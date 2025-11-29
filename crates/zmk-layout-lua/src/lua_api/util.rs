@@ -3,10 +3,12 @@ use std::rc::Rc;
 
 use mlua::{Error as LuaError, Lua, Result as LuaResult, Table as LuaTable, Value as LuaValue};
 
+use zmk_layout_core::key_positions::KeyPositionMap;
 use zmk_layout_core::layout_engine::LayoutEngine;
 
 pub type SharedLayout = Rc<RefCell<LayoutEngine>>;
 pub type SharedLogs = Rc<RefCell<Vec<String>>>;
+pub type SharedPositions = Rc<RefCell<KeyPositionMap>>;
 
 pub fn script_error(message: impl Into<String>) -> LuaError {
     LuaError::RuntimeError(message.into())

@@ -12,8 +12,9 @@ use super::{
     input::InputObject,
     layer::LayerBuilder,
     macro_builder::MacroObject,
+    position::PositionMap,
     query::{BehaviorInfo, ComboInfo, LayerInfo, list_behavior_definitions, list_combo_definitions},
-    util::{SharedLayout, SharedLogs, script_error},
+    util::{SharedLayout, SharedLogs, SharedPositions, script_error},
 };
 
 use zmk_layout_core::{
@@ -30,8 +31,10 @@ use zmk_layout_core::{
     },
     dts::DtsDocument,
     io::serialize_keymap,
+    key_positions::KeyPositionMap,
     keymap::KeymapDocument,
     layout_engine::LayoutEngine,
+    profiles::KeyboardProfileDoc,
 };
 use toml::{Value as TomlValue, map::Map as TomlMap};
 
@@ -43,6 +46,7 @@ use toml::{Value as TomlValue, map::Map as TomlMap};
 #[derive(Clone)]
 pub struct Layout {
     layout: SharedLayout,
+    positions: SharedPositions,
     #[allow(dead_code)]
     logs: SharedLogs,
 }
@@ -54,11 +58,48 @@ impl Layout {
     fn new() -> Self {
         let engine = LayoutEngine::empty();
         let shared_layout = Arc::new(RefCell::new(engine));
+        let shared_positions = Arc::new(RefCell::new(KeyPositionMap::new()));
         let shared_logs: Arc<RefCell<Vec<String>>> = Arc::new(RefCell::new(Vec::new()));
         Self {
             layout: shared_layout,
+            positions: shared_positions,
             logs: shared_logs,
         }
+    }
+
+    /// Load key position names from a keyboard profile.
+    ///
+    /// This enables using semantic position names like "LH_C6R1" instead of
+    /// numeric indices when defining combos and layers.
+    ///
+    /// Args:
+    ///     profile_name: Name of the keyboard profile (e.g., "glove80").
+    fn load_positions(&self, profile_name: &str) -> PyResult<()> {
+        let profile = KeyboardProfileDoc::load(profile_name).map_err(|err| {
+            script_error(format!(
+                "failed to load profile '{}': {}",
+                profile_name, err
+            ))
+        })?;
+        let map = KeyPositionMap::from_profile(&profile);
+        *self.positions.borrow_mut() = map;
+        Ok(())
+    }
+
+    /// Get the current position map.
+    ///
+    /// Returns:
+    ///     A PositionMap object for looking up position names.
+    fn get_positions(&self) -> PositionMap {
+        PositionMap::new(self.positions.borrow().clone())
+    }
+
+    /// Check if position names are loaded.
+    ///
+    /// Returns:
+    ///     True if position names have been loaded from a profile.
+    fn has_positions(&self) -> bool {
+        !self.positions.borrow().is_empty()
     }
 
     /// Get a layer builder for the given layer name.
@@ -80,7 +121,7 @@ impl Layout {
     /// Returns:
     ///     A ComboObject for fluent configuration.
     fn combo(&self, name: String) -> ComboObject {
-        ComboObject::new(name, Arc::clone(&self.layout))
+        ComboObject::new(name, Arc::clone(&self.layout), Arc::clone(&self.positions))
     }
 
     /// Get a behavior builder for the given behavior name.
@@ -420,6 +461,10 @@ impl Layout {
 impl Layout {
     pub fn shared_layout(&self) -> SharedLayout {
         Arc::clone(&self.layout)
+    }
+
+    pub fn shared_positions(&self) -> SharedPositions {
+        Arc::clone(&self.positions)
     }
 
     pub fn shared_logs(&self) -> SharedLogs {

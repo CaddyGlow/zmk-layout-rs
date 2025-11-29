@@ -4,6 +4,7 @@
 
 pub use crate::{
     dts::DtsDocument,
+    key_positions::{KeyPositionMap, NumericOnlyResolver, PositionResolver},
     keymap::KeymapDocument as StandardKeymapDocument,
     providers::{KeymapDocument as DtsKeymapDocument, KeymapProvider, ProviderError},
     tasks::{

@@ -4,11 +4,13 @@ use std::sync::Arc;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 
+use zmk_layout_core::key_positions::KeyPositionMap;
 use zmk_layout_core::layout_engine::LayoutEngine;
 
 /// Thread-safe shared layout engine using Arc for Python's GIL-based threading.
 pub type SharedLayout = Arc<RefCell<LayoutEngine>>;
 pub type SharedLogs = Arc<RefCell<Vec<String>>>;
+pub type SharedPositions = Arc<RefCell<KeyPositionMap>>;
 
 /// Create a Python runtime error from a string message.
 pub fn script_error(message: impl Into<String>) -> PyErr {

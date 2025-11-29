@@ -5,6 +5,7 @@ mod conditional;
 mod input;
 mod layer;
 mod macro_builder;
+mod position;
 mod query;
 mod util;
 
@@ -15,4 +16,5 @@ pub use conditional::ConditionalObject;
 pub use input::InputObject;
 pub use layer::LayerBuilder;
 pub use macro_builder::MacroObject;
+pub use position::{PositionMap, load_positions};
 pub use query::{BehaviorInfo, ComboInfo, LayerInfo};

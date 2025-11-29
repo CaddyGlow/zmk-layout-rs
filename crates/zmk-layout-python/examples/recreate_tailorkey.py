@@ -1,175 +1,119 @@
 #!/usr/bin/env python3
-"""Recreate the TailorKey sample keymap from its MoErgo JSON export by
-converting it to the standard layout JSON and feeding it through the template."""
+"""Recreate the TailorKey sample keymap using code and small data modules."""
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List
 
 import zmk_layout
 
-BindingNode = Union[str, Dict[str, Any]]
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(Path(__file__).parent))
+
+from tailorkey_layers import base, layer_names, overrides  # noqa: E402
+from tailorkey_behaviors import hold_taps, macros  # noqa: E402
+from tailorkey_combos import combos, input_listeners, metadata  # noqa: E402
 
 
-def render_binding(node: BindingNode) -> str:
-    if isinstance(node, str):
-        return node
-    if isinstance(node, dict):
-        value = node["value"]
-        params = node.get("params", [])
-        if not params:
-            return value
-        rendered = [render_binding(child) for child in params]
-        return f'{value} {" ".join(rendered)}'
-    raise TypeError(f"unsupported binding node: {type(node)}")
+def build_layers() -> List[Dict[str, Any]]:
+    layers = [{"name": layer_names[0], "bindings": base}]
+    for name in layer_names[1:]:
+        bindings = ["&trans"] * len(base)
+        for idx, val in overrides.get(name, {}).items():
+            bindings[idx - 1] = val
+        layers.append({"name": name, "bindings": bindings})
+    return layers
 
 
-def trim_name(name: str) -> str:
-    return name[1:] if name.startswith("&") else name
-
-
-def format_num(value: Any) -> str:
-    return f"< {value} >"
-
-
-def format_num_list(values: List[Any]) -> str:
-    return "< " + " ".join(str(v) for v in values) + " >"
-
-
-def to_standard_layout(data: Dict[str, Any]) -> Dict[str, Any]:
-    layer_names: List[str] = data.get("layer_names", [])
-    layers = [
-        {"name": name, "bindings": [render_binding(entry) for entry in bindings]}
-        for name, bindings in zip(layer_names, data.get("layers", []))
-    ]
-
-    macros = []
-    for macro in data.get("macros", []):
+def build_macros() -> List[Dict[str, Any]]:
+    result = []
+    for macro in macros:
         cells = len(macro.get("params", []))
-        macros.append(
+        result.append(
             {
-                "name": trim_name(macro["name"]),
+                "name": macro["name"],
                 "description": macro.get("description", ""),
-                "bindings": [render_binding(entry) for entry in macro.get("bindings", [])],
-                "wait_ms": macro.get("waitMs"),
-                "tap_ms": macro.get("tapMs"),
-                "binding_cells": cells if cells else None,
-                "compatible": "zmk,behavior-macro-one-param" if cells else "zmk,behavior-macro",
+                "bindings": macro.get("bindings", []),
+                "wait_ms": macro.get("wait_ms"),
+                "tap_ms": macro.get("tap_ms"),
+                "binding_cells": cells or None,
+                "compatible": (
+                    "zmk,behavior-macro-one-param" if cells else "zmk,behavior-macro"
+                ),
             }
         )
+    return result
 
-    behaviors = []
-    for ht in data.get("holdTaps", []):
-        props: Dict[str, str] = {}
-        if "tappingTermMs" in ht:
-            props["tapping-term-ms"] = format_num(ht["tappingTermMs"])
-        if "quickTapMs" in ht:
-            props["quick-tap-ms"] = format_num(ht["quickTapMs"])
-        if "requirePriorIdleMs" in ht:
-            props["require-prior-idle-ms"] = format_num(ht["requirePriorIdleMs"])
-        if ht.get("holdTriggerKeyPositions"):
-            props["hold-trigger-key-positions"] = format_num_list(
-                ht["holdTriggerKeyPositions"]
-            )
-        if "holdTriggerOnRelease" in ht:
-            props["hold-trigger-on-release"] = (
-                "true" if ht["holdTriggerOnRelease"] else "false"
-            )
-        if "flavor" in ht:
-            props["flavor"] = f"\"{ht['flavor']}\""
 
-        behaviors.append(
+def fmt_prop(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return f"< {value} >"
+    if isinstance(value, list):
+        return "< " + " ".join(str(v) for v in value) + " >"
+    if isinstance(value, str):
+        return f'"{value}"'
+    return str(value)
+
+
+def build_behaviors() -> List[Dict[str, Any]]:
+    result = []
+    for ht in hold_taps:
+        props = {
+            "tapping-term-ms": fmt_prop(ht.get("tapping_term_ms")),
+            "quick-tap-ms": fmt_prop(ht.get("quick_tap_ms")),
+            "require-prior-idle-ms": fmt_prop(ht.get("require_prior_idle_ms")),
+        }
+        positions = ht.get("hold_trigger_key_positions") or []
+        if positions:
+            props["hold-trigger-key-positions"] = fmt_prop(positions)
+        if "hold_trigger_on_release" in ht:
+            props["hold-trigger-on-release"] = fmt_prop(ht.get("hold_trigger_on_release"))
+        if "flavor" in ht and ht["flavor"] is not None:
+            props["flavor"] = fmt_prop(ht["flavor"])
+        # drop None values
+        props = {k: v for k, v in props.items() if v is not None}
+        result.append(
             {
-                "name": trim_name(ht["name"]),
+                "name": ht["name"],
                 "description": ht.get("description", ""),
                 "compatible": "zmk,behavior-hold-tap",
                 "binding_cells": 2,
-                "bindings": [render_binding(entry) for entry in ht.get("bindings", [])],
+                "bindings": ht.get("bindings", []),
                 "properties": props,
             }
         )
+    return result
 
-    combos = []
-    for combo in data.get("combos", []):
-        combos.append(
-            {
-                "name": combo["name"],
-                "description": combo.get("description", ""),
-                "key_positions": combo.get("keyPositions", []),
-                "binding": render_binding(combo["binding"]),
-                "timeout_ms": combo.get("timeoutMs"),
-                "layers": combo.get("layers", []),
-            }
-        )
 
-    input_listeners = []
-    for listener in data.get("inputListeners", []):
-        nodes = []
-        for node in listener.get("nodes", []):
-            nodes.append(
-                {
-                    "code": node["code"],
-                    "description": node.get("description"),
-                    "layers": node.get("layers", []),
-                    "inputProcessors": [
-                        {"code": proc["code"], "params": proc.get("params", [])}
-                        for proc in node.get("inputProcessors", [])
-                    ],
-                }
-            )
-        input_listeners.append(
-            {
-                "code": listener["code"],
-                "inputProcessors": listener.get("inputProcessors", []),
-                "nodes": nodes,
-            }
-        )
-
-    metadata = {
-        "title": data.get("title"),
-        "author": data.get("creator"),
-        "description": data.get("notes"),
-        "extras": {
-            "keyboard": data.get("keyboard"),
-            "uuid": data.get("uuid"),
-            "parent_uuid": data.get("parent_uuid"),
-            "tags": data.get("tags", []),
-        },
-    }
-
+def build_standard_layout() -> Dict[str, Any]:
     return {
-        "layers": layers,
+        "layers": build_layers(),
         "combos": combos,
-        "behaviors": behaviors,
-        "macros": macros,
+        "behaviors": build_behaviors(),
+        "macros": build_macros(),
         "input_listeners": input_listeners,
         "metadata": metadata,
     }
 
 
 def main() -> None:
-    repo_root = Path(__file__).resolve().parents[3]
-    sample_json = repo_root / "examples" / "samples" / "8e349bac-1664-41f1-8d2e-7b9398f6d8cc_TailorKey v4.2i Bilateral.json"
-    template = repo_root / "examples" / "moergo_glove80.j2"
-    output_path = repo_root / "out" / "tailorkey_from_json.keymap"
-
-    data = json.loads(sample_json.read_text())
-    standard = to_standard_layout(data)
-
     layout = zmk_layout.Layout()
-    layout.parse_json(json.dumps(standard), str(template))
+    standard = build_standard_layout()
+    json_payload = json.dumps(standard)
 
+    layout.parse_json(json_payload, "examples/moergo_glove80.j2")
+
+    output_path = ROOT / "out" / "tailorkey_from_json.keymap"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     layout.save_dts(str(output_path))
-
-    print(
-        f"Recreated TailorKey: {len(standard['layers'])} layers, "
-        f"{len(data.get('macros', []))} macros, "
-        f"{len(data.get('holdTaps', []))} hold-taps, "
-        f"{len(data.get('combos', []))} combos -> {output_path}"
-    )
+    print(f"Recreated TailorKey -> {output_path}")
 
 
 if __name__ == "__main__":

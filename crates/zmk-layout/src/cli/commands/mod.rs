@@ -31,6 +31,7 @@ fn run_firmware(command: FirmwareCommand) -> Result<i32, CliError> {
 fn run_profiles(command: ProfilesCommand) -> Result<i32, CliError> {
     match command {
         ProfilesCommand::Check(args) => profiles::check(&args),
+        ProfilesCommand::Show(args) => profiles::show(&args),
     }
 }
 

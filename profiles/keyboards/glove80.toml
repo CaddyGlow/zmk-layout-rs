@@ -86,11 +86,11 @@ template = "templates/glove80/keymap.dtsi.j2"
 [layout.detection]
 # Markers and regexes that appear in MoErgo-rendered DTSI files
 markers = [
-    "Automatically generated keymap",
-    "Custom Device-tree",
-    "Input Listeners",
-    "System behavior and Macros",
-    "MoErgo",
+  "Automatically generated keymap",
+  "Custom Device-tree",
+  "Input Listeners",
+  "System behavior and Macros",
+  "MoErgo",
 ]
 regex = ["/\\*\\s*Automatically\\s+generated\\s+keymap\\s*\\*/"]
 
@@ -99,7 +99,7 @@ key_gap = "  "
 base_indent = ""
 
 [[layout.formatting.rows]]
-keys = [-1, 0, 1, 2, 3, 4, -1, -1, -1, -1, -1, -1, -1, -1, 5, 6, 7, 8, 9, -1]
+keys = [0, 1, 2, 3, 4, -1, -1, -1, -1, -1, -1, -1, -1, 5, 6, 7, 8, 9]
 
 [[layout.formatting.rows]]
 keys = [10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, 16, 17, 18, 19, 20, 21]

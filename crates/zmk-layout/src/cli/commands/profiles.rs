@@ -4,8 +4,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::cli::{app::ProfileCheckArgs, error::CliError};
-use zmk_layout_core::profiles::KeyboardProfileDoc;
+use crate::cli::{
+    app::{ProfileCheckArgs, ProfileShowArgs},
+    error::CliError,
+};
+use zmk_layout_core::{
+    key_positions::KeyPositionMap,
+    profiles::{KeyboardProfileDoc, LayoutFormattingRow},
+};
 
 pub fn check(args: &ProfileCheckArgs) -> Result<i32, CliError> {
     let mut requested = args.paths.clone();
@@ -94,4 +100,46 @@ fn discover_profile_paths(dir: &Path) -> Result<Vec<PathBuf>, CliError> {
         .into_iter()
         .map(|name| dir.join(format!("{}.toml", name)))
         .collect())
+}
+
+pub fn show(args: &ProfileShowArgs) -> Result<i32, CliError> {
+    let profile = KeyboardProfileDoc::load(&args.profile).map_err(|err| {
+        CliError::ProfileCheck(format!("failed to load profile '{}': {}", args.profile, err))
+    })?;
+    let position_map = KeyPositionMap::from_profile(&profile);
+
+    println!(
+        "{} - {} keys",
+        profile.metadata.name, profile.hardware.key_count
+    );
+    println!();
+
+    for row in &profile.layout.formatting.rows {
+        let line = if args.names {
+            format_row_with_names(row, &position_map)
+        } else {
+            row.ascii_art()
+        };
+        println!("{}", line);
+    }
+
+    Ok(0)
+}
+
+fn format_row_with_names(row: &LayoutFormattingRow, positions: &KeyPositionMap) -> String {
+    const EMPTY: &str = "        .";
+    row.keys
+        .iter()
+        .map(|&value| {
+            if value < 0 {
+                EMPTY.to_string()
+            } else {
+                match positions.get_name(value as u32) {
+                    Some(name) => format!("{:>9}", name),
+                    None => format!("{:>9}", value),
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }

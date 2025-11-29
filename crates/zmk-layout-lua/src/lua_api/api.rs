@@ -1,4 +1,4 @@
-use std::{fs, rc::Rc};
+use std::{cell::RefCell, fs, rc::Rc};
 
 use mlua::{
     AnyUserData as LuaAnyUserData, Lua, Result as LuaResult, Table as LuaTable, UserData,
@@ -12,11 +12,12 @@ use super::{
     input::InputObject,
     layer::LayerBuilder,
     macro_builder::MacroObject,
+    position::PositionMapObject,
     query::{
         BehaviorInfoObject, ComboInfoObject, LayerInfoObject, list_behavior_definitions,
         list_combo_definitions,
     },
-    util::{SharedLayout, SharedLogs, require_positive_index, script_error},
+    util::{SharedLayout, SharedLogs, SharedPositions, require_positive_index, script_error},
 };
 
 use zmk_layout_core::{
@@ -33,8 +34,10 @@ use zmk_layout_core::{
     },
     dts::DtsDocument,
     io::serialize_keymap,
+    key_positions::KeyPositionMap,
     keymap::KeymapDocument,
     layout_engine::LayoutEngine,
+    profiles::KeyboardProfileDoc,
 };
 use serde_json;
 use toml::{Value as TomlValue, map::Map as TomlMap};
@@ -42,23 +45,54 @@ use toml::{Value as TomlValue, map::Map as TomlMap};
 #[derive(Clone)]
 pub struct LayoutApi {
     layout: SharedLayout,
+    positions: SharedPositions,
     #[allow(dead_code)]
     logs: SharedLogs,
 }
 
 impl LayoutApi {
     pub fn new(layout: SharedLayout, logs: SharedLogs) -> Self {
-        Self { layout, logs }
+        Self {
+            layout,
+            positions: Rc::new(RefCell::new(KeyPositionMap::new())),
+            logs,
+        }
+    }
+
+    pub fn with_positions(layout: SharedLayout, positions: SharedPositions, logs: SharedLogs) -> Self {
+        Self {
+            layout,
+            positions,
+            logs,
+        }
     }
 }
 
 impl UserData for LayoutApi {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
+        // Position map methods
+        methods.add_method("load_positions", |_, this, profile_name: String| {
+            let profile = KeyboardProfileDoc::load(&profile_name).map_err(|err| {
+                script_error(format!("failed to load profile '{}': {}", profile_name, err))
+            })?;
+            let map = KeyPositionMap::from_profile(&profile);
+            *this.positions.borrow_mut() = map;
+            Ok(())
+        });
+
+        methods.add_method("get_positions", |_, this, ()| {
+            Ok(PositionMapObject::from_shared(Rc::clone(&this.positions)))
+        });
+
+        methods.add_method("has_positions", |_, this, ()| {
+            Ok(!this.positions.borrow().is_empty())
+        });
+
         methods.add_method("layer", |_, this, name: String| {
             Ok(LayerBuilder::new(name, Rc::clone(&this.layout)))
         });
         methods.add_method("combo", |_, this, name: String| {
-            Ok(ComboObject::new(name, Rc::clone(&this.layout)))
+            Ok(ComboObject::new(name, Rc::clone(&this.layout), Rc::clone(&this.positions)))
         });
         methods.add_method("behavior", |_, this, name: String| {
             Ok(BehaviorObject::new(name, Rc::clone(&this.layout)))

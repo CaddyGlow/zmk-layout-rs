@@ -62,6 +62,10 @@ fn zmk_layout(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<python_api::InputObject>()?;
     m.add_class::<python_api::ConditionalObject>()?;
 
+    // Add position mapping classes
+    m.add_class::<python_api::PositionMap>()?;
+    m.add_function(wrap_pyfunction!(python_api::load_positions, m)?)?;
+
     // Add query classes
     m.add_class::<python_api::LayerInfo>()?;
     m.add_class::<python_api::ComboInfo>()?;

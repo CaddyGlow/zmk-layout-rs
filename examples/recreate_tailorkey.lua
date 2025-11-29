@@ -1,7 +1,6 @@
--- Recreate the TailorKey sample keymap by reading the JSON payload and
--- emitting a fresh DTS/KEYMAP via the fluent API (layers, combos, macros,
--- hold-taps). This keeps the data in script form instead of relying on the
--- built-in JSON import shortcut.
+-- Recreate the TailorKey sample keymap from code (no external JSON reads).
+-- Data lives in small modules and we build the standard layout table, encode
+-- it to JSON, and render via the Glove80 template.
 --
 -- Run:
 --   zmk-layout keymap lua \
@@ -9,215 +8,177 @@
 --     --layout /dev/null \
 --     --output out/tailorkey_from_json.keymap
 
--- Minimal JSON loader (prefers cjson, then dkjson).
-local function load_json_module()
-    local ok, mod = pcall(require, "cjson.safe")
-    if ok and mod then
-        return { decode = mod.decode, encode = mod.encode }
-    end
-    ok, mod = pcall(require, "cjson")
-    if ok and mod then
-        return { decode = mod.decode, encode = mod.encode }
-    end
-    ok, mod = pcall(require, "dkjson")
-    if ok and mod then
-        return {
-            decode = function(str)
-                local res, _, err = mod.decode(str)
-                if err then
-                    error(err)
-                end
-                return res
-            end,
-            encode = function(tbl)
-                return mod.encode(tbl)
-            end,
-        }
-    end
-    error("No JSON module found (tried cjson.safe, cjson, dkjson)")
+local layers_data = dofile("examples/tailorkey_layers.lua")
+local behaviors_data = dofile("examples/tailorkey_behaviors.lua")
+local combos_data = dofile("examples/tailorkey_combos.lua")
+
+-- JSON encoder (minimal, handles tables, strings, numbers, bools, nil).
+local function escape(str)
+    return (str:gsub("\\", "\\\\")
+        :gsub("\"", "\\\"")
+        :gsub("\b", "\\b")
+        :gsub("\f", "\\f")
+        :gsub("\n", "\\n")
+        :gsub("\r", "\\r")
+        :gsub("\t", "\\t"))
 end
 
-local json = load_json_module()
-
-local sample_json = "examples/samples/8e349bac-1664-41f1-8d2e-7b9398f6d8cc_TailorKey v4.2i Bilateral.json"
-local output_path = "out/tailorkey_from_json.keymap"
-
--- Helpers ------------------------------------------------------------------
-local function read_file(path)
-    local f = assert(io.open(path, "r"))
-    local content = f:read("*a")
-    f:close()
-    return content
-end
-
-local function trim_binding_name(name)
-    if type(name) == "string" and name:sub(1, 1) == "&" then
-        return name:sub(2)
-    end
-    return name
-end
-
-local function render_binding(node)
-    if type(node) == "string" then
-        return node
-    end
-    if type(node) == "table" then
-        local value = node.value or error("binding node missing value")
-        local params = node.params or {}
-        if #params == 0 then
-            return value
+local function is_array(tbl)
+    local max_idx = 0
+    local count = 0
+    for k, _ in pairs(tbl) do
+        if type(k) ~= "number" then
+            return false
         end
-        local parts = {}
-        for i, child in ipairs(params) do
-            parts[i] = render_binding(child)
+        if k > max_idx then
+            max_idx = k
         end
-        return value .. " " .. table.concat(parts, " ")
+        count = count + 1
     end
-    error("unsupported binding node type: " .. type(node))
+    if max_idx == 0 then
+        return true, 0
+    end
+    for i = 1, max_idx do
+        if tbl[i] == nil then
+            return false
+        end
+    end
+    return true, max_idx
 end
 
-local function map_list(list, fn)
-    local out = {}
-    for i, item in ipairs(list or {}) do
-        out[i] = fn(item)
+local function encode_json(value)
+    local t = type(value)
+    if t == "string" then
+        return "\"" .. escape(value) .. "\""
+    elseif t == "number" or t == "boolean" then
+        return tostring(value)
+    elseif t == "nil" then
+        return "null"
+    elseif t == "table" then
+        local array, max_idx = is_array(value)
+        if array then
+            local parts = {}
+            for i = 1, max_idx do
+                parts[i] = encode_json(value[i])
+            end
+            return "[" .. table.concat(parts, ",") .. "]"
+        else
+            local parts = {}
+            for k, v in pairs(value) do
+                parts[#parts + 1] = "\"" .. escape(k) .. "\":" .. encode_json(v)
+            end
+            return "{" .. table.concat(parts, ",") .. "}"
+        end
+    else
+        error("unsupported json type: " .. t)
     end
-    return out
 end
 
-local function format_num(n)
-    return string.format("< %s >", n)
+local function build_layers()
+    local built = {}
+    local base = layers_data.base
+    built[1] = { name = layers_data.layer_names[1], bindings = base }
+    for i = 2, #layers_data.layer_names do
+        local name = layers_data.layer_names[i]
+        local overrides = layers_data.overrides[name] or {}
+        local bindings = {}
+        for idx = 1, #base do
+            bindings[idx] = "&trans"
+        end
+        for idx, val in pairs(overrides) do
+            bindings[idx] = val
+        end
+        built[#built + 1] = { name = name, bindings = bindings }
+    end
+    return built
 end
 
-local function format_num_list(list)
-    if not list or #list == 0 then
-        return nil
-    end
-    return "< " .. table.concat(list, " ") .. " >"
-end
-
-local function to_standard_layout(data)
-    local layers = {}
-    for idx, layer_name in ipairs(data.layer_names or {}) do
-        table.insert(layers, {
-            name = layer_name,
-            bindings = map_list(data.layers[idx] or {}, render_binding),
-        })
-    end
-
-    local macros = {}
-    for _, macro in ipairs(data.macros or {}) do
+local function build_macros()
+    local result = {}
+    for _, macro in ipairs(behaviors_data.macros) do
         local cells = macro.params and #macro.params or 0
-        table.insert(macros, {
-            name = trim_binding_name(macro.name),
+        result[#result + 1] = {
+            name = macro.name,
             description = macro.description or "",
-            bindings = map_list(macro.bindings or {}, render_binding),
-            wait_ms = macro.waitMs,
-            tap_ms = macro.tapMs,
+            bindings = macro.bindings,
+            wait_ms = macro.wait_ms,
+            tap_ms = macro.tap_ms,
             binding_cells = cells > 0 and cells or nil,
             compatible = cells > 0 and "zmk,behavior-macro-one-param" or "zmk,behavior-macro",
-        })
+        }
     end
+    return result
+end
 
-    local behaviors = {}
-    for _, ht in ipairs(data.holdTaps or {}) do
+local function format_property(value)
+    if value == nil then
+        return nil
+    end
+    local t = type(value)
+    if t == "number" then
+        return string.format("< %s >", value)
+    elseif t == "boolean" then
+        return value and "true" or "false"
+    elseif t == "table" then
+        local parts = {}
+        for i, v in ipairs(value) do
+            parts[i] = tostring(v)
+        end
+        return "< " .. table.concat(parts, " ") .. " >"
+    elseif t == "string" then
+        return string.format("\"%s\"", value)
+    end
+    return tostring(value)
+end
+
+local function build_behaviors()
+    local result = {}
+    for _, ht in ipairs(behaviors_data.hold_taps) do
         local props = {}
-        if ht.tappingTermMs then
-            props["tapping-term-ms"] = format_num(ht.tappingTermMs)
+        props["tapping-term-ms"] = format_property(ht.tapping_term_ms)
+        props["quick-tap-ms"] = format_property(ht.quick_tap_ms)
+        props["require-prior-idle-ms"] = format_property(ht.require_prior_idle_ms)
+        if ht.hold_trigger_key_positions and #ht.hold_trigger_key_positions > 0 then
+            props["hold-trigger-key-positions"] = format_property(ht.hold_trigger_key_positions)
         end
-        if ht.quickTapMs then
-            props["quick-tap-ms"] = format_num(ht.quickTapMs)
-        end
-        if ht.requirePriorIdleMs then
-            props["require-prior-idle-ms"] = format_num(ht.requirePriorIdleMs)
-        end
-        if ht.holdTriggerKeyPositions and #ht.holdTriggerKeyPositions > 0 then
-            props["hold-trigger-key-positions"] = format_num_list(ht.holdTriggerKeyPositions)
-        end
-        if ht.holdTriggerOnRelease ~= nil then
-            props["hold-trigger-on-release"] = ht.holdTriggerOnRelease and "true" or "false"
+        if ht.hold_trigger_on_release ~= nil then
+            props["hold-trigger-on-release"] = format_property(ht.hold_trigger_on_release)
         end
         if ht.flavor then
-            props["flavor"] = string.format("\"%s\"", ht.flavor)
+            props["flavor"] = format_property(ht.flavor)
         end
-
-        table.insert(behaviors, {
-            name = trim_binding_name(ht.name),
+        result[#result + 1] = {
+            name = ht.name,
             description = ht.description or "",
             compatible = "zmk,behavior-hold-tap",
             binding_cells = 2,
-            bindings = map_list(ht.bindings or {}, render_binding),
+            bindings = ht.bindings,
             properties = props,
-        })
+        }
     end
+    return result
+end
 
-    local combos = {}
-    for _, combo in ipairs(data.combos or {}) do
-        table.insert(combos, {
-            name = combo.name,
-            description = combo.description or "",
-            key_positions = combo.keyPositions or {},
-            binding = render_binding(combo.binding),
-            timeout_ms = combo.timeoutMs,
-            layers = combo.layers or {},
-        })
-    end
-
-    local input_listeners = {}
-    for _, listener in ipairs(data.inputListeners or {}) do
-        local nodes = {}
-        for _, node in ipairs(listener.nodes or {}) do
-            local node_procs = map_list(node.inputProcessors or {}, function(proc)
-                return { code = proc.code, params = proc.params or {} }
-            end)
-            table.insert(nodes, {
-                code = node.code,
-                description = node.description,
-                layers = node.layers or {},
-                inputProcessors = node_procs,
-            })
-        end
-        table.insert(input_listeners, {
-            code = listener.code,
-            inputProcessors = listener.inputProcessors or {},
-            nodes = nodes,
-        })
-    end
-
-    local metadata = {
-        title = data.title,
-        author = data.creator,
-        description = data.notes,
-        extras = {
-            keyboard = data.keyboard,
-            uuid = data.uuid,
-            parent_uuid = data.parent_uuid,
-            tags = data.tags or {},
-        },
-    }
-
+local function build_standard_layout()
     return {
-        layers = layers,
-        combos = combos,
-        behaviors = behaviors,
-        macros = macros,
-        input_listeners = input_listeners,
-        metadata = metadata,
+        layers = build_layers(),
+        combos = combos_data.combos,
+        behaviors = build_behaviors(),
+        macros = build_macros(),
+        input_listeners = combos_data.input_listeners,
+        metadata = combos_data.metadata,
     }
 end
 
--- Build layout -------------------------------------------------------------
-local data = json.decode(read_file(sample_json))
-local standard = to_standard_layout(data)
-local standard_json = assert(json.encode(standard))
+local function save_keymap()
+    local standard_layout = build_standard_layout()
+    local json = encode_json(standard_layout)
+    local output_path = "out/tailorkey_from_json.keymap"
 
-layout:parse_json(standard_json, "examples/moergo_glove80.j2")
-layout:save_dts(output_path)
+    os.execute("mkdir -p out")
+    layout:parse_json(json, "examples/moergo_glove80.j2")
+    layout:save_dts(output_path)
+    log(string.format("Recreated TailorKey layout -> %s", output_path))
+end
 
-log(string.format(
-    "Recreated TailorKey layout: %d layers, %d macros, %d hold-taps, %d combos -> %s",
-    #(standard.layers or {}),
-    #(data.macros or {}),
-    #(data.holdTaps or {}),
-    #(data.combos or {}),
-    output_path
-))
+save_keymap()

@@ -5,8 +5,9 @@ use pyo3::types::PyList;
 
 use zmk_layout_core::layout_engine::LayerSelector;
 
+use super::position::resolve_positions_1based;
 use super::util::{
-    SharedLayout, ensure_staged, pylist_to_strings, pylist_to_u32, pyvalue_to_optional_u32,
+    SharedLayout, SharedPositions, ensure_staged, pylist_to_strings, pyvalue_to_optional_u32,
     script_error,
 };
 
@@ -18,6 +19,7 @@ use super::util::{
 pub struct ComboObject {
     name: String,
     layout: SharedLayout,
+    positions: SharedPositions,
     keys: RefCell<Option<Vec<u32>>>,
     binding: RefCell<Option<String>>,
     timeout: RefCell<Option<Option<u32>>>,
@@ -27,10 +29,11 @@ pub struct ComboObject {
 }
 
 impl ComboObject {
-    pub fn new(name: String, layout: SharedLayout) -> Self {
+    pub fn new(name: String, layout: SharedLayout, positions: SharedPositions) -> Self {
         let combo = Self {
             name,
             layout,
+            positions,
             keys: RefCell::new(None),
             binding: RefCell::new(None),
             timeout: RefCell::new(None),
@@ -127,16 +130,22 @@ impl ComboObject {
 
 #[pymethods]
 impl ComboObject {
-    /// Set the key positions that trigger this combo (1-based indices).
+    /// Set the key positions that trigger this combo.
+    ///
+    /// Accepts either:
+    /// - Numeric indices (1-based): [52, 57]
+    /// - Position names: ["LH_T1", "RH_T1"]
+    /// - Mixed: [52, "RH_T1"]
     ///
     /// Args:
-    ///     keys: List of key positions (1-based).
+    ///     keys: List of key positions (1-based numbers or position names).
     ///
     /// Returns:
     ///     Self for method chaining.
     fn keys(&self, keys: &Bound<'_, PyList>) -> PyResult<Self> {
         self.ensure_staged()?;
-        let key_positions = pylist_to_u32(keys)?;
+        let positions = self.positions.borrow();
+        let key_positions = resolve_positions_1based(&positions, keys)?;
         *self.keys.borrow_mut() = Some(key_positions);
         Ok(self.clone())
     }
