@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 
 use mlua::{Result as LuaResult, UserData, UserDataMethods};
 
-use super::util::{SharedLayout, ensure_staged, script_error};
+use super::util::{ensure_staged, script_error, SharedLayout};
 
 #[derive(Clone)]
 pub struct InputObject {

@@ -3,9 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mlua::{
-    Result as LuaResult, Table as LuaTable, UserData, UserDataMethods, Value as LuaValue,
-};
+use mlua::{Result as LuaResult, Table as LuaTable, UserData, UserDataMethods, Value as LuaValue};
 
 use zmk_layout_core::key_positions::KeyPositionMap;
 use zmk_layout_core::profiles::KeyboardProfileDoc;
@@ -77,8 +75,12 @@ impl UserData for PositionMapObject {
 
 /// Load a PositionMapObject from a keyboard profile name.
 pub fn load_positions(profile_name: &str) -> LuaResult<PositionMapObject> {
-    let profile = KeyboardProfileDoc::load(profile_name)
-        .map_err(|err| script_error(format!("failed to load profile '{}': {}", profile_name, err)))?;
+    let profile = KeyboardProfileDoc::load(profile_name).map_err(|err| {
+        script_error(format!(
+            "failed to load profile '{}': {}",
+            profile_name, err
+        ))
+    })?;
     let map = KeyPositionMap::from_profile(&profile);
     Ok(PositionMapObject::new(map))
 }

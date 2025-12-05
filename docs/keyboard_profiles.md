@@ -15,6 +15,10 @@ versioned document.
   are mandatory; everything else can be omitted when a keyboard does not need
   it.
 
+Profiles can live directly under `profiles/keyboards/<slug>.toml` or inside a
+keyboard-named folder as `profiles/keyboards/<slug>/profile.toml` so related
+assets (e.g., key coordinate JSON) can sit alongside the profile.
+
 ## Top-Level Structure
 
 Every profile must define at least these keys:
@@ -213,7 +217,7 @@ the same TOML vocabulary so manifests and CLIs can resolve them consistently.
 Use the CLI to catch schema mistakes before committing:
 
 ```bash
-zmk-layout profiles check profiles/keyboards/glove80.toml \
+zmk-layout profiles check profiles/keyboards/glove80/profile.toml \
     tests/fixtures/profiles/bad_profile.toml
 zmk-layout profiles check --all --profiles-dir tests/fixtures/profiles
 ```

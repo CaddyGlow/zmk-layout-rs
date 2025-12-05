@@ -1,0 +1,29 @@
+keyboard = "fixture-preview"
+version = 1
+
+[metadata]
+name = "Fixture Preview"
+vendor = "TestCo"
+
+[hardware]
+key_count = 6
+is_split = false
+
+[firmware]
+default = "preview"
+[firmware.versions.preview]
+repository = "example/repo"
+branch = "main"
+
+[layout]
+template = "templates/preview.dtsi.j2"
+
+[layout.formatting]
+key_gap = " "
+base_indent = ""
+
+[[layout.formatting.rows]]
+keys = [0, 1, 2]
+
+[[layout.formatting.rows]]
+keys = [3, 4, 5]

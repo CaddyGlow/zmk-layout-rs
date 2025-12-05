@@ -6,8 +6,8 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
-        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
+        Arc, OnceLock,
     },
     thread,
     time::Duration,

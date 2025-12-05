@@ -18,7 +18,7 @@ use super::{
     manifest::{BuildTarget, FirmwareManifest, KeyboardProfile, ToolchainProfile},
     progress::ProgressReporter,
     request::{BuildRequest, BuildRequestBuilder},
-    toolchain::{BuildContext, create_toolchain},
+    toolchain::{create_toolchain, BuildContext},
     workspace::WorkspaceManager,
 };
 

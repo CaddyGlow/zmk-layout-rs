@@ -11,8 +11,8 @@ use std::{
 };
 
 use super::core::{
-    FlashConfig, FlashDevice, FlashDiscovery, FlashError, FlashTarget, Query, QueryMetadata,
-    flash_debug,
+    flash_debug, FlashConfig, FlashDevice, FlashDiscovery, FlashError, FlashTarget, Query,
+    QueryMetadata,
 };
 
 pub(super) fn discover_devices(config: &FlashConfig) -> Result<Vec<FlashDiscovery>, FlashError> {

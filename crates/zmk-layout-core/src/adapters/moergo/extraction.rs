@@ -1,5 +1,5 @@
 use crate::adapters::{
-    AdapterError, RegexExtractionConfig, export_standard_str_with_regex_extractions,
+    export_standard_str_with_regex_extractions, AdapterError, RegexExtractionConfig,
 };
 
 /// Build the default MoErgo regex extractors that mirror the comment markers in the Glove80 template.

@@ -163,7 +163,7 @@ fn cli_profiles_check_validates_profiles() {
     let mut cmd = cargo_bin_cmd!("zmk-layout");
     cmd.arg("profiles")
         .arg("check")
-        .arg("profiles/keyboards/glove80.toml");
+        .arg("profiles/keyboards/glove80/profile.toml");
     cmd.assert()
         .success()
         .stdout(predicates::str::contains("[OK ]"));
@@ -372,6 +372,28 @@ fn cli_keymap_convert_rejects_vendor_on_json_input() {
     cmd.assert().failure().stderr(predicates::str::contains(
         "--vendor is only supported for Devicetree input formats",
     ));
+}
+
+#[test]
+fn cli_keymap_show_lists_and_renders_layer() {
+    let mut cmd = cargo_bin_cmd!("zmk-layout");
+    cmd.arg("keymap")
+        .arg("show")
+        .arg("--layout")
+        .arg(fixture("layout_preview.dts"))
+        .arg("--profile")
+        .arg(fixture("profiles/layout_preview.toml"))
+        .arg("--layer")
+        .arg("base");
+
+    cmd.assert().success().stdout(
+        predicates::str::contains("layers (2):")
+            .and(predicates::str::contains("- base"))
+            .and(predicates::str::contains("- nav"))
+            .and(predicates::str::contains("layer `base` (profile: Fixture Preview):"))
+            .and(predicates::str::contains("&kp A &kp B &kp C"))
+            .and(predicates::str::contains("&kp D &kp E &kp F")),
+    );
 }
 
 #[test]

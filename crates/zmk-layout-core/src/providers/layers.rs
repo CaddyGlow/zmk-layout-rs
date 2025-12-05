@@ -6,14 +6,14 @@ use crate::{
 use std::{collections::HashMap, mem};
 
 use super::{
-    ProviderError,
     behaviors::BehaviorProvider,
-    combos::{ComboDefinition, ComboProvider, combo_node_mut},
-    format::{BindingFormat, format_bindings_raw, format_u32_list, parse_binding_list},
+    combos::{combo_node_mut, ComboDefinition, ComboProvider},
+    format::{format_bindings_raw, format_u32_list, parse_binding_list, BindingFormat},
     util::{
         ensure_bindings_property, ensure_layer_node, ensure_property, find_bindings_property,
         find_bindings_property_mut, find_layer_node, find_layer_node_mut, is_behavior_root,
     },
+    ProviderError,
 };
 
 /// Provider that exposes convenience APIs for editing keymap layers, combos, and behaviors.

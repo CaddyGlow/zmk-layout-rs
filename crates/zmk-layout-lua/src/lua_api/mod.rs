@@ -10,4 +10,4 @@ pub mod query;
 pub mod util;
 
 pub use api::LayoutApi;
-pub use position::{PositionMapObject, load_positions};
+pub use position::{load_positions, PositionMapObject};

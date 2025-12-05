@@ -1,6 +1,6 @@
 use crate::cli::{
     app::{ApplyArgs, DiffArgs, ValidateArgs},
-    context::{PreparedContext, execute, prepare, print_combo_conditions, print_results},
+    context::{execute, prepare, print_combo_conditions, print_results, PreparedContext},
     error::CliError,
 };
 use zmk_layout_core::{io, tasks::ExecutionMode};

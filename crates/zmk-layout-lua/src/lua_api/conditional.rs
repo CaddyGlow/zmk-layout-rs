@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 
 use mlua::{Result as LuaResult, UserData, UserDataMethods};
 
-use super::util::{SharedLayout, ensure_staged};
+use super::util::{ensure_staged, SharedLayout};
 
 #[derive(Clone)]
 pub struct ConditionalObject {

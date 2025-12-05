@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use minijinja::{AutoEscape, Environment};
 use serde_json::{Map, Value};
 
+use crate::formatting::{format_binding, render_layer_block};
+
 use super::{
     layout::AdapterLayout,
     template::TemplateError,
@@ -368,7 +370,12 @@ fn render_layers_only(layout: &AdapterLayout, formatting: Option<&FormattingHint
         output.push_str(" {\n");
         output.push_str("            bindings = ");
         match formatting.as_ref() {
-            Some(fmt) => output.push_str(&format_layer_with_formatting(layer, fmt)),
+            Some(fmt) => output.push_str(&render_layer_block(
+                &layer.bindings,
+                &fmt.rows,
+                &fmt.key_gap,
+                &fmt.base_indent,
+            )),
             None => {
                 output.push_str(&format_list(&layer.bindings));
             }
@@ -390,102 +397,6 @@ fn render_keymap_node(layout: &AdapterLayout, formatting: Option<&FormattingHint
     }
     output.push_str("};\n");
     output
-}
-
-fn format_layer_with_formatting(layer: &LayerSpec, fmt: &FormattingHints) -> String {
-    let mut width_per_col: Vec<usize> = Vec::new();
-    for row in &fmt.rows {
-        for (idx, pos) in row.iter().enumerate() {
-            let token = binding_for_pos(layer, *pos);
-            let len = token.map(|t| t.len()).unwrap_or_default();
-            if width_per_col.len() <= idx {
-                width_per_col.push(len);
-            } else if len > width_per_col[idx] {
-                width_per_col[idx] = len;
-            }
-        }
-    }
-    let mut lines: Vec<String> = Vec::new();
-    for row in &fmt.rows {
-        let mut line = String::new();
-        line.push_str(&fmt.base_indent);
-        for (col, pos) in row.iter().enumerate() {
-            if col > 0 {
-                line.push_str(&fmt.key_gap);
-            }
-            let token = binding_for_pos(layer, *pos);
-            let width = *width_per_col.get(col).unwrap_or(&0);
-            if let Some(tok) = token {
-                line.push_str(&format!("{tok:>width$}"));
-            } else {
-                line.push_str(&" ".repeat(width.max(1)));
-            }
-        }
-        lines.push(line);
-    }
-    let min_indent = lines
-        .iter()
-        .map(|line| line.chars().take_while(|c| c.is_whitespace()).count())
-        .min()
-        .unwrap_or(0);
-    let normalized: Vec<String> = lines
-        .into_iter()
-        .map(|line| line.chars().skip(min_indent).collect())
-        .collect();
-    let joined = normalized.join("\n");
-    format!("<\n{joined}\n{}>", fmt.base_indent)
-}
-
-fn binding_for_pos<'a>(layer: &'a LayerSpec, pos: i32) -> Option<String> {
-    if pos < 0 {
-        return None;
-    }
-    layer
-        .bindings
-        .get(pos as usize)
-        .map(|raw| format_binding(raw))
-}
-
-fn format_binding(raw: &str) -> String {
-    let tokens: Vec<&str> = raw.split_whitespace().filter(|t| !t.is_empty()).collect();
-    if tokens.len() < 2 {
-        return raw.to_string();
-    }
-    let head = tokens[0];
-    let modifiers = &tokens[1..tokens.len() - 1];
-    let base = tokens.last().copied().unwrap_or_default();
-    if !head.starts_with('&') || base.contains('(') || base.contains(')') {
-        return raw.to_string();
-    }
-    if !modifiers.iter().all(|m| is_known_modifier(m)) {
-        return raw.to_string();
-    }
-    let mut wrapped = base.to_string();
-    for modifier in modifiers.iter().rev() {
-        wrapped = format!("{modifier}({wrapped})");
-    }
-    format!("{head} {wrapped}")
-}
-
-fn is_known_modifier(token: &str) -> bool {
-    matches!(
-        token,
-        "LC" | "RC"
-            | "LS"
-            | "RS"
-            | "LG"
-            | "RG"
-            | "LA"
-            | "RA"
-            | "LALT"
-            | "RALT"
-            | "LCTL"
-            | "RCTL"
-            | "LSFT"
-            | "RSFT"
-            | "LGUI"
-            | "RGUI"
-    )
 }
 
 fn render_behaviors<'a>(behaviors: impl Iterator<Item = &'a BehaviorSpec>) -> String {

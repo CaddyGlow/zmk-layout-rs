@@ -13,8 +13,8 @@ use zmk_layout_core::{
         CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
     },
     flash::{
-        FlashConfig, build_flash_targets, default_sides, discover_devices, flash_target,
-        render_device, render_flash_outcome, render_flash_warning, resolve_flash_source,
+        build_flash_targets, default_sides, discover_devices, flash_target, render_device,
+        render_flash_outcome, render_flash_warning, resolve_flash_source, FlashConfig,
     },
     io,
 };
@@ -36,7 +36,11 @@ pub fn build(args: &FirmwareBuildArgs) -> Result<i32, CliError> {
         Err(err) => return Err(err.into()),
     };
     print_build_report(&report);
-    if report.success { Ok(0) } else { Ok(2) }
+    if report.success {
+        Ok(0)
+    } else {
+        Ok(2)
+    }
 }
 
 pub fn flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {

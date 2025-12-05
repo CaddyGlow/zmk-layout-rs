@@ -10,7 +10,7 @@ use super::{
     combo::ComboObject,
     macro_builder::MacroObject,
     util::{
-        SharedLayout, create_read_only_table, ensure_staged, require_positive_index, script_error,
+        create_read_only_table, ensure_staged, require_positive_index, script_error, SharedLayout,
     },
 };
 

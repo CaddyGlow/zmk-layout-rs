@@ -5,9 +5,9 @@ use crate::{
 };
 
 use super::{
-    ProviderError,
     format::{parse_binding_groups, parse_numeric_list, parse_numeric_value},
     util::{apply_combo_conditions, ensure_property, find_child_node_mut, find_layer_node_mut},
+    ProviderError,
 };
 
 /// Provider that enumerates combos and exposes their metadata.

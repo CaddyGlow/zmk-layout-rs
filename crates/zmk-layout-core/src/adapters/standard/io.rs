@@ -10,13 +10,13 @@ use crate::{
 };
 
 use super::{
-    AdapterError,
     layout::AdapterLayout,
     render::render_layout_with_template,
     template::{
-        RegexExtractionConfig, TemplateCapture, apply_captured_template_values,
-        capture_regex_sections, strip_fragments_matching, template_contains_placeholders,
+        apply_captured_template_values, capture_regex_sections, strip_fragments_matching,
+        template_contains_placeholders, RegexExtractionConfig, TemplateCapture,
     },
+    AdapterError,
 };
 
 /// Export a document to the standard JSON format.

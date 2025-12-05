@@ -9,7 +9,7 @@ use toml::Value as TomlValue;
 use zmk_layout_core::adapters::BehaviorSpec;
 
 use super::util::{
-    SharedLayout, create_read_only_table, ensure_staged, lua_table_to_strings, script_error,
+    create_read_only_table, ensure_staged, lua_table_to_strings, script_error, SharedLayout,
 };
 
 #[derive(Clone)]

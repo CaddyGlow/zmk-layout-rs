@@ -5,8 +5,8 @@ use zmk_layout_core::layout_engine::LayerSelector;
 
 use super::position::resolve_positions_1based;
 use super::util::{
-    SharedLayout, SharedPositions, ensure_staged, lua_table_to_strings, lua_value_to_optional_u32,
-    script_error,
+    ensure_staged, lua_table_to_strings, lua_value_to_optional_u32, script_error, SharedLayout,
+    SharedPositions,
 };
 
 #[derive(Clone)]

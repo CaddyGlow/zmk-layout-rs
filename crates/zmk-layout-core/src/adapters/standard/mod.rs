@@ -16,7 +16,7 @@ pub use io::{
 pub use layout::AdapterLayout;
 pub use render::render_layout_with_template;
 pub use template::{
-    RegexExtractionConfig, TemplateError, TemplateParseMode, template_contains_placeholders,
+    template_contains_placeholders, RegexExtractionConfig, TemplateError, TemplateParseMode,
 };
 pub use types::{
     BehaviorSpec, ComboSpec, InputListenerNodeSpec, InputListenerSpec, InputProcessorSpec,

@@ -11,6 +11,7 @@ pub mod bindings;
 pub mod build;
 pub mod dts;
 pub mod flash;
+pub mod formatting;
 pub mod io;
 pub mod key_positions;
 pub mod keymap;

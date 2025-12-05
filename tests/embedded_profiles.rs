@@ -27,8 +27,8 @@ fn filesystem_overrides_embedded() {
     let embedded = KeyboardProfileDoc::load("glove80").expect("load profile");
 
     // Filesystem version (if exists) should also load
-    if std::path::Path::new("profiles/keyboards/glove80.toml").exists() {
-        let from_file = KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml")
+    if std::path::Path::new("profiles/keyboards/glove80/profile.toml").exists() {
+        let from_file = KeyboardProfileDoc::from_file("profiles/keyboards/glove80/profile.toml")
             .expect("load from filesystem");
         assert_eq!(embedded.keyboard, from_file.keyboard);
     }

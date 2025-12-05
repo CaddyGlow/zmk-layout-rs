@@ -8,11 +8,11 @@ use serde_json::Value;
 
 use crate::{
     adapters::{
-        AdapterError,
         standard::{
             BehaviorSpec, ComboSpec, InputListenerNodeSpec, InputListenerSpec, InputProcessorSpec,
             LayerSpec, MacroSpec,
         },
+        AdapterError,
     },
     bindings::{BindingParser, LayoutBinding, LayoutParam, ParamValue},
     keymap::{KeymapDocument, KeymapMetadata},

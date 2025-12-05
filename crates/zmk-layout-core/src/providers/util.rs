@@ -3,7 +3,7 @@ use crate::{
     tokenizer::TokenSpan,
 };
 
-use super::{COMBO_CONDITION_COMMENT_PREFIX, ProviderError};
+use super::{ProviderError, COMBO_CONDITION_COMMENT_PREFIX};
 
 pub fn find_layer_node<'a>(items: &'a [DtItem], name: &str) -> Option<&'a DtNode> {
     for item in items {

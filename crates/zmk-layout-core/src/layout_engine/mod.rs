@@ -1,7 +1,7 @@
 //! Layout mutation helpers shared across tasks, scripts, and future tooling.
 
 use crate::{
-    adapters::ComboSpec, adapters::standard::LayerSpec, bindings::BindingParser,
+    adapters::standard::LayerSpec, adapters::ComboSpec, bindings::BindingParser,
     keymap::KeymapDocument, providers::ProviderError,
 };
 use serde_json;

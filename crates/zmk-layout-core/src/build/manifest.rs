@@ -1,7 +1,9 @@
 //! Manifest and profile definitions for the firmware builder pipeline.
 
 use crate::{
-    profiles::{EmbeddedFirmwareProfiles, KeyboardProfileDoc, ProfileError},
+    profiles::{
+        filesystem_profile_candidates, EmbeddedFirmwareProfiles, KeyboardProfileDoc, ProfileError,
+    },
     tasks::MetadataMap,
 };
 use serde::Deserialize;
@@ -385,10 +387,13 @@ fn load_keyboard_profile(
     if !trimmed.contains('/') && !trimmed.contains('\\') && !trimmed.ends_with(".toml") {
         match KeyboardProfileDoc::load(trimmed) {
             Ok(document) => {
-                return Ok(Some(KeyboardProfileDocument {
-                    path: PathBuf::from(format!("profiles/keyboards/{}.toml", trimmed)),
-                    document,
-                }));
+                let path = filesystem_profile_candidates(trimmed)
+                    .into_iter()
+                    .find(|candidate| candidate.exists())
+                    .unwrap_or_else(|| {
+                        PathBuf::from(format!("profiles/keyboards/{trimmed}/profile.toml"))
+                    });
+                return Ok(Some(KeyboardProfileDocument { path, document }));
             }
             Err(ProfileError::NotFound(_)) => {
                 // Fall through to path-based loading

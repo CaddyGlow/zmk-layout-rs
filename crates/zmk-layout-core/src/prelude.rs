@@ -8,7 +8,7 @@ pub use crate::{
     keymap::KeymapDocument as StandardKeymapDocument,
     providers::{KeymapDocument as DtsKeymapDocument, KeymapProvider, ProviderError},
     tasks::{
-        ExecutionMode, NoScriptBackend, ScriptBackend, TaskEngineOptions, TaskExecution,
-        TaskOutcome, TaskStatus, apply_tasks, apply_tasks_with_backend,
+        apply_tasks, apply_tasks_with_backend, ExecutionMode, NoScriptBackend, ScriptBackend,
+        TaskEngineOptions, TaskExecution, TaskOutcome, TaskStatus,
     },
 };

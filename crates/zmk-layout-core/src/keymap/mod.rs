@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::adapters::{
-    AdapterLayout,
     standard::{
         BehaviorSpec, ComboSpec, InputListenerSpec, LayerSpec, LayoutMetadata, MacroSpec,
         TemplateParseMode,
     },
+    AdapterLayout,
 };
 use crate::dts::DtsDocument;
 use crate::providers::ProviderError;

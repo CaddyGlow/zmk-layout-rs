@@ -1,0 +1,9 @@
+keymap {
+    compatible = "zmk,keymap";
+    base {
+        bindings = < &kp A &kp B &kp C &kp D &kp E &kp F >;
+    };
+    nav {
+        bindings = < &kp TAB &kp LEFT &kp DOWN &kp UP &kp RIGHT &kp ESC >;
+    };
+};

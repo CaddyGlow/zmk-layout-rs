@@ -14,18 +14,20 @@ use super::{
     macro_builder::MacroObject,
     position::PositionMapObject,
     query::{
-        BehaviorInfoObject, ComboInfoObject, LayerInfoObject, list_behavior_definitions,
-        list_combo_definitions,
+        list_behavior_definitions, list_combo_definitions, BehaviorInfoObject, ComboInfoObject,
+        LayerInfoObject,
     },
-    util::{SharedLayout, SharedLogs, SharedPositions, require_positive_index, script_error},
+    util::{require_positive_index, script_error, SharedLayout, SharedLogs, SharedPositions},
 };
 
+use serde_json;
+use toml::{map::Map as TomlMap, Value as TomlValue};
 use zmk_layout_core::{
     adapters::{
         pipeline::AdapterPipeline,
         standard::{
-            AdapterLayout, import_standard_file_with_template, import_standard_str_with_template,
-            render_standard_template,
+            import_standard_file_with_template, import_standard_str_with_template,
+            render_standard_template, AdapterLayout,
         },
     },
     build::{
@@ -39,8 +41,6 @@ use zmk_layout_core::{
     layout_engine::LayoutEngine,
     profiles::KeyboardProfileDoc,
 };
-use serde_json;
-use toml::{Value as TomlValue, map::Map as TomlMap};
 
 #[derive(Clone)]
 pub struct LayoutApi {
@@ -59,7 +59,11 @@ impl LayoutApi {
         }
     }
 
-    pub fn with_positions(layout: SharedLayout, positions: SharedPositions, logs: SharedLogs) -> Self {
+    pub fn with_positions(
+        layout: SharedLayout,
+        positions: SharedPositions,
+        logs: SharedLogs,
+    ) -> Self {
         Self {
             layout,
             positions,
@@ -73,7 +77,10 @@ impl UserData for LayoutApi {
         // Position map methods
         methods.add_method("load_positions", |_, this, profile_name: String| {
             let profile = KeyboardProfileDoc::load(&profile_name).map_err(|err| {
-                script_error(format!("failed to load profile '{}': {}", profile_name, err))
+                script_error(format!(
+                    "failed to load profile '{}': {}",
+                    profile_name, err
+                ))
             })?;
             let map = KeyPositionMap::from_profile(&profile);
             *this.positions.borrow_mut() = map;
@@ -92,7 +99,11 @@ impl UserData for LayoutApi {
             Ok(LayerBuilder::new(name, Rc::clone(&this.layout)))
         });
         methods.add_method("combo", |_, this, name: String| {
-            Ok(ComboObject::new(name, Rc::clone(&this.layout), Rc::clone(&this.positions)))
+            Ok(ComboObject::new(
+                name,
+                Rc::clone(&this.layout),
+                Rc::clone(&this.positions),
+            ))
         });
         methods.add_method("behavior", |_, this, name: String| {
             Ok(BehaviorObject::new(name, Rc::clone(&this.layout)))
@@ -314,7 +325,11 @@ pub fn install_layout_api(lua: &Lua, layout: SharedLayout, logs: SharedLogs) -> 
 }
 
 /// Create a layout API object (for use in native modules).
-pub fn create_layout_api(lua: &Lua, layout: SharedLayout, logs: SharedLogs) -> LuaResult<LuaAnyUserData> {
+pub fn create_layout_api(
+    lua: &Lua,
+    layout: SharedLayout,
+    logs: SharedLogs,
+) -> LuaResult<LuaAnyUserData> {
     let api = LayoutApi::new(layout, logs);
     lua.create_userdata(api)
 }

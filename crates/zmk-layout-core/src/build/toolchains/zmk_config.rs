@@ -17,7 +17,7 @@ use crate::build::{
     progress::{LogLevel, ProgressReporter},
     request::BuildRequest,
     toolchain::{
-        BuildContext, Toolchain, ToolchainConfig, ToolchainRunResult, resolve_toolchain_config,
+        resolve_toolchain_config, BuildContext, Toolchain, ToolchainConfig, ToolchainRunResult,
     },
     workspace::WorkspaceHandle,
 };

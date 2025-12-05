@@ -90,7 +90,12 @@ pub enum TaskStatus {
 
 /// Apply tasks using default options (mutating the document) without script support.
 pub fn apply_tasks(document: KeymapDocument, file: &TaskFile) -> TaskExecution {
-    apply_tasks_with_backend(document, file, TaskEngineOptions::default(), &NoScriptBackend)
+    apply_tasks_with_backend(
+        document,
+        file,
+        TaskEngineOptions::default(),
+        &NoScriptBackend,
+    )
 }
 
 /// Apply tasks with explicit engine options and a script backend.

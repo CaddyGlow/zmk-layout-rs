@@ -155,6 +155,7 @@ pub enum KeymapCommand {
     Apply(ApplyArgs),
     Validate(ValidateArgs),
     Diff(DiffArgs),
+    Show(KeymapShowArgs),
     #[command(name = "convert")]
     Convert(KeymapConvertArgs),
     #[command(name = "lua")]
@@ -239,6 +240,45 @@ pub struct KeymapConvertArgs {
     pub preprocess: PreprocessorArgs,
 }
 
+#[derive(Args, Clone)]
+pub struct KeymapShowArgs {
+    #[arg(
+        long,
+        value_name = "FILE",
+        help = "Layout file to inspect (JSON or Devicetree source)"
+    )]
+    pub layout: PathBuf,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "FORMAT",
+        default_value_t = KeymapFormat::Dts,
+        help = "Input format (json/dts/dtsi/moergo-json)"
+    )]
+    pub format: KeymapFormat,
+    #[arg(
+        long,
+        value_name = "PROFILE",
+        help = "Keyboard profile to use for formatting"
+    )]
+    pub profile: Option<String>,
+    #[arg(
+        long,
+        value_name = "LAYER",
+        help = "Layer to render; omit to only list layers"
+    )]
+    pub layer: Option<String>,
+    #[arg(
+        long,
+        value_enum,
+        help = "Force vendor-specific regex extraction when reading Devicetree"
+    )]
+    pub vendor: Option<VendorExtractionFlag>,
+    #[cfg(feature = "ancpp-preprocessor")]
+    #[command(flatten)]
+    pub preprocess: PreprocessorArgs,
+}
+
 impl KeymapConvertArgs {
     pub fn validate(&self) -> Result<(), String> {
         if self.vendor.is_some() && !self.from.is_dts_like() {
@@ -246,6 +286,15 @@ impl KeymapConvertArgs {
         }
         if self.to.is_dts_like() && self.template.is_none() && self.profile.is_none() {
             return Err("provide --template or --profile when converting to dts/dtsi".into());
+        }
+        Ok(())
+    }
+}
+
+impl KeymapShowArgs {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.vendor.is_some() && !self.format.is_dts_like() {
+            return Err("--vendor is only supported for Devicetree input formats".into());
         }
         Ok(())
     }

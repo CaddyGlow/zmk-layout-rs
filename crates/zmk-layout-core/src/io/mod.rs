@@ -6,8 +6,8 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    adapters::AdapterError,
     adapters::standard::AdapterLayout,
+    adapters::AdapterError,
     dts::DtsDocument,
     keymap::KeymapDocument,
     layout_handle::{LayoutHandle, LayoutOrigin},
@@ -17,7 +17,7 @@ use crate::{
 };
 
 #[cfg(feature = "ancpp-preprocessor")]
-use crate::preprocessor::{AncppError, PreprocessorConfig, preprocess_layout};
+use crate::preprocessor::{preprocess_layout, AncppError, PreprocessorConfig};
 
 /// Unified layout handle type for IO helpers.
 pub type LoadedLayout = LayoutHandle;

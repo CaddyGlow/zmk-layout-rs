@@ -40,6 +40,7 @@ fn run_keymap(command: KeymapCommand) -> Result<i32, CliError> {
         KeymapCommand::Apply(args) => tasks::apply(&args),
         KeymapCommand::Validate(args) => tasks::validate(&args),
         KeymapCommand::Diff(args) => tasks::diff(&args),
+        KeymapCommand::Show(args) => keymap::show(&args),
         KeymapCommand::Lua(args) => script::run(&args),
         KeymapCommand::Convert(args) => keymap::convert(&args),
     }

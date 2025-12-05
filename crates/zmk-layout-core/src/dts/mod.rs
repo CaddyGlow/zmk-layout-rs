@@ -6,9 +6,9 @@ use thiserror::Error;
 
 use crate::{
     ast::{DtItem, DtMacroCall},
-    macro_support::{MacroError, MacroExpansionError, MacroRegistry, collect_macros},
+    macro_support::{collect_macros, MacroError, MacroExpansionError, MacroRegistry},
     parser::parse_layout,
-    serialization::{SerializeConfig, SerializeError, serialize, serialize_with_config},
+    serialization::{serialize, serialize_with_config, SerializeConfig, SerializeError},
     tokenizer::LayoutError,
 };
 

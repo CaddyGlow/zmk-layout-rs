@@ -11,7 +11,7 @@ use crate::{
         manifest::{BuildTarget, ToolchainKind},
         progress::{LogLevel, ProgressReporter},
         request::BuildRequest,
-        toolchain::{BuildContext, Toolchain, ToolchainRunResult, resolve_toolchain_config},
+        toolchain::{resolve_toolchain_config, BuildContext, Toolchain, ToolchainRunResult},
         workspace::WorkspaceHandle,
     },
     dts::DtsDocument,

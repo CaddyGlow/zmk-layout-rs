@@ -3,7 +3,7 @@
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -60,45 +60,47 @@ impl KeyboardProfileDoc {
     /// The name should be just the profile name without path or extension (e.g., "glove80").
     ///
     /// Search order:
-    /// 1. `profiles/keyboards/{name}.toml` in filesystem
-    /// 2. Embedded profile `{name}.toml`
+    /// 1. `profiles/keyboards/{name}/profile.toml` in filesystem
+    /// 2. `profiles/keyboards/{name}/{name}.toml` in filesystem
+    /// 3. `profiles/keyboards/{name}.toml` in filesystem
+    /// 4. Embedded profile (`{name}/profile.toml`, `{name}/{name}.toml`, or `{name}.toml`)
     pub fn load(name: &str) -> Result<Self, ProfileError> {
-        let filename = format!("{}.toml", name);
-        let fs_path = PathBuf::from("profiles/keyboards").join(&filename);
-
         // Try filesystem first (allows override)
-        if fs_path.exists() {
-            return Self::from_file(&fs_path);
+        for candidate in filesystem_profile_candidates(name) {
+            if candidate.exists() {
+                return Self::from_file(&candidate);
+            }
         }
 
         // Fall back to embedded profile
-        let embedded = EmbeddedKeyboardProfiles::get(&filename)
-            .ok_or_else(|| ProfileError::NotFound(name.to_string()))?;
-        let contents = std::str::from_utf8(embedded.data.as_ref())
-            .map_err(|_| ProfileError::Validation("embedded profile is not valid UTF-8".into()))?;
-        Self::from_toml_str(contents)
+        for candidate in embedded_profile_candidates(name) {
+            if let Some(embedded) = EmbeddedKeyboardProfiles::get(&candidate) {
+                let contents = std::str::from_utf8(embedded.data.as_ref()).map_err(|_| {
+                    ProfileError::Validation("embedded profile is not valid UTF-8".into())
+                })?;
+                return Self::from_toml_str(contents);
+            }
+        }
+
+        Err(ProfileError::NotFound(name.to_string()))
     }
 
     /// List all available keyboard profiles (both embedded and filesystem).
     pub fn list_available() -> Vec<String> {
-        let mut profiles = std::collections::BTreeSet::new();
+        let mut profiles = BTreeSet::new();
 
         // Add embedded profiles
         for file in EmbeddedKeyboardProfiles::iter() {
-            if let Some(name) = file.as_ref().strip_suffix(".toml") {
-                profiles.insert(name.to_string());
+            let path = Path::new(file.as_ref());
+            if let Some(name) = profile_name_from_path(path) {
+                profiles.insert(name);
             }
         }
 
         // Add filesystem profiles (may override embedded)
-        if let Ok(entries) = fs::read_dir("profiles/keyboards") {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.path().file_stem().and_then(|s| s.to_str()) {
-                    if entry.path().extension().and_then(|s| s.to_str()) == Some("toml") {
-                        profiles.insert(name.to_string());
-                    }
-                }
-            }
+        let root = Path::new("profiles/keyboards");
+        if root.exists() {
+            collect_profile_names(root, &mut profiles);
         }
 
         profiles.into_iter().collect()
@@ -111,6 +113,79 @@ impl KeyboardProfileDoc {
             .filter_map(|name| KeyboardProfileDoc::load(&name).ok())
             .filter(|profile| profile.layout.detection.matches(rendered))
             .collect()
+    }
+}
+
+pub(crate) fn filesystem_profile_candidates(name: &str) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let root = PathBuf::from("profiles/keyboards");
+    push_unique_path(&mut candidates, root.join(name).join("profile.toml"));
+    push_unique_path(
+        &mut candidates,
+        root.join(name).join(format!("{name}.toml")),
+    );
+    push_unique_path(&mut candidates, root.join(format!("{name}.toml")));
+    candidates
+}
+
+pub(crate) fn embedded_profile_candidates(name: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    push_unique_string(&mut candidates, format!("{name}/profile.toml"));
+    push_unique_string(&mut candidates, format!("{name}/{name}.toml"));
+    push_unique_string(&mut candidates, format!("{name}.toml"));
+    candidates
+}
+
+fn collect_profile_names(root: &Path, profiles: &mut BTreeSet<String>) {
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !kind.is_file() {
+                continue;
+            }
+            if let Some(name) = profile_name_from_path(&path) {
+                profiles.insert(name);
+            }
+        }
+    }
+}
+
+fn profile_name_from_path(path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?;
+    if !ext.eq_ignore_ascii_case("toml") {
+        return None;
+    }
+    let stem = path.file_stem()?.to_str()?;
+    if stem.eq_ignore_ascii_case("profile") {
+        return path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            .map(|name| name.to_string());
+    }
+    Some(stem.to_string())
+}
+
+fn push_unique_path(vec: &mut Vec<PathBuf>, value: PathBuf) {
+    if !vec.contains(&value) {
+        vec.push(value);
+    }
+}
+
+fn push_unique_string(vec: &mut Vec<String>, value: String) {
+    if !vec.iter().any(|existing| existing == &value) {
+        vec.push(value);
     }
 }
 
@@ -906,19 +981,18 @@ mod tests {
 
     #[test]
     fn parses_glove80_profile() {
-        let doc =
-            KeyboardProfileDoc::from_file(&test_profile_path("glove80.toml")).expect("profile");
+        let doc = KeyboardProfileDoc::from_file(&test_profile_path("glove80/profile.toml"))
+            .expect("profile");
         assert_eq!(doc.keyboard, "glove80");
         assert_eq!(doc.version, 1);
         assert_eq!(doc.metadata.name, "MoErgo Glove80");
         assert_eq!(doc.hardware.key_count, 80);
         assert_eq!(doc.layout.formatting.rows.len(), 6);
-        assert!(
-            doc.layout
-                .keymap
-                .properties
-                .contains_key("system_behaviors_dts")
-        );
+        assert!(doc
+            .layout
+            .keymap
+            .properties
+            .contains_key("system_behaviors_dts"));
     }
 
     #[test]
@@ -984,21 +1058,20 @@ template = "layout.dtsi"
 
     #[test]
     fn preserves_extra_tables() {
-        let doc =
-            KeyboardProfileDoc::from_file(&test_profile_path("glove80.toml")).expect("profile");
+        let doc = KeyboardProfileDoc::from_file(&test_profile_path("glove80/profile.toml"))
+            .expect("profile");
         assert!(doc.hardware.build_defaults.extras.contains_key("board"));
-        assert!(
-            doc.layout
-                .keymap
-                .properties
-                .contains_key("key_position_header")
-        );
+        assert!(doc
+            .layout
+            .keymap
+            .properties
+            .contains_key("key_position_header"));
     }
 
     #[test]
     fn formatting_rows_render_ascii() {
-        let doc =
-            KeyboardProfileDoc::from_file(&test_profile_path("glove80.toml")).expect("profile");
+        let doc = KeyboardProfileDoc::from_file(&test_profile_path("glove80/profile.toml"))
+            .expect("profile");
         let ascii: Vec<String> = doc
             .layout
             .formatting
@@ -1020,8 +1093,8 @@ template = "layout.dtsi"
 
     #[test]
     fn key_position_header_is_exposed() {
-        let doc =
-            KeyboardProfileDoc::from_file(&test_profile_path("glove80.toml")).expect("profile");
+        let doc = KeyboardProfileDoc::from_file(&test_profile_path("glove80/profile.toml"))
+            .expect("profile");
         let header = doc
             .layout
             .keymap

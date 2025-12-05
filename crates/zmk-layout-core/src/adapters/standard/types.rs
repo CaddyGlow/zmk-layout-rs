@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize, de::Deserializer, ser::Serializer};
+use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::providers::{BehaviorDefinition, ComboDefinition};
