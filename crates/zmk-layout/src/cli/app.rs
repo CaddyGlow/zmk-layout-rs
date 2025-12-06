@@ -53,7 +53,7 @@ impl Cli {
 pub enum Command {
     #[command(subcommand)]
     Keymap(KeymapCommand),
-    Lua(ScriptArgs),
+    Lua(BasicScriptArgs),
     #[command(subcommand)]
     Firmware(FirmwareCommand),
     #[command(subcommand)]
@@ -119,15 +119,43 @@ pub struct DiffArgs {
 }
 
 #[derive(Args, Clone)]
+pub struct BasicScriptArgs {
+    #[arg(value_name = "SCRIPT", help = "Lua script file to execute")]
+    pub script: PathBuf,
+    #[arg(trailing_var_arg = true, value_name = "ARGS", help = "Arguments passed to the script")]
+    pub args: Vec<String>,
+}
+
+#[derive(Args, Clone)]
 pub struct ScriptArgs {
     #[arg(long, value_name = "FILE", help = "Lua script file to execute")]
     pub script: PathBuf,
     #[arg(
         long = "layout",
-        value_name = "DTS",
+        value_name = "FILE",
         help = "Layout file to transform (optional; starts from a minimal layout when omitted)"
     )]
     pub layout: Option<PathBuf>,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "FORMAT",
+        default_value_t = KeymapFormat::Dts,
+        help = "Input format (json/dts/dtsi/moergo-json)"
+    )]
+    pub format: KeymapFormat,
+    #[arg(
+        long,
+        value_name = "PROFILE",
+        help = "Keyboard profile to use (enables vendor-specific extraction)"
+    )]
+    pub profile: Option<String>,
+    #[arg(
+        long,
+        value_enum,
+        help = "Force vendor-specific regex extraction when reading Devicetree"
+    )]
+    pub vendor: Option<VendorExtractionFlag>,
     #[arg(long, value_name = "FILE", help = "Write updated layout to this file")]
     pub output: Option<PathBuf>,
     #[arg(long = "diff", help = "Show diff instead of writing output")]

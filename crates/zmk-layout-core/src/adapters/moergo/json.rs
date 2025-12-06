@@ -316,13 +316,34 @@ impl MoergoLayout {
 
 impl MoergoBinding {
     fn from_layout_binding(binding: &LayoutBinding) -> Self {
-        let params = binding
-            .params
-            .iter()
-            .map(MoergoBinding::from_layout_param)
-            .collect();
+        // Strip leading '&' only for Custom behaviors (moergo format uses "Custom" not "&Custom")
+        let is_custom = binding.value == "&Custom";
+        let value = if is_custom {
+            "Custom".to_string()
+        } else {
+            binding.value.clone()
+        };
+
+        // For Custom bindings, flatten params to single strings (don't decompose nested bindings)
+        let params = if is_custom {
+            binding
+                .params
+                .iter()
+                .map(|param| MoergoBinding {
+                    value: Value::String(stringify_layout_param(param)),
+                    params: vec![],
+                })
+                .collect()
+        } else {
+            binding
+                .params
+                .iter()
+                .map(MoergoBinding::from_layout_param)
+                .collect()
+        };
+
         Self {
-            value: Value::String(binding.value.clone()),
+            value: Value::String(value),
             params,
         }
     }
@@ -342,6 +363,12 @@ impl MoergoBinding {
 
     fn to_binding_string(&self) -> String {
         let value = value_to_string(&self.value);
+        // Add '&' prefix for "Custom" behavior when importing from moergo format
+        let value = if value == "Custom" {
+            "&Custom".to_string()
+        } else {
+            value
+        };
         if self.params.is_empty() {
             return value;
         }
@@ -605,6 +632,76 @@ impl MoergoInputProcessor {
     }
 }
 
+fn stringify_layout_param(param: &LayoutParam) -> String {
+    let value = match &param.value {
+        ParamValue::Text(text) => text.clone(),
+        ParamValue::Integer(num) => num.to_string(),
+    };
+    // Strip unnecessary parentheses from simple identifiers (e.g., "(LEFT_PINKY_MOD)" -> "LEFT_PINKY_MOD")
+    let value = strip_simple_parens(&value);
+    if param.params.is_empty() {
+        return value;
+    }
+    let joined = param
+        .params
+        .iter()
+        .map(stringify_layout_param)
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{value} {joined}")
+}
+
+/// Strip outer parentheses from a value if they're just for grouping.
+/// E.g., "(LEFT_PINKY_MOD)" -> "LEFT_PINKY_MOD"
+/// E.g., "(_C(L))" -> "_C(L)" (function call)
+/// But keep parens for operator expressions like "(A | B)" or "(1 + 2)"
+fn strip_simple_parens(value: &str) -> String {
+    if value.starts_with('(') && value.ends_with(')') {
+        let inner = &value[1..value.len() - 1];
+        // Strip if it's a simple identifier or a function call without operators
+        if is_strippable_expression(inner) {
+            return inner.to_string();
+        }
+    }
+    value.to_string()
+}
+
+/// Check if the expression can have its outer parens stripped.
+/// Returns true for simple identifiers and function calls without operators.
+fn is_strippable_expression(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    // Check for binary operators that require parens to be kept
+    let has_operator = s.contains(" | ")
+        || s.contains(" & ")
+        || s.contains(" ^ ")
+        || s.contains(" + ")
+        || s.contains(" - ")
+        || s.contains(" * ")
+        || s.contains(" / ")
+        || s.contains(" << ")
+        || s.contains(" >> ");
+    if has_operator {
+        return false;
+    }
+    // Make sure parentheses are balanced (for nested function calls like _C(L))
+    let mut depth = 0;
+    for ch in s.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    depth == 0
+}
+
 fn parse_u32_property(spec: &BehaviorSpec, key: &str) -> Option<u32> {
     spec.properties
         .get(key)
@@ -773,10 +870,101 @@ mod tests {
     use super::*;
 
     #[test]
-    fn binding_round_trip_preserves_text() {
+    fn binding_export_strips_ampersand_from_custom() {
+        let parser = BindingParser::new();
+        let parsed = parser.parse_with_behavior_rules("&Custom foo");
+        let mo = MoergoBinding::from_layout_binding(&parsed);
+        // Moergo format uses "Custom" without '&' prefix
+        assert_eq!(value_to_string(&mo.value), "Custom");
+    }
+
+    #[test]
+    fn binding_export_preserves_other_behaviors() {
+        let parser = BindingParser::new();
+        let parsed = parser.parse_with_behavior_rules("&kp A");
+        let mo = MoergoBinding::from_layout_binding(&parsed);
+        // Other behaviors keep their '&' prefix
+        assert_eq!(value_to_string(&mo.value), "&kp");
+    }
+
+    #[test]
+    fn binding_import_adds_ampersand_to_custom() {
+        let mo = MoergoBinding {
+            value: Value::String("Custom".into()),
+            params: vec![MoergoBinding {
+                value: Value::String("foo".into()),
+                params: vec![],
+            }],
+        };
+        // Import adds '&' prefix to Custom
+        assert_eq!(mo.to_binding_string(), "&Custom foo");
+    }
+
+    #[test]
+    fn binding_round_trip_preserves_value() {
         let parser = BindingParser::new();
         let parsed = parser.parse_with_behavior_rules("&mt LSHFT A");
         let mo = MoergoBinding::from_layout_binding(&parsed);
+        // Round trip: internal -> moergo -> internal
         assert_eq!(mo.to_binding_string(), "&mt LSHFT A");
+    }
+
+    #[test]
+    fn custom_binding_round_trip() {
+        let parser = BindingParser::new();
+        let parsed = parser.parse_with_behavior_rules("&Custom foo bar");
+        let mo = MoergoBinding::from_layout_binding(&parsed);
+        // Export should strip '&' from Custom
+        assert_eq!(value_to_string(&mo.value), "Custom");
+        // Import should add it back
+        assert_eq!(mo.to_binding_string(), "&Custom foo bar");
+    }
+
+    #[test]
+    fn custom_binding_flattens_nested_params() {
+        let parser = BindingParser::new();
+        let parsed = parser.parse_with_behavior_rules("&Custom &left_index_tap KEY_LH_C1R4");
+        let mo = MoergoBinding::from_layout_binding(&parsed);
+        // Custom params should be flattened to single strings, not nested
+        assert_eq!(mo.params.len(), 1);
+        assert_eq!(
+            value_to_string(&mo.params[0].value),
+            "&left_index_tap KEY_LH_C1R4"
+        );
+        assert!(mo.params[0].params.is_empty());
+    }
+
+    #[test]
+    fn custom_binding_strips_simple_parens() {
+        let parser = BindingParser::new();
+        // Input with function-call syntax: &kp(LEFT_PINKY_MOD)
+        let parsed = parser.parse_with_behavior_rules("&Custom &kp(LEFT_PINKY_MOD)");
+        let mo = MoergoBinding::from_layout_binding(&parsed);
+        // Should strip unnecessary parens from simple identifier
+        assert_eq!(
+            value_to_string(&mo.params[0].value),
+            "&kp LEFT_PINKY_MOD"
+        );
+    }
+
+    #[test]
+    fn strip_simple_parens_keeps_complex_expressions() {
+        // Simple identifier - strip parens
+        assert_eq!(strip_simple_parens("(FOO)"), "FOO");
+        assert_eq!(strip_simple_parens("(LEFT_PINKY_MOD)"), "LEFT_PINKY_MOD");
+
+        // Function calls - strip outer parens
+        assert_eq!(strip_simple_parens("(_C(L))"), "_C(L)");
+        assert_eq!(strip_simple_parens("(_C(K))"), "_C(K)");
+        assert_eq!(strip_simple_parens("(foo(bar))"), "foo(bar)");
+
+        // Operator expressions - keep parens
+        assert_eq!(strip_simple_parens("(A | B)"), "(A | B)");
+        assert_eq!(strip_simple_parens("(1 + 2)"), "(1 + 2)");
+        assert_eq!(strip_simple_parens("(A << 8)"), "(A << 8)");
+
+        // No parens - unchanged
+        assert_eq!(strip_simple_parens("FOO"), "FOO");
+        assert_eq!(strip_simple_parens("_C(L)"), "_C(L)");
     }
 }

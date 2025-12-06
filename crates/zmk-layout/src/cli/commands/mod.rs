@@ -13,7 +13,7 @@ use super::app::Cli;
 
 pub fn dispatch(cli: Cli) -> Result<i32, CliError> {
     match cli.command {
-        Command::Lua(args) => script::run(&args),
+        Command::Lua(args) => script::run_basic(&args),
         Command::Firmware(cmd) => run_firmware(cmd),
         Command::Profiles(cmd) => run_profiles(cmd),
         Command::Keymap(cmd) => run_keymap(cmd),

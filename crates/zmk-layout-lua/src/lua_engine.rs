@@ -108,6 +108,18 @@ pub fn execute_script(
     script_source: &str,
     _script_dir: Option<&Path>,
 ) -> Result<ScriptResult, ScriptExecutionError> {
+    execute_script_with_args(document, script_source, _script_dir, &[])
+}
+
+/// Execute a Lua script with command-line arguments.
+///
+/// Arguments are exposed to the script via the global `arg` table.
+pub fn execute_script_with_args(
+    document: KeymapDocument,
+    script_source: &str,
+    _script_dir: Option<&Path>,
+    args: &[String],
+) -> Result<ScriptResult, ScriptExecutionError> {
     let mut engine_layout = LayoutEngine::new(document);
     let shared_engine = Rc::new(RefCell::new(engine_layout.clone()));
     let logs = Rc::new(RefCell::new(Vec::new()));
@@ -124,6 +136,19 @@ pub fn execute_script(
         },
     )
     .map_err(|err| ScriptExecutionError::Engine(err.to_string()))?;
+
+    // Set the arg table (Lua convention for command-line arguments)
+    let arg_table = lua
+        .create_table()
+        .map_err(|err| ScriptExecutionError::Engine(err.to_string()))?;
+    for (i, arg) in args.iter().enumerate() {
+        arg_table
+            .set(i + 1, arg.as_str())
+            .map_err(|err| ScriptExecutionError::Engine(err.to_string()))?;
+    }
+    lua.globals()
+        .set("arg", arg_table)
+        .map_err(|err| ScriptExecutionError::Engine(err.to_string()))?;
 
     let execution = lua.load(script_source).set_name("script").exec();
     match execution {
