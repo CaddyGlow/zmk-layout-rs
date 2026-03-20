@@ -41,6 +41,10 @@ pub struct BuildRequest {
     pub output_dir: PathBuf,
     pub extra_env: BTreeMap<String, String>,
     pub kconfig_defs: BTreeMap<String, String>,
+    /// User-provided kconfig file (--kconfig); when set, skips generation.
+    pub kconfig_file: Option<PathBuf>,
+    /// JSON config parameters extracted from the layout (e.g. MoErgo config_parameters).
+    pub json_config_params: Option<Vec<JsonValue>>,
     pub disable_cache: bool,
     pub manifest: Arc<FirmwareManifest>,
     pub progress: Arc<dyn ProgressReporter>,
@@ -100,6 +104,8 @@ pub struct BuildRequestBuilder {
     output_dir: Option<PathBuf>,
     extra_env: BTreeMap<String, String>,
     kconfig_defs: BTreeMap<String, String>,
+    kconfig_file: Option<PathBuf>,
+    json_config_params: Option<Vec<JsonValue>>,
     disable_cache: bool,
     progress: Option<Arc<dyn ProgressReporter>>,
 }
@@ -115,6 +121,8 @@ impl BuildRequestBuilder {
             output_dir: None,
             extra_env: BTreeMap::new(),
             kconfig_defs: BTreeMap::new(),
+            kconfig_file: None,
+            json_config_params: None,
             disable_cache: false,
             progress: None,
         }
@@ -178,6 +186,16 @@ impl BuildRequestBuilder {
         self
     }
 
+    pub fn kconfig_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.kconfig_file = Some(path.into());
+        self
+    }
+
+    pub fn json_config_params(mut self, params: Vec<JsonValue>) -> Self {
+        self.json_config_params = Some(params);
+        self
+    }
+
     pub fn disable_cache(mut self, flag: bool) -> Self {
         self.disable_cache = flag;
         self
@@ -233,6 +251,8 @@ impl BuildRequestBuilder {
             output_dir,
             extra_env: self.extra_env,
             kconfig_defs: self.kconfig_defs,
+            kconfig_file: self.kconfig_file,
+            json_config_params: self.json_config_params,
             disable_cache: self.disable_cache,
             manifest,
             progress,

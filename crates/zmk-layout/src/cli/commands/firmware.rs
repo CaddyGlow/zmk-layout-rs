@@ -178,6 +178,9 @@ fn build_firmware_request(
         let (key, value) = parse_kconfig_def(def)?;
         builder = builder.kconfig_def(key, value);
     }
+    if let Some(kconfig_path) = &args.kconfig {
+        builder = builder.kconfig_file(kconfig_path.clone());
+    }
     let builder = apply_firmware_layout(builder, args)?;
     Ok(builder.build()?)
 }
@@ -206,6 +209,17 @@ fn apply_firmware_layout(
         KeymapFormat::Json => builder = builder.layout_json_path(path.clone()),
         KeymapFormat::MoergoJson => {
             let text = io::read_text(path)?;
+
+            // Extract config_parameters from raw JSON before conversion
+            if let Ok(raw_json) = serde_json::from_str::<serde_json::Value>(&text) {
+                if let Some(params) = raw_json.get("config_parameters").and_then(|v| v.as_array())
+                {
+                    if !params.is_empty() {
+                        builder = builder.json_config_params(params.clone());
+                    }
+                }
+            }
+
             let keymap = moergo::import_moergo_json(&text).map_err(CliError::Adapter)?;
             let layout: AdapterLayout = keymap.into();
             let standard_json = layout.to_standard_json().map_err(|err| {
@@ -330,12 +344,20 @@ fn print_firmware_request(request: &BuildRequest) {
             println!("env      : {key}={value}");
         }
     }
-    if request.kconfig_defs.is_empty() {
-        println!("kconfig  : (none)");
-    } else {
+    match &request.kconfig_file {
+        Some(path) => println!("kconfig  : file:{}", path.display()),
+        None => println!("kconfig  : generated"),
+    }
+    if !request.kconfig_defs.is_empty() {
         for (key, value) in &request.kconfig_defs {
-            println!("kconfig  : {key}={value}");
+            println!("  -D       {key}={value}");
         }
+    }
+    if request.json_config_params.as_ref().is_some_and(|p| !p.is_empty()) {
+        println!(
+            "config   : {} JSON parameter(s) for kconfig mapping",
+            request.json_config_params.as_ref().unwrap().len()
+        );
     }
 }
 

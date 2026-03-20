@@ -3,7 +3,10 @@ use thiserror::Error;
 
 use crate::{dts::DtsError, serialization::SerializeError};
 
-use super::manifest::{ManifestError, ToolchainKind};
+use super::{
+    kconfig::KconfigError,
+    manifest::{ManifestError, ToolchainKind},
+};
 
 /// Errors surfaced while orchestrating firmware builds.
 #[derive(Debug, Error)]
@@ -41,4 +44,12 @@ pub enum BuildError {
     MissingLayoutArtifact(&'static str),
     #[error("build cancelled by signal")]
     Cancelled,
+    #[error("kconfig resolution failed: {0}")]
+    Kconfig(Box<KconfigError>),
+}
+
+impl From<KconfigError> for BuildError {
+    fn from(err: KconfigError) -> Self {
+        BuildError::Kconfig(Box::new(err))
+    }
 }

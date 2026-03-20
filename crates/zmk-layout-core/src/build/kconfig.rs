@@ -680,4 +680,151 @@ mod tests {
         // Different value is error
         assert!(check_conflict(&merged, "CONFIG_FOO", "n", "test").is_err());
     }
+
+    #[test]
+    fn resolve_generated_layers_hardware_then_defs() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut defs = BTreeMap::new();
+        defs.insert("CONFIG_OVERRIDE".to_string(), "42".to_string());
+        let resolver = KconfigResolver::new_generated(defs);
+
+        let mut hw_defaults = BTreeMap::new();
+        hw_defaults.insert("CONFIG_HW".to_string(), "y".to_string());
+
+        let result = resolver
+            .resolve(dir.path(), None, Some(&hw_defaults), None, None)
+            .unwrap();
+        assert!(result.config_path.is_some());
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].key, "CONFIG_HW");
+        assert_eq!(result.entries[0].origin, "hardware defaults");
+        assert_eq!(result.entries[1].key, "CONFIG_OVERRIDE");
+        assert_eq!(result.entries[1].origin, "kconfig_defs");
+
+        // Verify the file was written
+        let content = fs::read_to_string(result.config_path.unwrap()).unwrap();
+        assert!(content.contains("CONFIG_HW=y"));
+        assert!(content.contains("CONFIG_OVERRIDE=42"));
+    }
+
+    #[test]
+    fn resolve_from_user_file_copies_and_appends_defs() {
+        let dir = tempfile::tempdir().unwrap();
+        let user_file = dir.path().join("user.conf");
+        fs::write(&user_file, "CONFIG_BASE=100\n").unwrap();
+
+        let workspace = dir.path().join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+
+        let mut defs = BTreeMap::new();
+        defs.insert("CONFIG_EXTRA".to_string(), "n".to_string());
+        let resolver = KconfigResolver::new_from_file(user_file, defs);
+
+        let result = resolver
+            .resolve(&workspace, None, None, None, None)
+            .unwrap();
+        assert!(result.config_path.is_some());
+        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries[0].key, "CONFIG_BASE");
+        assert_eq!(result.entries[0].origin, "user-provided");
+        assert_eq!(result.entries[1].key, "CONFIG_EXTRA");
+        assert_eq!(result.entries[1].origin, "kconfig_defs");
+
+        let content = fs::read_to_string(result.config_path.unwrap()).unwrap();
+        assert!(content.contains("CONFIG_BASE=100"));
+        assert!(content.contains("CONFIG_EXTRA=n"));
+    }
+
+    #[test]
+    fn resolve_defs_only_skips_when_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolver = KconfigResolver::new_defs_only(BTreeMap::new());
+        let result = resolver
+            .resolve(dir.path(), None, None, None, None)
+            .unwrap();
+        assert!(result.config_path.is_none());
+        assert!(result.entries.is_empty());
+    }
+
+    #[test]
+    fn resolve_generated_maps_json_params() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolver = KconfigResolver::new_generated(BTreeMap::new());
+
+        // Build a kconfig_options map
+        let mut kconfig_map = BTreeMap::new();
+        let mut option_table = toml::map::Map::new();
+        option_table.insert("name".into(), TomlValue::String("CONFIG_ZMK_SLEEP".into()));
+        option_table.insert("type".into(), TomlValue::String("bool".into()));
+        option_table.insert("default".into(), TomlValue::Boolean(false));
+        kconfig_map.insert("DEEP_SLEEP".to_string(), TomlValue::Table(option_table));
+
+        // Build JSON config_parameters
+        let params = vec![serde_json::json!({
+            "paramName": "DEEP_SLEEP",
+            "value": "true"
+        })];
+
+        let result = resolver
+            .resolve(dir.path(), Some(&kconfig_map), None, None, Some(&params))
+            .unwrap();
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].key, "CONFIG_ZMK_SLEEP");
+        assert_eq!(result.entries[0].value, "y"); // true -> y for bool
+    }
+
+    #[test]
+    fn resolve_generated_applies_defaults_for_missing_params() {
+        let dir = tempfile::tempdir().unwrap();
+        let resolver = KconfigResolver::new_generated(BTreeMap::new());
+
+        let mut kconfig_map = BTreeMap::new();
+        let mut option_table = toml::map::Map::new();
+        option_table.insert(
+            "name".into(),
+            TomlValue::String("CONFIG_ZMK_BATTERY_REPORT_INTERVAL".into()),
+        );
+        option_table.insert("type".into(), TomlValue::String("int".into()));
+        option_table.insert("default".into(), TomlValue::Integer(600));
+        kconfig_map.insert(
+            "BATTERY_REPORT_INTERVAL_SEC".to_string(),
+            TomlValue::Table(option_table),
+        );
+
+        // No JSON params provided -- should get default
+        let result = resolver
+            .resolve(dir.path(), Some(&kconfig_map), None, None, Some(&[]))
+            .unwrap();
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(
+            result.entries[0].key,
+            "CONFIG_ZMK_BATTERY_REPORT_INTERVAL"
+        );
+        assert_eq!(result.entries[0].value, "600");
+    }
+
+    #[test]
+    fn defs_override_prior_layers() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut defs = BTreeMap::new();
+        defs.insert("CONFIG_HW".to_string(), "n".to_string());
+        let resolver = KconfigResolver::new_generated(defs);
+
+        let mut hw_defaults = BTreeMap::new();
+        hw_defaults.insert("CONFIG_HW".to_string(), "y".to_string());
+
+        let result = resolver
+            .resolve(dir.path(), None, Some(&hw_defaults), None, None)
+            .unwrap();
+        // Both entries are tracked, but defs override
+        assert_eq!(result.entries.len(), 2);
+        // The file should have the override last
+        let content = fs::read_to_string(result.config_path.unwrap()).unwrap();
+        let lines: Vec<&str> = content
+            .lines()
+            .filter(|l| l.starts_with("CONFIG_HW="))
+            .collect();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1], "CONFIG_HW=n"); // defs override
+    }
 }

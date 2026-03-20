@@ -20,6 +20,11 @@ pub struct EmbeddedKeyboardProfiles;
 #[folder = "$CARGO_MANIFEST_DIR/../../profiles/firmwares/"]
 pub struct EmbeddedFirmwareProfiles;
 
+/// Embedded vendor profiles bundled in the binary.
+#[derive(RustEmbed)]
+#[folder = "$CARGO_MANIFEST_DIR/../../profiles/vendors/"]
+pub struct EmbeddedVendorProfiles;
+
 /// Convenience type used for arbitrary TOML tables we want to retain.
 pub type ProfileProperties = BTreeMap<String, TomlValue>;
 
@@ -134,6 +139,39 @@ pub(crate) fn embedded_profile_candidates(name: &str) -> Vec<String> {
     push_unique_string(&mut candidates, format!("{name}/{name}.toml"));
     push_unique_string(&mut candidates, format!("{name}.toml"));
     candidates
+}
+
+/// Load kconfig_options from a vendor's `all_kconfig.toml`.
+///
+/// Searches filesystem first (`profiles/vendors/{vendor}/all_kconfig.toml`),
+/// then falls back to embedded vendor profiles.  Returns `None` when no map
+/// is found for the given vendor.
+pub fn load_vendor_kconfig_options(vendor: &str) -> Option<BTreeMap<String, TomlValue>> {
+    let filename = format!("{}/all_kconfig.toml", vendor.to_lowercase());
+
+    // Try filesystem first (allows override)
+    let fs_path = PathBuf::from("profiles/vendors").join(&filename);
+    let contents = if fs_path.exists() {
+        fs::read_to_string(&fs_path).ok()?
+    } else {
+        let embedded = EmbeddedVendorProfiles::get(&filename)?;
+        std::str::from_utf8(embedded.data.as_ref()).ok()?.to_string()
+    };
+
+    let root: TomlValue = toml::from_str(&contents).ok()?;
+    let kconfig_options = root
+        .as_table()?
+        .get("keymap")?
+        .as_table()?
+        .get("kconfig_options")?
+        .as_table()?;
+
+    Some(
+        kconfig_options
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
+    )
 }
 
 fn collect_profile_names(root: &Path, profiles: &mut BTreeSet<String>) {
@@ -1127,5 +1165,33 @@ template = "layout.dtsi"
             profiles.contains(&"glove80".to_string()),
             "should include glove80"
         );
+    }
+
+    #[test]
+    fn loads_vendor_kconfig_options() {
+        let options = super::load_vendor_kconfig_options("MoErgo")
+            .expect("should load MoErgo kconfig options");
+        assert!(
+            !options.is_empty(),
+            "should have at least one kconfig option"
+        );
+        // Verify a known option
+        let battery = options
+            .get("BATTERY_REPORT_INTERVAL_SEC")
+            .expect("should have BATTERY_REPORT_INTERVAL_SEC");
+        let table = battery.as_table().expect("should be a table");
+        assert_eq!(
+            table.get("name").and_then(|v| v.as_str()),
+            Some("CONFIG_ZMK_BATTERY_REPORT_INTERVAL")
+        );
+        assert_eq!(
+            table.get("type").and_then(|v| v.as_str()),
+            Some("int")
+        );
+    }
+
+    #[test]
+    fn vendor_kconfig_options_returns_none_for_unknown_vendor() {
+        assert!(super::load_vendor_kconfig_options("nonexistent").is_none());
     }
 }

@@ -13,6 +13,7 @@ use serde::Serialize;
 use super::{
     docker::DockerBackend,
     error::BuildError,
+    kconfig::KconfigResolver,
     layout::LayoutStager,
     logs::LogFile,
     manifest::{BuildTarget, FirmwareManifest, KeyboardProfile, ToolchainProfile},
@@ -88,11 +89,77 @@ impl FirmwareBuilder {
             request.disable_cache,
         )?;
         let stager = LayoutStager::new();
-        let layout = stager.stage(
+        let mut layout = stager.stage(
             &request.layout,
             request.keyboard_profile_document(),
             &workspace,
         )?;
+
+        // -- Kconfig resolution --
+        let kconfig_resolution = {
+            let resolver = if let Some(user_file) = &request.kconfig_file {
+                KconfigResolver::new_from_file(user_file.clone(), request.kconfig_defs.clone())
+            } else {
+                KconfigResolver::new_generated(request.kconfig_defs.clone())
+            };
+
+            // Gather profile kconfig map from vendor
+            let profile_kconfig_map = request
+                .keyboard_profile_doc()
+                .and_then(|doc| {
+                    crate::profiles::load_vendor_kconfig_options(&doc.metadata.vendor)
+                });
+
+            // Gather hardware defaults
+            let hardware_defaults = request.keyboard_profile_doc().and_then(|doc| {
+                let kconfig = &doc.hardware.build_defaults.kconfig;
+                if kconfig.is_empty() {
+                    None
+                } else {
+                    Some(
+                        kconfig
+                            .iter()
+                            .map(|(k, v)| (k.clone(), toml_value_to_string(v)))
+                            .collect::<BTreeMap<String, String>>(),
+                    )
+                }
+            });
+
+            // Gather firmware version kconfig
+            let firmware_kconfig = request.keyboard_profile_doc().and_then(|doc| {
+                let version = doc.firmware.versions.get(&doc.firmware.default)?;
+                let props = &version.properties;
+                let kconfig = props.get("kconfig")?.as_table()?;
+                if kconfig.is_empty() {
+                    return None;
+                }
+                Some(
+                    kconfig
+                        .iter()
+                        .map(|(k, v)| (k.clone(), toml_value_to_string(v)))
+                        .collect::<BTreeMap<String, String>>(),
+                )
+            });
+
+            let json_params = request.json_config_params.as_deref();
+
+            resolver.resolve(
+                workspace.layout_dir(),
+                profile_kconfig_map.as_ref(),
+                hardware_defaults.as_ref(),
+                firmware_kconfig.as_ref(),
+                json_params,
+            )?
+        };
+
+        // Set config artifact from kconfig resolution
+        if let Some(config_path) = kconfig_resolution.config_path {
+            layout.config = Some(config_path);
+        }
+
+        for warning in &kconfig_resolution.warnings {
+            request.progress.log(super::LogLevel::Warn, warning);
+        }
 
         let ctx = BuildContext {
             manifest: &self.manifest,
@@ -425,4 +492,20 @@ fn resolve_target<'a>(
             keyboard: keyboard.id.clone(),
             target: id.to_string(),
         })
+}
+
+fn toml_value_to_string(v: &toml::Value) -> String {
+    match v {
+        toml::Value::String(s) => s.clone(),
+        toml::Value::Integer(i) => i.to_string(),
+        toml::Value::Float(f) => f.to_string(),
+        toml::Value::Boolean(b) => {
+            if *b {
+                "y".to_string()
+            } else {
+                "n".to_string()
+            }
+        }
+        other => other.to_string(),
+    }
 }
