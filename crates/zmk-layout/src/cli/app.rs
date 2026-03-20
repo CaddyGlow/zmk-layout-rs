@@ -493,6 +493,13 @@ pub struct FirmwareFlashArgs {
     pub copy_timeout: Option<u64>,
     #[arg(long, help = "Skip sync after copy, even if requested by the profile")]
     pub no_sync: bool,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "MODE",
+        help = "Device detection mode: poll (default) or events"
+    )]
+    pub detect: Option<DetectModeFlag>,
 }
 
 #[derive(Args, Clone)]
@@ -532,6 +539,12 @@ impl From<ConflictFlag> for ConflictPolicy {
             ConflictFlag::Script => ConflictPolicy::Script,
         }
     }
+}
+
+#[derive(Copy, Clone, ValueEnum)]
+pub enum DetectModeFlag {
+    Poll,
+    Events,
 }
 
 #[derive(Copy, Clone, ValueEnum)]

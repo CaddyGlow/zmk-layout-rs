@@ -15,6 +15,7 @@ mod stub;
 #[cfg(all(target_os = "windows", feature = "flash-windows"))]
 mod windows;
 
+// Polling platform alias
 #[cfg(all(target_os = "linux", feature = "flash-linux"))]
 use linux as platform;
 #[cfg(all(target_os = "macos", feature = "flash-macos"))]
@@ -29,4 +30,30 @@ use stub as platform;
 #[cfg(all(target_os = "windows", feature = "flash-windows"))]
 use windows as platform;
 
+// Event-driven watcher modules
+mod watcher;
+
+#[cfg(all(target_os = "linux", feature = "flash-events-linux"))]
+mod linux_watcher;
+#[cfg(all(target_os = "macos", feature = "flash-events-macos"))]
+mod macos_watcher;
+#[cfg(all(target_os = "windows", feature = "flash-events-windows"))]
+mod windows_watcher;
+mod watcher_stub;
+
+// Watcher platform alias
+#[cfg(all(target_os = "linux", feature = "flash-events-linux"))]
+use linux_watcher as platform_watcher;
+#[cfg(all(target_os = "macos", feature = "flash-events-macos"))]
+use macos_watcher as platform_watcher;
+#[cfg(all(target_os = "windows", feature = "flash-events-windows"))]
+use windows_watcher as platform_watcher;
+#[cfg(not(any(
+    all(target_os = "linux", feature = "flash-events-linux"),
+    all(target_os = "macos", feature = "flash-events-macos"),
+    all(target_os = "windows", feature = "flash-events-windows"),
+)))]
+use watcher_stub as platform_watcher;
+
 pub use core::*;
+pub use watcher::{FlashEvent, FlashId, FlashWatcher};

@@ -3,7 +3,7 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 #[cfg(feature = "ancpp-preprocessor")]
 use crate::cli::preprocess::build_config;
 use crate::cli::{
-    app::{FirmwareBuildArgs, FirmwareDevicesArgs, FirmwareFlashArgs},
+    app::{DetectModeFlag, FirmwareBuildArgs, FirmwareDevicesArgs, FirmwareFlashArgs},
     error::CliError,
 };
 use zmk_layout_core::{
@@ -14,7 +14,7 @@ use zmk_layout_core::{
     },
     flash::{
         build_flash_targets, default_sides, discover_devices, flash_target, render_device,
-        render_flash_outcome, render_flash_warning, resolve_flash_source, FlashConfig,
+        render_flash_outcome, render_flash_warning, resolve_flash_source, DetectMode, FlashConfig,
     },
     io,
 };
@@ -70,6 +70,12 @@ pub fn flash(args: &FirmwareFlashArgs) -> Result<i32, CliError> {
     }
     if args.no_sync {
         config.sync_after_copy = false;
+    }
+    if let Some(mode) = args.detect {
+        config.detect_mode = match mode {
+            DetectModeFlag::Poll => DetectMode::Poll,
+            DetectModeFlag::Events => DetectMode::Events,
+        };
     }
 
     let source = resolve_flash_source(

@@ -120,6 +120,16 @@ impl FlashBackend for EnvFlashBackend {
     }
 }
 
+/// Device detection mode: polling or event-driven.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DetectMode {
+    /// Poll for devices at regular intervals (default).
+    #[default]
+    Poll,
+    /// Use platform event mechanisms (udevadm, diskutil activity, WMI events).
+    Events,
+}
+
 /// Logical half to flash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlashSide {
@@ -169,6 +179,7 @@ pub struct FlashConfig {
     pub mount_timeout: Duration,
     pub copy_timeout: Duration,
     pub sync_after_copy: bool,
+    pub detect_mode: DetectMode,
 }
 
 impl Default for FlashConfig {
@@ -178,6 +189,7 @@ impl Default for FlashConfig {
             mount_timeout: Duration::from_secs(60),
             copy_timeout: Duration::from_secs(60),
             sync_after_copy: false,
+            detect_mode: DetectMode::Poll,
         }
     }
 }
@@ -341,6 +353,8 @@ pub enum FlashError {
     UdisksctlOutput { device: String },
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
+    #[error("event watcher failed: {0}")]
+    WatcherFailed(String),
 }
 
 /// List the currently connected storage devices that match the flash query.
@@ -856,6 +870,9 @@ pub(crate) fn wait_for_device(
     target: Option<&FlashTarget>,
     seen_serials: &HashSet<String>,
 ) -> Result<FlashDevice, FlashError> {
+    if config.detect_mode == DetectMode::Events {
+        return super::watcher::wait_for_device_events(config, target, seen_serials);
+    }
     backend.wait_for_device(config, target, seen_serials)
 }
 
