@@ -381,28 +381,26 @@ pub struct FirmwareBuildArgs {
         help = "Target id to build (repeatable)"
     )]
     pub targets: Vec<String>,
+
     #[arg(
-        long = "layout-json",
-        value_name = "FILE",
-        help = "Layout JSON file to consume"
+        long = "layout",
+        value_name = "PATH",
+        help = "Layout input (JSON, MoErgo JSON, DTS, DTSI, or keymap)"
     )]
-    pub layout_json: Option<PathBuf>,
+    pub layout: Option<PathBuf>,
+
     #[arg(
-        long = "layout-dts",
-        value_name = "FILE",
-        help = "DTS layout to use as input"
+        long = "format",
+        value_enum,
+        value_name = "FORMAT",
+        help = "Layout format; auto-detected from extension if omitted"
     )]
-    pub layout_dts: Option<PathBuf>,
-    #[arg(
-        long = "keymap",
-        value_name = "FILE",
-        help = "Keymap Devicetree source (.keymap/.dtsi)"
-    )]
-    pub keymap: Option<PathBuf>,
+    pub format: Option<KeymapFormat>,
+
     #[arg(
         long = "kconfig",
         value_name = "FILE",
-        help = "Optional CONFIG overlay (.conf/.config.dtsi)"
+        help = "Kconfig overlay (.conf); skips generation and appends -D defs"
     )]
     pub kconfig: Option<PathBuf>,
     #[arg(

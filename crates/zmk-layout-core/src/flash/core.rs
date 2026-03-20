@@ -539,7 +539,7 @@ pub(crate) fn flash_target_with_backend(
     if let Some(expected) = target.board_id.as_ref() {
         match read_board_id(&device.mountpoint) {
             Some(found) => {
-                if !found.eq_ignore_ascii_case(expected) && !found.contains(expected) {
+                if !board_id_matches(&found, expected) {
                     return Err(FlashError::BoardIdMismatch {
                         device: device.name.clone(),
                         expected: expected.clone(),
@@ -825,6 +825,29 @@ fn read_board_id(mountpoint: &Path) -> Option<String> {
         }
     }
     None
+}
+
+/// Normalize a board ID for comparison by lowercasing and replacing separators.
+fn normalize_board_id(id: &str) -> String {
+    id.to_ascii_lowercase().replace('-', "_")
+}
+
+/// Check if a found board ID matches the expected one.
+/// Uses normalized comparison: lowercase + treat `-` and `_` as equivalent.
+/// Matches if either starts with the other (after normalization).
+fn board_id_matches(found: &str, expected: &str) -> bool {
+    // Empty expected means "don't check" - always matches
+    if expected.is_empty() {
+        return true;
+    }
+    // Exact match (case-insensitive)
+    if found.eq_ignore_ascii_case(expected) {
+        return true;
+    }
+    // Normalize both and check prefix matching
+    let found_norm = normalize_board_id(found);
+    let expected_norm = normalize_board_id(expected);
+    found_norm.starts_with(&expected_norm) || expected_norm.starts_with(&found_norm)
 }
 
 pub(crate) fn wait_for_device(
@@ -1395,6 +1418,26 @@ mod tests {
             ),
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn board_id_matches_glove80_variants() {
+        use super::board_id_matches;
+
+        // Exact match
+        assert!(board_id_matches("glove80_lh", "glove80_lh"));
+
+        // Case-insensitive exact match
+        assert!(board_id_matches("Glove80_LH", "glove80_lh"));
+
+        // Glove80 bootloader format vs ZMK expected format
+        // "Glove80-LH-revH" should match "glove80_lh" (prefix after normalization)
+        assert!(board_id_matches("Glove80-LH-revH", "glove80_lh"));
+        assert!(board_id_matches("Glove80-RH-revH", "glove80_rh"));
+
+        // Should NOT match completely different boards
+        assert!(!board_id_matches("Glove80-RH-revH", "glove80_lh"));
+        assert!(!board_id_matches("some_other_board", "glove80_lh"));
     }
 }
 

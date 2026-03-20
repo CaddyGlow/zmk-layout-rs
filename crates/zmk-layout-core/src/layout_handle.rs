@@ -261,12 +261,21 @@ fn minimal_dts_document() -> DtsDocument {
         leading_comments: Vec::new(),
         trailing_comments: Vec::new(),
     };
-    DtsDocument::from_items(vec![
-        DtItem::Node(behaviors),
-        DtItem::Node(macros),
-        DtItem::Node(combos),
-        DtItem::Node(keymap),
-    ])
+    let root = DtNode {
+        name: "/".to_string(),
+        raw_name: "/".to_string(),
+        span: empty_span(),
+        properties: Vec::new(),
+        children: vec![
+            DtItem::Node(behaviors),
+            DtItem::Node(macros),
+            DtItem::Node(combos),
+            DtItem::Node(keymap),
+        ],
+        leading_comments: Vec::new(),
+        trailing_comments: Vec::new(),
+    };
+    DtsDocument::from_items(vec![DtItem::Node(root)])
 }
 
 fn set_original_format_meta(keymap: &mut KeymapDocument, format: &str) {

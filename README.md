@@ -186,7 +186,7 @@ use zmk_layout_rs::{
 };
 
 fn hydrate_profile_layout() -> Result<(), Box<dyn std::error::Error>> {
-    let profile = KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml")?;
+    let profile = KeyboardProfileDoc::from_file("profiles/keyboards/glove80/profile.toml")?;
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let hydrated =
         import_standard_file_for_profile("layout.json", &profile, &repo_root)?;
@@ -198,7 +198,7 @@ fn hydrate_profile_layout() -> Result<(), Box<dyn std::error::Error>> {
 Validate profiles directly from the CLI:
 
 ```bash
-zmk-layout profiles check profiles/keyboards/glove80.toml
+zmk-layout profiles check profiles/keyboards/glove80/profile.toml
 zmk-layout profiles check --all
 ```
 

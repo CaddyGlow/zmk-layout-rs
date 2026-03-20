@@ -25,7 +25,7 @@ use zmk_layout_rs::profiles::KeyboardProfileDoc;
 let profile = KeyboardProfileDoc::load("glove80")?;
 
 // Load from specific file path (original behavior)
-let profile = KeyboardProfileDoc::from_file("profiles/keyboards/glove80.toml")?;
+let profile = KeyboardProfileDoc::from_file("profiles/keyboards/glove80/profile.toml")?;
 
 // List all available profiles (both embedded and filesystem)
 let profiles = KeyboardProfileDoc::list_available();

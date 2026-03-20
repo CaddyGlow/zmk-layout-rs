@@ -7,7 +7,7 @@ use crate::cli::{
     error::CliError,
 };
 use zmk_layout_core::{
-    adapters::AdapterPipeline,
+    adapters::{moergo, standard::AdapterLayout, AdapterPipeline},
     build::{
         BuildError, BuildReport, BuildRequest, BuildRequestBuilder, CliDockerBackend,
         CliProgressReporter, FirmwareBuilder, FirmwareManifest, LayoutSource,
@@ -180,58 +180,92 @@ fn apply_firmware_layout(
     mut builder: BuildRequestBuilder,
     args: &FirmwareBuildArgs,
 ) -> Result<BuildRequestBuilder, CliError> {
-    let mut layout_set = false;
-    if let Some(path) = &args.layout_json {
-        builder = builder.layout_json_path(path.clone());
-        layout_set = true;
+    use crate::cli::app::KeymapFormat;
+
+    let path = args.layout.as_ref().ok_or_else(|| {
+        CliError::FirmwareLayout("--layout is required".into())
+    })?;
+
+    let format = detect_layout_format(path, args.format.as_ref())?;
+
+    // Warn if .json without explicit format (could be MoErgo)
+    if path.extension().and_then(|e| e.to_str()) == Some("json") && args.format.is_none() {
+        eprintln!(
+            "warning: assuming standard JSON format; use --format moergo-json if this is a MoErgo layout"
+        );
     }
-    if let Some(path) = &args.layout_dts {
-        if layout_set {
-            return Err(CliError::FirmwareLayout(
-                "multiple layout inputs were provided".into(),
-            ));
+
+    // Apply layout based on detected format
+    match format {
+        KeymapFormat::Json => builder = builder.layout_json_path(path.clone()),
+        KeymapFormat::MoergoJson => {
+            let text = io::read_text(path)?;
+            let keymap = moergo::import_moergo_json(&text).map_err(CliError::Adapter)?;
+            let layout: AdapterLayout = keymap.into();
+            let standard_json = layout.to_standard_json().map_err(|err| {
+                CliError::InvalidArgument(format!(
+                    "failed to convert MoErgo layout to standard JSON: {err}"
+                ))
+            })?;
+            let json_value = serde_json::from_str(&standard_json).map_err(|err| {
+                CliError::InvalidArgument(format!(
+                    "failed to parse converted MoErgo layout JSON: {err}"
+                ))
+            })?;
+            builder = builder.layout_json_value(json_value);
         }
-        #[cfg(feature = "ancpp-preprocessor")]
-        let layout = if args.preprocess.preprocess {
-            let cfg = build_config(&args.preprocess, path)?;
-            io::load_layout_preprocessed(path, &cfg)?
-        } else {
-            io::load_layout(path)?
-        };
-        #[cfg(not(feature = "ancpp-preprocessor"))]
-        let layout = io::load_layout(path)?;
-        let dts_text = layout
-            .preprocessed_text
-            .clone()
-            .or(layout.raw_text.clone())
-            .unwrap_or_default();
-        let pipeline = AdapterPipeline::from_dts_text(dts_text);
-        builder = builder.layout_via_pipeline(pipeline);
-        layout_set = true;
-    }
-    match (&args.keymap, &args.kconfig) {
-        (Some(keymap), extra) => {
-            if layout_set {
-                return Err(CliError::FirmwareLayout(
-                    "multiple layout inputs were provided".into(),
-                ));
-            }
-            builder = builder.layout_files(keymap.clone(), extra.clone());
-            layout_set = true;
+        KeymapFormat::Dts | KeymapFormat::Dtsi => {
+            #[cfg(feature = "ancpp-preprocessor")]
+            let layout = if args.preprocess.preprocess {
+                let cfg = build_config(&args.preprocess, path)?;
+                io::load_layout_preprocessed(path, &cfg)?
+            } else {
+                io::load_layout(path)?
+            };
+            #[cfg(not(feature = "ancpp-preprocessor"))]
+            let layout = io::load_layout(path)?;
+
+            let dts_text = layout
+                .preprocessed_text
+                .clone()
+                .or(layout.raw_text.clone())
+                .unwrap_or_default();
+            let pipeline = AdapterPipeline::from_dts_text(dts_text);
+            builder = builder.layout_via_pipeline(pipeline);
         }
-        (None, Some(_)) => {
-            return Err(CliError::FirmwareLayout(
-                "--kconfig requires --keymap".into(),
-            ));
-        }
-        (None, None) => {}
     }
-    if !layout_set {
-        return Err(CliError::FirmwareLayout(
-            "provide one of --layout-json, --layout-dts, or --keymap/--kconfig".into(),
-        ));
-    }
+
     Ok(builder)
+}
+
+/// Detect layout format from file extension, with optional explicit override.
+fn detect_layout_format(
+    path: &std::path::Path,
+    explicit_format: Option<&crate::cli::app::KeymapFormat>,
+) -> Result<crate::cli::app::KeymapFormat, CliError> {
+    use crate::cli::app::KeymapFormat;
+
+    if let Some(format) = explicit_format {
+        return Ok(*format);
+    }
+
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+
+    match extension.as_deref() {
+        Some("json") => Ok(KeymapFormat::Json),
+        Some("dts") | Some("keymap") => Ok(KeymapFormat::Dts),
+        Some("dtsi") => Ok(KeymapFormat::Dtsi),
+        Some(ext) => Err(CliError::FirmwareLayout(format!(
+            "unknown file extension '{}'; specify --format explicitly",
+            ext
+        ))),
+        None => Err(CliError::FirmwareLayout(
+            "--format is required when layout has no file extension".into(),
+        )),
+    }
 }
 
 fn parse_env_var(input: &str) -> Result<(String, String), CliError> {

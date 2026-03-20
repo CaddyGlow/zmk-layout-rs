@@ -1,6 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{env, fs, path::PathBuf};
 
 use crate::{
+    adapters::standard::render_standard_template_for_profile,
     keymap::KeymapDocument,
     layout_handle::{LayoutHandle, LayoutHandleError, LayoutOrigin},
 };
@@ -30,11 +31,36 @@ impl LayoutStager {
     ) -> Result<KeymapArtifacts, BuildError> {
         match source {
             LayoutSource::JsonPath(path) => {
+                if let Some(profile) = profile {
+                    let json_text = fs::read_to_string(path).map_err(BuildError::Io)?;
+                    let profile_root = profile_root(profile);
+                    let rendered = render_standard_template_for_profile(
+                        &json_text,
+                        &profile.document,
+                        &profile_root,
+                    )
+                    .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+                    let rendered = apply_position_macros(rendered, profile);
+                    return self.write_rendered_layout(json_text, rendered, workspace);
+                }
                 let mut handle = LayoutHandle::from_json_path(path, LayoutOrigin::JsonFile)
                     .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
                 self.write_handle(&mut handle, workspace, true)
             }
             LayoutSource::JsonValue(value) => {
+                if let Some(profile) = profile {
+                    let json_text = serde_json::to_string(value)
+                        .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+                    let profile_root = profile_root(profile);
+                    let rendered = render_standard_template_for_profile(
+                        &json_text,
+                        &profile.document,
+                        &profile_root,
+                    )
+                    .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
+                    let rendered = apply_position_macros(rendered, profile);
+                    return self.write_rendered_layout(json_text, rendered, workspace);
+                }
                 let json_text = serde_json::to_string(value)
                     .map_err(|err| BuildError::InvalidRequest(err.to_string()))?;
                 let mut handle = LayoutHandle::from_json_text(json_text, LayoutOrigin::JsonText)
@@ -105,6 +131,23 @@ impl LayoutStager {
         Ok(artifacts)
     }
 
+    fn write_rendered_layout(
+        &self,
+        json_text: String,
+        keymap_text: String,
+        workspace: &WorkspaceHandle,
+    ) -> Result<KeymapArtifacts, BuildError> {
+        let keymap_dest = workspace.layout_dir().join("keymap.dtsi");
+        fs::write(&keymap_dest, keymap_text).map_err(BuildError::Io)?;
+        let json_dest = workspace.layout_dir().join("layout.json");
+        fs::write(&json_dest, json_text).map_err(BuildError::Io)?;
+        Ok(KeymapArtifacts {
+            keymap: Some(keymap_dest),
+            json: Some(json_dest),
+            ..Default::default()
+        })
+    }
+
     fn copy_files(
         &self,
         keymap: &PathBuf,
@@ -123,6 +166,64 @@ impl LayoutStager {
             artifacts.config = Some(config_dest);
         }
         Ok(artifacts)
+    }
+}
+
+fn profile_root(profile: &crate::build::manifest::KeyboardProfileDocument) -> PathBuf {
+    let template = PathBuf::from(&profile.document.layout.template);
+    if template.is_absolute() {
+        return PathBuf::from(".");
+    }
+    if let Some(root) = profile.path.parent() {
+        let candidate = root.join(&template);
+        if candidate.exists() {
+            return root.to_path_buf();
+        }
+    }
+    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+fn apply_position_macros(
+    keymap_text: String,
+    profile: &crate::build::manifest::KeyboardProfileDocument,
+) -> String {
+    let Some(map) = load_position_macro_map(profile) else {
+        return keymap_text;
+    };
+    map.into_iter().fold(keymap_text, |mut acc, (name, value)| {
+        acc = acc.replace(&name, &value);
+        acc
+    })
+}
+
+fn load_position_macro_map(
+    profile: &crate::build::manifest::KeyboardProfileDocument,
+) -> Option<Vec<(String, String)>> {
+    let dir = profile.path.parent()?;
+    let path = dir.join("key_positions.json");
+    let contents = fs::read_to_string(path).ok()?;
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&contents).ok()?;
+    let mut map = Vec::new();
+    for entry in entries {
+        let Some(label) = entry.get("label").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(index) = entry.get("i").and_then(|v| v.as_u64()) else {
+            continue;
+        };
+        let macro_name = if let Some(stripped) = label.strip_prefix("L_") {
+            format!("POS_LH_{stripped}")
+        } else if let Some(stripped) = label.strip_prefix("R_") {
+            format!("POS_RH_{stripped}")
+        } else {
+            continue;
+        };
+        map.push((macro_name, index.to_string()));
+    }
+    if map.is_empty() {
+        None
+    } else {
+        Some(map)
     }
 }
 

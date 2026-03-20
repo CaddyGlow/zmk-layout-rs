@@ -1,7 +1,7 @@
 # Keyboard Profile Migration Plan
 
 We now have a TOML-based keyboard profile specification (`docs/keyboard_profiles.md`)
-and a first profile (`profiles/keyboards/glove80.toml`). This plan outlines how to
+and a first profile (`profiles/keyboards/glove80/profile.toml`). This plan outlines how to
 move the codebase from the legacy YAML folders under `example_profile/` to the
 new unified format without breaking existing tooling.
 
@@ -18,7 +18,7 @@ new unified format without breaking existing tooling.
    documented in `docs/keyboard_profiles.md` (array-of-table representation).
 4. **Update & commit**: document the completed loader work in this plan and
    create a git checkpoint before starting Phase 2.
-> Status: Completed – added `src/profiles/mod.rs`, `profiles/keyboards/glove80.toml`
+> Status: Completed – added `src/profiles/mod.rs`, `profiles/keyboards/glove80/profile.toml`
 > fixture updates, and loader tests covering happy-path parsing and validation.
 
 ## Phase 2 – Manifest Integration
