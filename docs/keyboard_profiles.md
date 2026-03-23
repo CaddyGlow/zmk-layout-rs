@@ -212,6 +212,41 @@ This satisfies the required sections while staying concise. Tooling can enrich
 it with defaults (flash method, board identifier, etc.), but every keyboard uses
 the same TOML vocabulary so manifests and CLIs can resolve them consistently.
 
+## Loading Profiles
+
+Profiles are embedded in the binary at compile time via `rust-embed`. At
+runtime, the filesystem is checked first so local files can override embedded
+defaults.
+
+```rust
+// Load by name (filesystem first, then embedded)
+let profile = KeyboardProfileDoc::load("glove80")?;
+
+// Load from an explicit path
+let profile = KeyboardProfileDoc::from_file("profiles/keyboards/glove80/profile.toml")?;
+
+// List all available profiles (embedded + filesystem)
+let profiles = KeyboardProfileDoc::list_available();
+```
+
+Firmware manifests can reference profiles by name or path:
+
+```toml
+[keyboards.glove80.metadata]
+profile = "glove80"           # resolved from embedded or filesystem
+profile = "../custom.toml"    # explicit path
+```
+
+The CLI accepts both names and paths for `--manifest`:
+
+```bash
+zmk-layout firmware build --manifest glove80 ...    # by name
+zmk-layout firmware build --manifest path/to.toml ...  # by path
+```
+
+Search order: filesystem `profiles/{keyboards|firmwares}/{name}.toml`, then
+embedded, then `NotFound`.
+
 ## Validation
 
 Use the CLI to catch schema mistakes before committing:

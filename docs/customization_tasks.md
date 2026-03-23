@@ -115,8 +115,6 @@ targets ensure two people editing the same slot are prompted to resolve the clas
 - **Skipped behavior/meta/script tasks** – these tasks execute now; they only skip when the settings
   map is empty or a conflict policy tells the engine to skip a mismatched `expected` block.
 
-For additional background, see `LAYOUT_TASK_PLAN.md` for the full roadmap.
-
 ## Combo Conditions
 
 Combos can restrict when they fire by declaring a `conditions = ["..."]` array inside the task. During
