@@ -32,6 +32,7 @@ zmk-layout firmware flash \
 | `--mount-timeout <sec>` | How long to wait for a device |
 | `--copy-timeout <sec>` | Timeout for the copy operation |
 | `--no-sync` | Skip sync after copy |
+| `--detect poll\|events` | Device detection mode (default: poll) |
 
 ### Default flow (split boards)
 
@@ -90,13 +91,14 @@ new firmware) and is reported as a warning, not an error.
 
 Key types in the `flash` module:
 
-- `FlashConfig` -- timeouts, queries, sync flag (seeded from `hardware.flash`)
+- `FlashConfig` -- timeouts, queries, sync flag, detect mode (seeded from `hardware.flash`)
 - `FlashSource` -- `Single(PathBuf)` or `Split { left, right }`
-- `FlashTarget` -- side + optional board id
+- `FlashTarget` -- side + optional board id + config
 - `FlashDevice` -- discovered device + mountpoint + board metadata
-- `FirmwareFlasher` -- orchestrator with `flash_target()`
+- `FlashSideSelection` -- `Left`, `Right`, `Both`
 
-Discovery: `probe_devices()`, `read_board_id()`.
+Orchestration uses free functions: `flash_target()`, `discover_devices()`,
+`build_flash_targets()`, `resolve_flash_source()`.
 
 ## Testing without hardware
 

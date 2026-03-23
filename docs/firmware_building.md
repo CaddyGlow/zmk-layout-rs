@@ -51,22 +51,24 @@ zmk-layout firmware build \
   --keyboard glove80 \
   --toolchain zmk \
   --target left \
-  --layout-dts path/to/layout.dts \
-  --output dist/glove80-left
+  --layout path/to/layout.dts \
+  --output-dir dist/glove80-left
 ```
 
 Key options:
 
 - `--keyboard` / `--toolchain` select entries from the manifest (toolchain is
   optional when a keyboard default exists).
-- Layout input is required (`--layout-json`, `--layout-dts`, or `--keymap`
-  + `--kconfig`).
+- `--layout <path>` provides the layout input. Format is auto-detected from the
+  file extension, or can be forced with `--format dts|json|moergo-json|dtsi|keymap`.
+- `--kconfig <file>` supplies a Kconfig overlay (`.conf`).
 - `--target` can be repeated to restrict the build to a subset of target IDs.
 - `--env KEY=VALUE` overrides environment variables for the Docker invocation.
 - `-D/--kconfig-def NAME=VALUE` appends additional Kconfig options (forwarded as
   `-D` CMake args for west builds and written into the staged `.conf` file).
 - `--disable-cache` skips cache hydration/persist so temporary workspaces are
   always clean.
+- `--dry-run` prints the resolved request without running Docker.
 
 The CLI always prints the resolved request (keyboard, toolchain, targets,
 output path, env overrides) followed by a build summary detailing metadata,

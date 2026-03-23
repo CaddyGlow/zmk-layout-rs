@@ -84,7 +84,7 @@ JSON shape (all fields optional unless noted):
   "title": "Corne-ish Zen",
   "metadata": { "keyboard": "cradio" },
   "layers": [{ "name": "base", "bindings": ["&kp Q", "&kp W"] }],
-  "combos": [{ "name": "copy", "key_positions": [0, 1], "bindings": ["&kp C"] }],
+  "combos": [{ "name": "copy", "key_positions": [0, 1], "binding": "&kp C" }],
   "behaviors": [{ "name": "caps_word", "bindings": ["&caps_word"] }]
 }
 ```
@@ -169,28 +169,33 @@ zmk-layout keymap convert --input layout.json --output keymap.dtsi --from json -
   --template templates/keymap.dtsi.j2
 ```
 
-Useful flags: `--conflicts override|skip|prompt|script`, `--combo-conditions`,
-`--preprocess` (requires `ancpp-preprocessor` feature), `--profile <name>`.
+Useful flags for apply/validate/diff: `--conflicts override|skip|prompt|script`,
+`--combo-conditions`, `--preprocess` (requires `ancpp-preprocessor` feature).
+The `--profile <name>` flag is available on `convert`, `lua`, and `show`.
 
 ### Firmware commands
 
 ```bash
 # Build firmware
 zmk-layout firmware build \
-  --manifest glove80 --keyboard glove80 --toolchain zmk \
-  --target left --layout-dts config/keymap.generated.dts \
-  --output dist/glove80-left
+  --manifest profiles/firmwares/glove80.toml --keyboard glove80 \
+  --toolchain zmk --target left \
+  --layout config/keymap.generated.dts \
+  --output-dir dist/glove80-left
 
 # Flash firmware
-zmk-layout firmware flash --manifest glove80 --keyboard glove80 \
+zmk-layout firmware flash \
+  --manifest profiles/firmwares/glove80.toml --keyboard glove80 \
   --artifacts dist/
 
 # List detected devices
-zmk-layout firmware devices --manifest glove80 --keyboard glove80
+zmk-layout firmware devices \
+  --manifest profiles/firmwares/glove80.toml --keyboard glove80
 ```
 
-Layout input: supply `--layout-json`, `--layout-dts`, or `--keymap` plus optional
-`--kconfig`. Other flags: `--env KEY=VALUE`, `-D/--kconfig-def NAME=VALUE`,
+Layout input: supply `--layout <path>` (format auto-detected from extension, or
+specify with `--format dts|json|moergo-json|dtsi|keymap`). Use `--kconfig` for a
+config overlay file. Other flags: `--env KEY=VALUE`, `-D/--kconfig-def NAME=VALUE`,
 `--disable-cache`, `--dry-run`.
 
 ### Lua scripts
